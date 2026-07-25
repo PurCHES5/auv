@@ -51,7 +51,7 @@ fn finish_sidebar_scan(
   scroll_amount: f64,
   scroll_settle_ms: u64,
 ) -> PlaylistSidebarScan {
-  crate::run_artifacts::emit_sidebar_scan_events(&loop_outcome.observations, scroll_amount, scroll_settle_ms, loop_outcome.stop_reason);
+  crate::telemetry::emit_sidebar_scan_events(&loop_outcome.observations, scroll_amount, scroll_settle_ms, loop_outcome.stop_reason);
 
   let mut scan = reconstruct_playlist_sidebar(
     ScanAppContext {

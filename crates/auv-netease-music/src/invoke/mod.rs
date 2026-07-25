@@ -1,41 +1,25 @@
-mod help;
 mod select_proof;
-mod sidebar_scan_proof;
 
-use std::collections::BTreeMap;
 use std::process::ExitCode;
 
 use auv_cli_invoke::{
-  CommandGroup, InvokeCommandInput, InvokeNamespace, InvokeOutputOptions, InvokeRegistry, InvokeResult, command, render_invoke_result,
+  CommandGroup, InvokeCli, InvokeCliAction, InvokeCommandInput, InvokeNamespace, InvokeOutputOptions, InvokeRegistry, InvokeResult, command,
+  render_invoke_result,
 };
 
-pub use help::{render_command_help, render_help_index};
 pub use select_proof::{
   SELECT_PROOF_COMMAND_ID, build_select_result_from_fixture_dir, hermetic_select_proof_fixture_dir, select_proof_handler,
-};
-pub use sidebar_scan_proof::{
-  SIDEBAR_SCAN_PROOF_COMMAND_ID, build_scan_from_fixture_dir, hermetic_sidebar_scan_proof_fixture_dir, sidebar_scan_proof_handler,
 };
 
 pub fn netease_registry() -> InvokeRegistry {
   InvokeRegistry::from_groups(vec![
-    CommandGroup::new("netease", "NETEASE").group(
-      CommandGroup::new("playlist", "Playlist")
-        .command(command::spec(
-          select_proof::SELECT_PROOF_COMMAND_ID,
-          InvokeNamespace::Fixture,
-          "Hermetic playlist select proof from fixture dir",
-          select_proof::SELECT_PROOF_ARGS,
-          select_proof::select_proof_handler,
-        ))
-        .command(command::spec(
-          sidebar_scan_proof::SIDEBAR_SCAN_PROOF_COMMAND_ID,
-          InvokeNamespace::Fixture,
-          "Hermetic playlist sidebar scan proof from fixture dir",
-          sidebar_scan_proof::SIDEBAR_SCAN_PROOF_ARGS,
-          sidebar_scan_proof::sidebar_scan_proof_handler,
-        )),
-    ),
+    CommandGroup::new("netease", "NETEASE").group(CommandGroup::new("playlist", "Playlist").command(command::spec(
+      select_proof::SELECT_PROOF_COMMAND_ID,
+      InvokeNamespace::Fixture,
+      "Hermetic playlist select proof from fixture dir",
+      select_proof::SELECT_PROOF_ARGS,
+      select_proof::select_proof_handler,
+    ))),
   ])
 }
 
@@ -52,77 +36,26 @@ pub async fn run(tokens: &[String]) -> ExitCode {
 
 async fn run_in_context(tokens: &[String]) -> ExitCode {
   let registry = netease_registry();
-
-  if tokens.is_empty() || tokens == ["--help"] || tokens == ["-h"] {
-    print!("{}", render_help_index(&registry));
-    return ExitCode::SUCCESS;
-  }
-
-  let mut index = 0usize;
-  let mut dry_run = false;
-  while index < tokens.len() {
-    match tokens[index].as_str() {
-      "--dry-run" => {
-        dry_run = true;
-        index += 1;
-      }
-      "--help" | "-h" if index == 0 => {
-        print!("{}", render_help_index(&registry));
-        return ExitCode::SUCCESS;
-      }
-      _ => break,
-    }
-  }
-
-  let Some(command_id) = tokens.get(index) else {
-    eprintln!("error: invoke requires a command id");
-    print!("{}", render_help_index(&registry));
-    return ExitCode::from(2);
-  };
-
-  if tokens.get(index + 1).is_some_and(|token| token == "--help" || token == "-h") {
-    let Some(command) = registry.resolve(command_id) else {
-      eprintln!("error: unknown command {command_id}");
-      print!("{}", render_help_index(&registry));
-      return ExitCode::from(2);
-    };
-    print!("{}", render_command_help(command));
-    return ExitCode::SUCCESS;
-  }
-
-  let Some(command) = registry.resolve(command_id) else {
-    eprintln!("error: unknown command {command_id}");
-    print!("{}", render_help_index(&registry));
-    return ExitCode::from(2);
-  };
-
-  let mut inputs = BTreeMap::new();
-  let mut cursor = index + 1;
-  while cursor < tokens.len() {
-    let flag = tokens[cursor].as_str();
-    if flag == "--help" || flag == "-h" {
-      print!("{}", render_command_help(command));
+  let cli = InvokeCli::new(&registry, "auv-netease-music invoke");
+  let parsed = match cli.parse(tokens) {
+    Ok(InvokeCliAction::Help(help)) => {
+      print!("{help}");
       return ExitCode::SUCCESS;
     }
-    if !flag.starts_with("--") {
-      eprintln!("error: unexpected argument {flag}");
+    Ok(InvokeCliAction::Invoke(parsed)) => parsed,
+    Err(error) => {
+      eprint!("{error}");
       return ExitCode::from(2);
     }
-    let key = flag.trim_start_matches("--");
-    let Some(value) = tokens.get(cursor + 1) else {
-      eprintln!("error: flag {flag} requires a value");
-      return ExitCode::from(2);
-    };
-    inputs.insert(key.to_string(), value.clone());
-    cursor += 2;
-  }
+  };
+  let command = registry.resolve(&parsed.command_id).expect("clap command ids come from the invoke registry");
 
   let direct_result = command
     .invoke(InvokeCommandInput {
       command_id: command.id.to_string(),
       target_application_id: None,
-      inputs,
-      dry_run,
+      inputs: parsed.inputs,
+      dry_run: parsed.dry_run,
       cancellation: auv_cli_invoke::InvokeCancellation::new(),
     })
     .await;
@@ -144,20 +77,39 @@ async fn run_in_context(tokens: &[String]) -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-  use super::{netease_registry, render_command_help, render_help_index, run};
+  use auv_cli_invoke::InvokeCli;
+
+  use super::{netease_registry, run};
   use crate::invoke::select_proof::SELECT_PROOF_COMMAND_ID;
 
   #[test]
   fn invoke_help_uses_app_binary_prefix() {
     let registry = netease_registry();
-    let help = render_help_index(&registry);
+    let cli = InvokeCli::new(&registry, "auv-netease-music invoke");
+    let help = cli.render_help();
     assert!(help.contains("auv-netease-music invoke"));
-    assert!(!help.contains("USAGE\n  auv invoke <command>"));
+    assert!(!help.contains("auv invoke"));
 
-    let command = registry.resolve(SELECT_PROOF_COMMAND_ID).expect("command");
-    let command_help = render_command_help(command);
+    let command_help = cli.render_command_help(SELECT_PROOF_COMMAND_ID).expect("command help");
     assert!(command_help.contains("auv-netease-music invoke netease.playlist.selectProof"));
-    assert!(!command_help.contains("USAGE\n  auv invoke netease.playlist.selectProof"));
+    assert!(!command_help.contains("auv invoke"));
+  }
+
+  #[test]
+  fn invoke_rejects_unknown_flags_and_missing_required_inputs() {
+    use std::process::ExitCode;
+
+    let missing = futures_executor::block_on(run(&[SELECT_PROOF_COMMAND_ID.to_string()]));
+    assert_eq!(missing, ExitCode::from(2));
+
+    let unknown = futures_executor::block_on(run(&[
+      SELECT_PROOF_COMMAND_ID.to_string(),
+      "--fixture-dir".to_string(),
+      crate::invoke::hermetic_select_proof_fixture_dir().display().to_string(),
+      "--unknown".to_string(),
+      "value".to_string(),
+    ]));
+    assert_eq!(unknown, ExitCode::from(2));
   }
 
   #[test]

@@ -1,21 +1,16 @@
-//! NetEase run-scoped artifact publication and typed reads.
+//! Durable NetEase artifact schemas, publication, and typed reads.
 
-use auv_driver::InputActionResult;
 use auv_tracing::{
   ArtifactMetadata, ArtifactPurpose, ArtifactUri, ArtifactWriteError, Attributes, ByteLength, ContentType, ErrorCode, JsonArtifactError,
   JsonArtifactReadError, ReadArtifactError, RunSnapshot, RunStore, ValidationError, read_artifact_bytes,
 };
-use auv_view::ViewBounds;
-use auv_view::memory::{MemoryReadConfig, MemoryReadOutcome, StaleReason, ViewMemory};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+use crate::PlaylistSidebarScan;
 use crate::commands::playlist::PlaylistSelectResult;
-use crate::scroll::policies::detection_motion::MotionEvidence;
-use crate::{Inputs, PlaylistSidebarScan, SidebarScanStopReason, SidebarViewportObservation};
 
 pub const PLAYLIST_SIDEBAR_SCAN_PURPOSE: &str = "auv.netease.playlist_sidebar_scan";
-pub const VIEW_MEMORY_PURPOSE: &str = "auv.netease.view_memory";
 pub const PLAYLIST_SELECT_RESULT_PURPOSE: &str = "auv.netease.playlist_select_result";
 
 /// NetEase structured artifacts contain OCR/view records, not bulk media.
@@ -25,263 +20,12 @@ pub const PLAYLIST_SELECT_RESULT_PURPOSE: &str = "auv.netease.playlist_select_re
 pub const NETEASE_STRUCTURED_ARTIFACT_JSON_BYTE_LIMIT: u64 = 4 * 1024 * 1024;
 pub const NETEASE_STRUCTURED_ARTIFACT_PAYLOAD_TOO_LARGE_CODE: &str = "auv.netease.structured_artifact.payload_too_large";
 
-#[derive(Serialize)]
-struct ArtifactPreparationFailed {
-  purpose: &'static str,
-  error: String,
-}
-
-impl auv_tracing::EventPayload for ArtifactPreparationFailed {
-  const NAME: &'static str = "auv.netease.artifact_preparation_failed";
-  const VERSION: u32 = 1;
-}
-
-#[derive(Serialize)]
-struct SidebarObserved {
-  observation_index: usize,
-  viewport_fingerprint: String,
-}
-
-impl auv_tracing::EventPayload for SidebarObserved {
-  const NAME: &'static str = "auv.netease.sidebar.observed";
-  const VERSION: u32 = 1;
-}
-
-#[derive(Serialize)]
-struct SidebarScrolled {
-  from_observation: usize,
-  to_observation: usize,
-  requested_delta: f64,
-  settle_ms: u64,
-  delivery_path: Option<String>,
-  motion: Option<MotionEvidence>,
-}
-
-impl auv_tracing::EventPayload for SidebarScrolled {
-  const NAME: &'static str = "auv.netease.sidebar.scrolled";
-  const VERSION: u32 = 1;
-}
-
-#[derive(Serialize)]
-struct SidebarScanStopped {
-  reason: SidebarScanStopReason,
-}
-
-impl auv_tracing::EventPayload for SidebarScanStopped {
-  const NAME: &'static str = "auv.netease.sidebar.scan_stopped";
-  const VERSION: u32 = 1;
-}
-
-#[derive(Serialize)]
-#[serde(tag = "action", rename_all = "snake_case")]
-pub(crate) enum PlaylistSelectInputDelivered {
-  SeekSidebarTop {
-    attempt: usize,
-    bounds: ViewBounds,
-    delivery: InputActionResult,
-  },
-  SeekTargetPage {
-    attempt: usize,
-    bounds: ViewBounds,
-    delivery: InputActionResult,
-  },
-  SeekBottomPadding {
-    attempt: usize,
-    bounds: ViewBounds,
-    delivery: InputActionResult,
-  },
-  SelectPlaylist {
-    bounds: ViewBounds,
-    delivery: InputActionResult,
-  },
-  SelectPlaylistForegroundRetry {
-    bounds: ViewBounds,
-    delivery: InputActionResult,
-  },
-}
-
-impl auv_tracing::EventPayload for PlaylistSelectInputDelivered {
-  const NAME: &'static str = "auv.netease.playlist_select.input_delivered";
-  const VERSION: u32 = 1;
-}
-
-#[derive(Serialize)]
-#[serde(tag = "source", rename_all = "snake_case")]
-pub(crate) enum PlaylistTargetResolved {
-  ViewMemory { bounds: ViewBounds },
-  RescanReplay { attempt: usize, bounds: ViewBounds },
-  BottomPadding { attempt: usize, bounds: ViewBounds },
-}
-
-impl auv_tracing::EventPayload for PlaylistTargetResolved {
-  const NAME: &'static str = "auv.netease.playlist_select.target_resolved";
-  const VERSION: u32 = 1;
-}
-
-#[derive(Serialize)]
-#[serde(tag = "action", rename_all = "snake_case")]
-pub(crate) enum PlaylistPlayInputDelivered {
-  PlayAll {
-    label: String,
-    bounds: ViewBounds,
-    delivery: InputActionResult,
-  },
-  PlayAllForegroundRetry {
-    label: String,
-    bounds: ViewBounds,
-    delivery: InputActionResult,
-  },
-}
-
-impl auv_tracing::EventPayload for PlaylistPlayInputDelivered {
-  const NAME: &'static str = "auv.netease.playlist_play.input_delivered";
-  const VERSION: u32 = 1;
-}
-
-#[derive(Serialize)]
-#[serde(tag = "action", rename_all = "snake_case")]
-pub(crate) enum DailyRecommendedInputDelivered {
-  SeekSidebarTop {
-    attempt: usize,
-    bounds: ViewBounds,
-    delivery: InputActionResult,
-  },
-  SelectSidebarRecommend {
-    label: String,
-    bounds: ViewBounds,
-    delivery: InputActionResult,
-  },
-  OpenDailyRecommendedCard {
-    label: String,
-    bounds: ViewBounds,
-    delivery: InputActionResult,
-  },
-  OpenDailyRecommendedTitleForegroundRetry {
-    label: String,
-    bounds: ViewBounds,
-    delivery: InputActionResult,
-  },
-  PlayAll {
-    label: String,
-    bounds: ViewBounds,
-    delivery: InputActionResult,
-  },
-  PlayAllForegroundRetry {
-    label: String,
-    bounds: ViewBounds,
-    delivery: InputActionResult,
-  },
-}
-
-impl auv_tracing::EventPayload for DailyRecommendedInputDelivered {
-  const NAME: &'static str = "auv.netease.daily_recommended.input_delivered";
-  const VERSION: u32 = 1;
-}
-
-#[derive(Serialize)]
-pub(crate) struct DailyRecommendedPlayAllChecked {
-  pub visible: bool,
-}
-
-impl auv_tracing::EventPayload for DailyRecommendedPlayAllChecked {
-  const NAME: &'static str = "auv.netease.daily_recommended.play_all_checked";
-  const VERSION: u32 = 1;
-}
-
-pub(crate) fn emit_sidebar_scan_events(
-  observations: &[SidebarViewportObservation],
-  scroll_amount: f64,
-  scroll_settle_ms: u64,
-  stop_reason: Option<SidebarScanStopReason>,
-) {
-  for (index, observation) in observations.iter().enumerate() {
-    auv_tracing::emit_event!(SidebarObserved {
-      observation_index: observation.observation_index,
-      viewport_fingerprint: observation.viewport_fingerprint.clone(),
-    });
-    if let Some(next) = observations.get(index + 1) {
-      auv_tracing::emit_event!(SidebarScrolled {
-        from_observation: observation.observation_index,
-        to_observation: next.observation_index,
-        requested_delta: -scroll_amount,
-        settle_ms: scroll_settle_ms,
-        delivery_path: next.incoming_scroll_delivery_path.clone(),
-        motion: next.scroll_motion.clone(),
-      });
-    }
-  }
-  if let Some(reason) = stop_reason {
-    auv_tracing::emit_event!(SidebarScanStopped { reason });
-  }
-}
-
-pub(crate) fn emit_json<T: Serialize>(purpose: &'static str, value: &T) {
-  let result = ArtifactPurpose::parse(purpose).map_err(|error| error.to_string()).and_then(|purpose| {
-    auv_tracing::emit_json_artifact(
-      purpose,
-      Attributes::empty(),
-      ByteLength::new(NETEASE_STRUCTURED_ARTIFACT_JSON_BYTE_LIMIT).expect("static NetEase JSON limit is valid"),
-      value,
-    )
-    .map(drop)
-    .map_err(|error| error.to_string())
-  });
-  if let Err(error) = result {
-    preparation_failed(purpose, error);
-  }
-}
-
-pub(crate) fn emit_png(purpose: &'static str, image: &image::RgbaImage) {
-  if !auv_tracing::Context::current().can_publish_artifacts() {
-    return;
-  }
-  let result = encode_png(image).and_then(|body| {
-    let purpose_value = ArtifactPurpose::parse(purpose).map_err(|error| error.to_string())?;
-    let content_type = ContentType::parse("image/png").map_err(|error| error.to_string())?;
-    let artifact =
-      auv_tracing::NewArtifact::from_bytes(purpose_value, content_type, Attributes::empty(), body).map_err(|error| error.to_string())?;
-    drop(auv_tracing::emit_artifact!(artifact));
-    Ok(())
-  });
-  if let Err(error) = result {
-    preparation_failed(purpose, error);
-  }
-}
-
-pub(crate) fn preparation_failed(purpose: &'static str, error: impl Into<String>) {
-  auv_tracing::emit_event!(ArtifactPreparationFailed {
-    purpose,
-    error: error.into()
-  });
-}
-
-pub(crate) fn spawn_artifact_task(operation: impl FnOnce() + Send + 'static) -> Option<std::thread::JoinHandle<()>> {
-  if !auv_tracing::Context::current().can_publish_artifacts() {
-    return None;
-  }
-  let context = auv_tracing::Context::current();
-  Some(std::thread::spawn(move || context.in_scope(operation)))
-}
-
-fn encode_png(image: &image::RgbaImage) -> Result<Vec<u8>, String> {
-  use image::{ExtendedColorType, ImageEncoder, codecs::png::PngEncoder};
-
-  let mut body = Vec::new();
-  body.try_reserve_exact(image.as_raw().len()).map_err(|error| format!("allocate PNG buffer failed: {error}"))?;
-  PngEncoder::new(&mut body)
-    .write_image(image.as_raw(), image.width(), image.height(), ExtendedColorType::Rgba8)
-    .map_err(|error| format!("encode PNG artifact failed: {error}"))?;
-  Ok(body)
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlaylistArtifactPublication {
   pub scan_uri: ArtifactUri,
-  pub memory: Option<ViewMemory>,
 }
 
-/// Caller-read canonical playlist data whose optional memory has been checked
-/// against the scan's authority, run, app, scope, and source artifact.
+/// Caller-read canonical playlist data checked against its expected app.
 #[derive(Clone, Debug)]
 pub struct CanonicalPlaylistArtifacts {
   state: CanonicalPlaylistArtifactState,
@@ -291,16 +35,13 @@ pub struct CanonicalPlaylistArtifacts {
 #[derive(Clone, Debug)]
 enum CanonicalPlaylistArtifactState {
   Unavailable,
-  Available {
-    scan: PlaylistSidebarScan,
-    memory: Option<ViewMemory>,
-  },
+  Available { scan: PlaylistSidebarScan },
 }
 
 impl CanonicalPlaylistArtifacts {
   fn from_scan(scan: PlaylistSidebarScan) -> Self {
     Self {
-      state: CanonicalPlaylistArtifactState::Available { scan, memory: None },
+      state: CanonicalPlaylistArtifactState::Available { scan },
       read_limits: Vec::new(),
     }
   }
@@ -308,14 +49,7 @@ impl CanonicalPlaylistArtifacts {
   pub fn scan(&self) -> Option<&PlaylistSidebarScan> {
     match &self.state {
       CanonicalPlaylistArtifactState::Unavailable => None,
-      CanonicalPlaylistArtifactState::Available { scan, .. } => Some(scan),
-    }
-  }
-
-  pub fn memory(&self) -> Option<&ViewMemory> {
-    match &self.state {
-      CanonicalPlaylistArtifactState::Unavailable => None,
-      CanonicalPlaylistArtifactState::Available { memory, .. } => memory.as_ref(),
+      CanonicalPlaylistArtifactState::Available { scan } => Some(scan),
     }
   }
 
@@ -329,17 +63,6 @@ impl CanonicalPlaylistArtifacts {
       read_limits,
     }
   }
-
-  fn attach_memory(&mut self, memory: ViewMemory) {
-    let CanonicalPlaylistArtifactState::Available { memory: slot, .. } = &mut self.state else {
-      unreachable!("memory can only be attached to a canonical scan")
-    };
-    *slot = Some(memory);
-  }
-
-  fn push_read_limit(&mut self, limit: String) {
-    self.read_limits.push(limit);
-  }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -349,16 +72,6 @@ pub enum CanonicalArtifactReferenceError {
     expected: String,
     actual: Option<String>,
   },
-  #[error("canonical view-memory app {actual:?} does not match requested app {expected:?}")]
-  MemoryAppMismatch { expected: String, actual: String },
-  #[error("canonical view-memory scope {actual:?} does not match playlist sidebar scope {expected:?}")]
-  MemoryScopeMismatch { expected: String, actual: String },
-  #[error("canonical view-memory region {actual:?} does not match playlist sidebar scope {expected:?}")]
-  MemoryRegionMismatch { expected: String, actual: String },
-  #[error("canonical view-memory ID {actual:?} does not match the requested app and playlist sidebar scope {expected:?}")]
-  MemoryIdMismatch { expected: String, actual: String },
-  #[error("canonical view-memory is stale ({reason:?})")]
-  StaleMemory { reason: StaleReason },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -383,41 +96,16 @@ pub enum NeteaseArtifactPublishError {
   },
 }
 
-/// Publishes the scan and its optional view memory into the caller's current
-/// run. The domain scan has already completed; publication errors never cause
-/// the scan to execute again.
+/// Publishes the scan into the caller's current run. The domain scan has
+/// already completed; publication errors never cause it to execute again.
 pub async fn persist_playlist_ls_artifacts(
   scan: &PlaylistSidebarScan,
-  inputs: &Inputs,
-  memory_enabled: bool,
 ) -> Result<Option<PlaylistArtifactPublication>, NeteaseArtifactPublishError> {
   let Some(scan_metadata) = publish_json(PLAYLIST_SIDEBAR_SCAN_PURPOSE, scan).await? else {
     return Ok(None);
   };
   let scan_uri = scan_metadata.uri().clone();
-  let memory = if memory_enabled {
-    crate::view_memory::try_build_writable_memory(inputs, scan, &scan_uri)
-  } else {
-    None
-  };
-  if let Some(memory) = &memory {
-    let Some(_metadata) = publish_json(VIEW_MEMORY_PURPOSE, memory).await? else {
-      return Ok(None);
-    };
-  }
-  Ok(Some(PlaylistArtifactPublication { scan_uri, memory }))
-}
-
-/// Admits a playlist sidebar scan as optional tracing evidence without waiting
-/// for or returning a storage receipt.
-pub fn emit_playlist_sidebar_scan(scan: &PlaylistSidebarScan) {
-  crate::run_artifacts::emit_json(PLAYLIST_SIDEBAR_SCAN_PURPOSE, scan);
-}
-
-/// Admits a playlist selection result as optional tracing evidence without
-/// making storage part of the selection result.
-pub fn emit_playlist_select_result(result: &PlaylistSelectResult) {
-  crate::run_artifacts::emit_json(PLAYLIST_SELECT_RESULT_PURPOSE, result);
+  Ok(Some(PlaylistArtifactPublication { scan_uri }))
 }
 
 /// Publishes the exact existing playlist-select result without changing the
@@ -442,14 +130,6 @@ pub async fn read_playlist_sidebar_scan(
   })
 }
 
-pub async fn read_view_memory(
-  store: &dyn RunStore,
-  snapshot: &RunSnapshot,
-  uri: &ArtifactUri,
-) -> Result<ViewMemory, NeteaseArtifactReadError> {
-  read_json(store, snapshot, uri, VIEW_MEMORY_PURPOSE).await
-}
-
 pub async fn read_playlist_select_result(
   store: &dyn RunStore,
   snapshot: &RunSnapshot,
@@ -459,45 +139,15 @@ pub async fn read_playlist_select_result(
 }
 
 /// Reads canonical playlist inputs from one caller-owned run snapshot.
-/// Invalid optional memory is omitted and reported as a read limit so it
-/// cannot drive reacquisition while the independently valid scan remains usable.
 pub async fn read_canonical_playlist_artifacts(
   store: &dyn RunStore,
   snapshot: &RunSnapshot,
   scan_uri: &ArtifactUri,
   expected_app_id: &str,
-  memory_enabled: bool,
 ) -> Result<CanonicalPlaylistArtifacts, NeteaseArtifactReadError> {
   let scan = read_playlist_sidebar_scan(store, snapshot, scan_uri).await?;
   validate_scan_reference(&scan, expected_app_id).map_err(|source| NeteaseArtifactReadError::InvalidReference { source })?;
-  let mut artifacts = CanonicalPlaylistArtifacts::from_scan(scan);
-  if !memory_enabled {
-    return Ok(artifacts);
-  }
-
-  for (memory_uri, published) in snapshot.artifacts() {
-    if published.metadata().purpose().as_str() != VIEW_MEMORY_PURPOSE {
-      continue;
-    }
-    let memory = match read_view_memory(store, snapshot, memory_uri).await {
-      Ok(memory) => memory,
-      Err(error) => {
-        artifacts.push_read_limit(format!("canonical view-memory artifact {memory_uri} read failed: {error}"));
-        continue;
-      }
-    };
-    if memory.source_scan_uri != *scan_uri {
-      continue;
-    }
-    match validate_memory_reference(memory, expected_app_id) {
-      Ok(memory) => {
-        artifacts.attach_memory(memory);
-        break;
-      }
-      Err(error) => artifacts.push_read_limit(error.to_string()),
-    }
-  }
-  Ok(artifacts)
+  Ok(CanonicalPlaylistArtifacts::from_scan(scan))
 }
 
 fn validate_scan_reference(scan: &PlaylistSidebarScan, expected_app_id: &str) -> Result<(), CanonicalArtifactReferenceError> {
@@ -509,44 +159,6 @@ fn validate_scan_reference(scan: &PlaylistSidebarScan, expected_app_id: &str) ->
     });
   }
   Ok(())
-}
-
-fn validate_memory_reference(memory: ViewMemory, expected_app_id: &str) -> Result<ViewMemory, CanonicalArtifactReferenceError> {
-  if memory.app_bundle_id != expected_app_id {
-    return Err(CanonicalArtifactReferenceError::MemoryAppMismatch {
-      expected: expected_app_id.to_string(),
-      actual: memory.app_bundle_id,
-    });
-  }
-  let expected_scope = crate::view_memory::PLAYLIST_SIDEBAR_SCOPE_ID;
-  if memory.scope_id != expected_scope {
-    return Err(CanonicalArtifactReferenceError::MemoryScopeMismatch {
-      expected: expected_scope.to_string(),
-      actual: memory.scope_id,
-    });
-  }
-  if memory.scope_snapshot.region_id != expected_scope {
-    return Err(CanonicalArtifactReferenceError::MemoryRegionMismatch {
-      expected: expected_scope.to_string(),
-      actual: memory.scope_snapshot.region_id,
-    });
-  }
-  let expected_memory_id = auv_view::memory::build_memory_id(expected_app_id, expected_scope);
-  if memory.memory_id != expected_memory_id {
-    return Err(CanonicalArtifactReferenceError::MemoryIdMismatch {
-      expected: expected_memory_id,
-      actual: memory.memory_id,
-    });
-  }
-
-  let config = MemoryReadConfig {
-    now_millis: crate::view_memory::system_time_millis(),
-    ..MemoryReadConfig::default()
-  };
-  match auv_view::memory::read_memory(memory, &config, None) {
-    MemoryReadOutcome::Accepted(memory) => Ok(memory),
-    MemoryReadOutcome::Rejected { reason } => Err(CanonicalArtifactReferenceError::StaleMemory { reason }),
-  }
 }
 
 async fn read_json<T: DeserializeOwned>(
@@ -716,7 +328,7 @@ mod tests {
   use auv_view::ViewBounds;
 
   use super::*;
-  use crate::run_artifacts::{PlaylistSelectInputDelivered, PlaylistTargetResolved};
+  use crate::telemetry::{PlaylistSelectInputDelivered, PlaylistTargetResolved};
 
   #[test]
   fn invalid_reader_contract_retains_validation_error_source() {
@@ -783,7 +395,8 @@ mod tests {
     let root = dispatcher::with_default(&dispatch, || Context::root(run_id));
 
     root.in_scope(|| {
-      auv_tracing::emit_event!(PlaylistTargetResolved::ViewMemory {
+      auv_tracing::emit_event!(PlaylistTargetResolved::RescanReplay {
+        attempt: 1,
         bounds: ViewBounds::new(12.0, 24.0, 160.0, 32.0),
       });
       auv_tracing::emit_event!(PlaylistSelectInputDelivered::SelectPlaylist {

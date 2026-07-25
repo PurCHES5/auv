@@ -71,7 +71,7 @@ Paths with **run recording + inspectable evidence + hermetic or structural test*
 | **fixture.observe** | full | `command.verification` + `command.known_limit` span events | CLI `Command Boundary Claims` (`inspect.rs` ~L519–526) | registry/help tests (`lib.rs` ~L239–272) | `commands/fixture.rs` |
 | **input.typeText / input.key** (macOS) | full | typed `input-action-result` artifact via `input_action_output` | partial (IAR in artifacts; no ATL) | `input_action_output` unit tests (`input.rs` ~L618+) | `input.rs` ~L508–542 |
 | **netease.playlist.selectProof** | full (product store) | `netease-playlist-select-result` role | partial (product artifact; not in `run_read` generic join) | `select_proof_fixture_writes_run_and_artifact`, `select_proof_not_in_default_registry` | `invoke/select_proof.rs` |
-| **netease.playlist.sidebarScanProof** | full (product store) | playlist sidebar scan artifact | partial | `sidebar_scan_proof_writes_scan_artifact`, `sidebar_scan_proof_no_view_memory_artifact` | `invoke/sidebar_scan_proof.rs` |
+| ~~`netease.playlist.sidebarScanProof`~~ | retired 2026-07-25 | fixture-only archived proof; product scan artifacts remain | n/a | retired with no production consumer | archived retirement record |
 | **Session API invoke** (any catalog command) | full | trace + handler artifacts + **synthetic** `operation-summary` + `operation-result` | `GetOperation` two-source join | transport doc + handler tests | `handler.rs` ~L125–150; `operation_result_store.rs`; `transport.rs` L6 |
 
 ---
@@ -187,7 +187,7 @@ rg 'TODO\(invoke' crates/auv-cli-invoke/src
 rg 'invoke_recorded' src/main.rs src/mcp.rs src/api
 cargo test -p auv-cli-invoke scan_frame
 cargo test -p auv-netease-music select_proof
-cargo test -p auv-netease-music sidebar_scan_proof
+# sidebarScanProof retired 2026-07-25; product scan artifact coverage lives in run_store_contract
 git diff --check -- docs/ai/references/
 ```
 

@@ -5,13 +5,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use auv_netease_music::run_artifacts::{
   NETEASE_STRUCTURED_ARTIFACT_JSON_BYTE_LIMIT, NETEASE_STRUCTURED_ARTIFACT_PAYLOAD_TOO_LARGE_CODE, NeteaseArtifactPublishError,
-  NeteaseArtifactReadError, PLAYLIST_SELECT_RESULT_PURPOSE, PLAYLIST_SIDEBAR_SCAN_PURPOSE, PlaylistArtifactPublication, VIEW_MEMORY_PURPOSE,
+  NeteaseArtifactReadError, PLAYLIST_SELECT_RESULT_PURPOSE, PLAYLIST_SIDEBAR_SCAN_PURPOSE, PlaylistArtifactPublication,
   persist_playlist_ls_artifacts, persist_playlist_select_proof, read_canonical_playlist_artifacts, read_playlist_select_result,
-  read_playlist_sidebar_scan, read_view_memory,
+  read_playlist_sidebar_scan,
 };
-use auv_netease_music::{
-  Inputs, PlaylistSelectResult, PlaylistSidebarScan, decode_playlist_sidebar_scan_json, resolve_playlist_play_candidate,
-};
+use auv_netease_music::{PlaylistSelectResult, PlaylistSidebarScan, decode_playlist_sidebar_scan_json, resolve_playlist_play_candidate};
 use auv_tracing::{
   ArtifactBody, ArtifactId, ArtifactMetadata, ArtifactPurpose, ArtifactReader, ArtifactUri, ArtifactWriteError, Attributes, AuthorityId,
   BoxFuture, ByteLength, CommitError, CommitResult, ContentType, Context, Dispatch, ErrorCode, FileRunStore, IdempotencyKey, MemoryRunStore,
@@ -19,7 +17,6 @@ use auv_tracing::{
   RunStore, RunSubscription, Sha256Digest, StoreArtifactRequest, TelemetryError, TelemetryItem, TelemetryProjector, TelemetryRoutePolicy,
   configure, dispatcher,
 };
-use auv_view::memory::ViewMemory;
 use futures_util::io::Cursor;
 use sha2::{Digest, Sha256};
 
@@ -49,15 +46,8 @@ impl NeteaseRunFixture {
   }
 
   async fn persist_playlist_scan(&self, scan: &PlaylistSidebarScan) -> PlaylistArtifactPublication {
-    self.persist_playlist_scan_with_memory(scan, true).await
-  }
-
-  async fn persist_playlist_scan_with_memory(&self, scan: &PlaylistSidebarScan, memory_enabled: bool) -> PlaylistArtifactPublication {
-    let mut inputs = Inputs::with_defaults();
-    inputs.app_id = scan.app().app_id.clone().expect("fixture app id");
-    let future = self.root.in_scope(|| persist_playlist_ls_artifacts(scan, &inputs, memory_enabled));
-    let persisted =
-      self.root.instrument(future).await.expect("publish playlist scan and view memory").expect("publication should be enabled");
+    let future = self.root.in_scope(|| persist_playlist_ls_artifacts(scan));
+    let persisted = self.root.instrument(future).await.expect("publish playlist scan").expect("publication should be enabled");
     self.dispatch.flush().await.expect("flush playlist artifacts");
     persisted
   }
@@ -95,28 +85,12 @@ impl NeteaseRunFixture {
     metadata
   }
 
-  async fn publish_memory(&self, memory: &ViewMemory) -> ArtifactMetadata {
-    self
-      .publish_bytes_with_attributes(
-        self.root.clone(),
-        VIEW_MEMORY_PURPOSE,
-        "application/json",
-        Attributes::empty(),
-        serde_json::to_vec(memory).expect("view-memory JSON"),
-      )
-      .await
-  }
-
   async fn snapshot(&self) -> RunSnapshot {
     self.store.load_snapshot(self.run_id).await.expect("load snapshot").expect("run snapshot")
   }
 
   async fn read_scan(&self, snapshot: &RunSnapshot, uri: &ArtifactUri) -> PlaylistSidebarScan {
     read_playlist_sidebar_scan(self.store(), snapshot, uri).await.expect("read playlist scan")
-  }
-
-  async fn read_memory(&self, snapshot: &RunSnapshot, uri: &ArtifactUri) -> ViewMemory {
-    read_view_memory(self.store(), snapshot, uri).await.expect("read view memory")
   }
 }
 
@@ -238,7 +212,7 @@ impl RunStore for ArtifactBytesStore {
 }
 
 #[test]
-fn playlist_scan_and_view_memory_round_trip_by_uri() {
+fn playlist_scan_round_trips_by_uri() {
   futures_executor::block_on(async {
     let fixture = NeteaseRunFixture::memory();
     let scan = sample_scan();
@@ -248,14 +222,6 @@ fn playlist_scan_and_view_memory_round_trip_by_uri() {
     assert!(persisted.scan_uri.to_string().starts_with("auv://runs/"));
     let snapshot = fixture.snapshot().await;
     assert_eq!(fixture.read_scan(&snapshot, &persisted.scan_uri).await, scan);
-    let memory_uri = snapshot
-      .artifacts()
-      .iter()
-      .find_map(|(uri, published)| (published.metadata().purpose().as_str() == VIEW_MEMORY_PURPOSE).then_some(uri))
-      .expect("view-memory URI");
-    let memory = fixture.read_memory(&snapshot, memory_uri).await;
-    assert_eq!(memory, persisted.memory.expect("persisted view memory"));
-    assert_eq!(memory.source_scan_uri, persisted.scan_uri);
   });
 }
 
@@ -284,15 +250,6 @@ fn canonical_artifacts_use_exact_purposes_and_json_content_type() {
     let scan = snapshot.artifacts().get(&persisted.scan_uri).expect("scan metadata").metadata();
     assert_eq!(scan.purpose().as_str(), PLAYLIST_SIDEBAR_SCAN_PURPOSE);
     assert_eq!(scan.content_type().to_string(), "application/json");
-    let memory = snapshot
-      .artifacts()
-      .values()
-      .find(|published| published.metadata().purpose().as_str() == VIEW_MEMORY_PURPOSE)
-      .expect("memory metadata")
-      .metadata();
-    assert_eq!(memory.purpose().as_str(), VIEW_MEMORY_PURPOSE);
-    assert_eq!(memory.content_type().to_string(), "application/json");
-    assert!(memory.attributes().is_empty(), "view-memory lineage belongs to the typed payload");
     let select = snapshot
       .artifacts()
       .values()
@@ -384,9 +341,7 @@ fn reader_requires_committed_length_digest_and_structured_artifact_bound() {
 #[test]
 fn disabled_context_preserves_select_result_and_is_not_a_publication_error() {
   futures_executor::block_on(async {
-    let scan_publication = persist_playlist_ls_artifacts(&sample_scan(), &Inputs::with_defaults(), true)
-      .await
-      .expect("disabled scan publication is not an error");
+    let scan_publication = persist_playlist_ls_artifacts(&sample_scan()).await.expect("disabled scan publication is not an error");
     assert!(scan_publication.is_none());
 
     let expected = sample_select_result();
@@ -457,8 +412,7 @@ fn rejected_publication_is_distinct_from_disabled_publication() {
     let root = dispatcher::with_default(&dispatch, || Context::root(RunId::new()));
 
     let scan = sample_scan();
-    let inputs = Inputs::with_defaults();
-    let scan_future = root.in_scope(|| persist_playlist_ls_artifacts(&scan, &inputs, true));
+    let scan_future = root.in_scope(|| persist_playlist_ls_artifacts(&scan));
     let scan_error = root.instrument(scan_future).await.expect_err("rejected scan publication must be an error");
     assert!(scan_error.to_string().contains("auv.test.netease_artifact_rejected"));
 
@@ -473,13 +427,13 @@ fn rejected_publication_is_distinct_from_disabled_publication() {
 fn standalone_cli_store_root_installs_current_run_context() {
   let store_root = std::env::temp_dir().join(format!("auv-netease-cli-context-{}", std::process::id()));
   let _ = std::fs::remove_dir_all(&store_root);
-  let fixture_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sidebar-scan-proof/hermetic_v0");
+  let fixture_dir = auv_netease_music::invoke::hermetic_select_proof_fixture_dir();
 
   let output = std::process::Command::new(env!("CARGO_BIN_EXE_auv-netease-music"))
     .arg("--store-root")
     .arg(&store_root)
     .arg("invoke")
-    .arg("netease.playlist.sidebarScanProof")
+    .arg(auv_netease_music::invoke::SELECT_PROOF_COMMAND_ID)
     .arg("--fixture-dir")
     .arg(&fixture_dir)
     .output()
@@ -502,8 +456,8 @@ fn standalone_cli_store_root_installs_current_run_context() {
   let snapshot =
     futures_executor::block_on(store.load_snapshot(run_id)).expect("load standalone CLI run").expect("standalone CLI run must exist");
   assert!(
-    snapshot.artifacts().values().any(|artifact| artifact.metadata().purpose().as_str() == PLAYLIST_SIDEBAR_SCAN_PURPOSE),
-    "standalone CLI run should contain the sidebar scan artifact"
+    snapshot.artifacts().values().any(|artifact| artifact.metadata().purpose().as_str() == PLAYLIST_SELECT_RESULT_PURPOSE),
+    "standalone CLI run should contain the playlist select artifact"
   );
 
   let _ = std::fs::remove_dir_all(store_root);
@@ -539,42 +493,16 @@ fn public_typed_candidate_operation_uses_caller_read_scan() {
     let fixture = NeteaseRunFixture::memory();
     let scan = sample_scan();
     let persisted = fixture.persist_playlist_scan(&scan).await;
-    let memory = persisted.memory.clone().expect("typed view memory");
     let snapshot = fixture.snapshot().await;
-    let artifacts = read_canonical_playlist_artifacts(fixture.store(), &snapshot, &persisted.scan_uri, "com.netease.163music", true)
+    let artifacts = read_canonical_playlist_artifacts(fixture.store(), &snapshot, &persisted.scan_uri, "com.netease.163music")
       .await
       .expect("caller-read canonical playlist artifacts");
 
     let candidate = resolve_playlist_play_candidate(&artifacts, "obs1.candidate.hermetic.test").expect("typed candidate should resolve");
 
     assert_eq!(candidate.scan(), &scan);
-    assert_eq!(candidate.memory(), Some(&memory));
     assert_eq!(candidate.target().label, "Hermetic Fixture Playlist");
     assert_eq!(candidate.target().candidate_id.as_deref(), Some("obs1.candidate.hermetic.test"));
-  });
-}
-
-#[test]
-fn canonical_reader_uses_the_typed_payload_uri_as_the_memory_link_authority() {
-  futures_executor::block_on(async {
-    let fixture = NeteaseRunFixture::memory();
-    let scan = sample_scan();
-    let first = fixture.persist_playlist_scan(&scan).await;
-    let second = fixture.persist_playlist_scan_with_memory(&scan, false).await;
-    let mut second_memory = first.memory.clone().expect("first typed view memory");
-    second_memory.source_scan_uri = second.scan_uri.clone();
-    fixture.publish_memory(&second_memory).await;
-    let snapshot = fixture.snapshot().await;
-
-    let first_artifacts = read_canonical_playlist_artifacts(fixture.store(), &snapshot, &first.scan_uri, "com.netease.163music", true)
-      .await
-      .expect("first scan artifacts");
-    let second_artifacts = read_canonical_playlist_artifacts(fixture.store(), &snapshot, &second.scan_uri, "com.netease.163music", true)
-      .await
-      .expect("second scan artifacts");
-
-    assert!(first_artifacts.memory().is_some(), "first scan should find its linked memory");
-    assert_eq!(second_artifacts.memory(), Some(&second_memory), "typed payload URI must link memory to the second scan");
   });
 }
 
@@ -585,7 +513,7 @@ fn canonical_reader_rejects_scan_for_another_requested_app() {
     let persisted = fixture.persist_playlist_scan(&sample_scan()).await;
     let snapshot = fixture.snapshot().await;
 
-    let error = read_canonical_playlist_artifacts(fixture.store(), &snapshot, &persisted.scan_uri, "com.example.OtherPlayer", true)
+    let error = read_canonical_playlist_artifacts(fixture.store(), &snapshot, &persisted.scan_uri, "com.example.OtherPlayer")
       .await
       .expect_err("scan app must match the caller-selected app");
 
@@ -594,33 +522,8 @@ fn canonical_reader_rejects_scan_for_another_requested_app() {
   });
 }
 
-#[test]
-fn canonical_reader_rejects_stale_memory_before_candidate_reacquisition() {
-  futures_executor::block_on(async {
-    let fixture = NeteaseRunFixture::memory();
-    let scan = sample_scan();
-    let source = fixture.persist_playlist_scan(&scan).await;
-    let requested = fixture.persist_playlist_scan_with_memory(&scan, false).await;
-    let mut memory = source.memory.expect("typed view memory");
-    memory.source_scan_uri = requested.scan_uri.clone();
-    memory.last_reconstructed_at_millis = 1;
-    fixture.publish_memory(&memory).await;
-    let snapshot = fixture.snapshot().await;
-
-    let artifacts = read_canonical_playlist_artifacts(fixture.store(), &snapshot, &requested.scan_uri, "com.netease.163music", true)
-      .await
-      .expect("scan remains usable when stale memory is rejected");
-    let candidate = resolve_playlist_play_candidate(&artifacts, "obs1.candidate.hermetic.test").expect("candidate from canonical scan");
-
-    assert!(artifacts.memory().is_none());
-    assert!(candidate.memory().is_none());
-    assert!(artifacts.read_limits().iter().any(|limit| limit.contains("stale")));
-  });
-}
-
 fn sample_scan() -> PlaylistSidebarScan {
-  let path =
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sidebar-scan-proof/hermetic_v0/playlist-sidebar-scan.json");
+  let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/run-artifacts/playlist-sidebar-scan.json");
   let json = std::fs::read_to_string(path).expect("read sidebar scan fixture");
   decode_playlist_sidebar_scan_json(&json).expect("decode sidebar scan fixture")
 }

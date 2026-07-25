@@ -126,8 +126,7 @@ fn public_domain_results_do_not_embed_parallel_timelines() {
     "executable": null,
   }));
 
-  let path =
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sidebar-scan-proof/hermetic_v0/playlist-sidebar-scan.json");
+  let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/run-artifacts/playlist-sidebar-scan.json");
   let scan: PlaylistSidebarScan =
     serde_json::from_slice(&std::fs::read(path).expect("read playlist scan fixture")).expect("decode playlist scan fixture");
   let output = serde_json::to_value(scan).expect("encode playlist scan");
@@ -183,33 +182,6 @@ fn playlist_select_result_rejects_tracing_identity() {
     serde_json::from_value::<PlaylistSelectResult>(value).is_err(),
     "the app-owned direct result must not absorb the outer tracing run identity"
   );
-}
-
-#[test]
-fn playlist_reacquire_uses_one_tagged_result_without_summary_flags() {
-  let mut value = select_fixture();
-  value.as_object_mut().expect("select fixture object").insert(
-    "reacquire".to_string(),
-    json!({
-      "status": "reacquired",
-      "bounds": {
-        "x": 59.0,
-        "y": 405.0,
-        "width": 120.0,
-        "height": 20.0
-      },
-      "strategy": "label_current_viewport",
-      "observation_count": 1
-    }),
-  );
-
-  let result: PlaylistSelectResult = serde_json::from_value(value).expect("typed reacquire result");
-  let output = serde_json::to_value(result).expect("encode typed reacquire result");
-  let reacquire = &output["reacquire"];
-  assert_eq!(reacquire["status"], "reacquired");
-  assert!(reacquire.get("outcome").is_none());
-  assert!(reacquire.get("summary").is_none());
-  assert!(reacquire.get("skipped_rescan_replay").is_none());
 }
 
 #[test]

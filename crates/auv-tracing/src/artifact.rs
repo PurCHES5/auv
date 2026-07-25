@@ -521,6 +521,22 @@ where
   Ok(emit_artifact(NewArtifact::from_json(purpose, attributes, byte_limit, value)?))
 }
 
+/// Admits one already-encoded in-memory artifact under the current context.
+///
+/// When the current context has no artifact authority, this returns a disabled
+/// emission without deriving length or digest metadata from `body`.
+pub fn emit_bytes_artifact(
+  purpose: ArtifactPurpose,
+  content_type: ContentType,
+  attributes: Attributes,
+  body: Vec<u8>,
+) -> Result<ArtifactEmission, ValidationError> {
+  if !crate::Context::current().can_publish_artifacts() {
+    return Ok(ArtifactEmission::disabled());
+  }
+  Ok(emit_artifact(NewArtifact::from_bytes(purpose, content_type, attributes, body)?))
+}
+
 /// Admits an artifact under the current captured run context.
 pub fn emit_artifact<R>(artifact: NewArtifact<R>) -> ArtifactEmission
 where

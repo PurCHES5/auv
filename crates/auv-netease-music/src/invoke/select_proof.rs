@@ -6,7 +6,7 @@ use auv_cli_invoke::{
 };
 
 use crate::commands::playlist::PlaylistSelectResult;
-use crate::run_artifacts::{PLAYLIST_SELECT_RESULT_PURPOSE, emit_playlist_select_result};
+use crate::run_artifacts::PLAYLIST_SELECT_RESULT_PURPOSE;
 
 #[cfg(feature = "tracing")]
 mod tracing {
@@ -80,12 +80,12 @@ pub fn select_proof_handler(input: InvokeCommandInput) -> InvokeCommandFuture {
 }
 
 async fn select_proof(input: InvokeCommandInput) -> Result<InvokeCommandOutput, String> {
-  let fixture_dir = required_input(&input, "fixture-dir")?.to_string();
+  let fixture_dir = input.required_input("fixture-dir")?.to_string();
   let fixture_path = Path::new(&fixture_dir);
   let preview = build_select_result_from_fixture_dir(fixture_path)?;
 
   if !input.dry_run {
-    emit_playlist_select_result(&preview);
+    crate::telemetry::json_artifact(PLAYLIST_SELECT_RESULT_PURPOSE, &preview);
   }
 
   let mut output = InvokeCommandOutput::from_result(&preview)?;
@@ -102,15 +102,6 @@ fn select_proof_report(fixture_dir: &str, query: &str) -> InvokeReport {
     ],
     Vec::new(),
   )
-}
-
-fn required_input<'a>(input: &'a InvokeCommandInput, key: &str) -> Result<&'a str, String> {
-  input
-    .inputs
-    .get(key)
-    .map(String::as_str)
-    .filter(|value| !value.is_empty())
-    .ok_or_else(|| format!("{SELECT_PROOF_COMMAND_ID} requires --{key}"))
 }
 
 pub fn hermetic_select_proof_fixture_dir() -> PathBuf {

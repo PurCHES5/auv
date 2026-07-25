@@ -1,8 +1,25 @@
+use comfy_table::{Cell, Table, presets::NOTHING};
 use serde::Serialize;
 
 use crate::views::query_match::{PlaylistQueryMatchMode, PlaylistQueryResolution};
 use crate::views::sidebar::SidebarView;
 use crate::{Confidence, PlaylistSidebarProjection, PlaylistSidebarScan, SidebarSectionKind};
+
+pub(crate) fn render_song_list_human(result: &crate::SongListScanResult) -> String {
+  let mut lines = vec![
+    "NetEase song list scan".to_string(),
+    format!("target: {}", result.target),
+    format!("items: {}", result.items.len()),
+    format!("observations: {}", result.observations.len()),
+  ];
+  if result.known_limits.is_empty() {
+    lines.push("known_limits: (none)".to_string());
+  } else {
+    lines.push("known_limits:".to_string());
+    lines.extend(result.known_limits.iter().map(|limit| format!("  - {limit}")));
+  }
+  lines.join("\n")
+}
 
 /// One playlist item surfaced by the listing or keyword filter.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -265,11 +282,11 @@ pub(crate) fn render_playlist_human_output(
       }
     }
     None => {
-      output.push_str(&format!("{item_count} playlists observed.\n\nSections:\n"));
-      for (kind, count) in section_counts(scan) {
-        output.push_str(&format!("  {kind:?}: {count}\n"));
-      }
       if detail {
+        output.push_str(&format!("{item_count} playlists observed.\n\nSections:\n"));
+        for (kind, count) in section_counts(scan) {
+          output.push_str(&format!("  {kind:?}: {count}\n"));
+        }
         output.push('\n');
         for candidate in &matches {
           output.push_str(&format!("* {:<3} {:<5} {}\n", candidate.confidence.level, candidate.scan_ref, candidate.label));
@@ -283,12 +300,58 @@ pub(crate) fn render_playlist_human_output(
         }
         append_detail_footer(&mut output, scan, scan_uri);
       } else {
-        output.push_str("\nMore: use a keyword, --detail, or --json.\n");
+        output.push_str(&render_playlist_table(&matches));
+        output.push_str("\n\nMore: use a keyword, --detail, or --json.\n");
       }
     }
   }
 
   output.trim_end().to_string()
+}
+
+fn render_playlist_table(matches: &[MatchRef]) -> String {
+  let mut table = Table::new();
+  table.load_preset(NOTHING);
+  table.set_header(["NAME", "SECTION", "CONFIDENCE", "ANCHOR ID"]);
+
+  if matches.is_empty() {
+    let mut output = render_table(table);
+    output.push_str("\n(no playlists observed)");
+    return output;
+  }
+
+  for candidate in matches {
+    table.add_row([
+      Cell::new(&candidate.label),
+      Cell::new(section_kind_name(candidate.section_kind)),
+      Cell::new(confidence_level_name(&candidate.confidence.level)),
+      Cell::new(candidate.anchor_id.as_deref().unwrap_or("-")),
+    ]);
+  }
+  render_table(table)
+}
+
+fn section_kind_name(kind: SidebarSectionKind) -> &'static str {
+  match kind {
+    SidebarSectionKind::FeatureNav => "feature_nav",
+    SidebarSectionKind::LibraryNav => "library_nav",
+    SidebarSectionKind::PlaylistNav => "playlist_nav",
+    SidebarSectionKind::MyPlaylists => "my_playlists",
+    SidebarSectionKind::FavoritePlaylists => "favorite_playlists",
+    SidebarSectionKind::Unknown => "unknown",
+  }
+}
+
+fn confidence_level_name(level: &str) -> &'static str {
+  match level {
+    "H" => "high",
+    "M" => "medium",
+    _ => "low",
+  }
+}
+
+fn render_table(table: Table) -> String {
+  table.to_string().lines().map(str::trim).collect::<Vec<_>>().join("\n")
 }
 
 fn section_counts(scan: &PlaylistSidebarScan) -> Vec<(SidebarSectionKind, usize)> {
@@ -572,7 +635,6 @@ mod tests {
     assert_eq!(json["scan_uri"], "auv://runs/run_abc/artifacts/scan_abc");
     assert!(json.get("run_id").is_none());
     assert!(json.get("artifacts").is_none());
-    assert!(json.get("view_memory").is_none());
     assert_eq!(json["known_limits"][0], "scan stopped after max_scrolls=2");
     assert_eq!(json["query_resolution"], "unique_contains");
     assert_eq!(json["result"]["matches"][0]["ref"], "pl_0");
@@ -583,17 +645,25 @@ mod tests {
   }
 
   #[test]
-  fn no_query_human_output_is_bounded_summary() {
+  fn no_query_human_output_lists_playlists_as_a_compact_table() {
     let scan = PlaylistSidebarScan::from_projection_for_tests(projection());
 
     let rendered = render_playlist_human_output(&scan, None, None, false, None);
 
-    assert!(rendered.contains("2 playlists observed."));
-    assert!(rendered.contains("Sections:"));
-    assert!(rendered.contains("MyPlaylists: 2"));
+    assert!(rendered.starts_with("NAME       SECTION       CONFIDENCE  ANCHOR ID\n"));
+    assert!(rendered.contains("Daily Mix  my_playlists  high        a1"));
+    assert!(rendered.contains("Workout    my_playlists  low         -"));
     assert!(rendered.contains("More: use a keyword, --detail, or --json."));
-    assert!(!rendered.contains("Daily Mix"));
     assert!(!rendered.contains("confidence=High"));
+  }
+
+  #[test]
+  fn no_query_human_output_reports_an_empty_playlist_table() {
+    let scan = PlaylistSidebarScan::from_projection_for_tests(PlaylistSidebarProjection::default());
+
+    let rendered = render_playlist_human_output(&scan, None, None, false, None);
+
+    assert!(rendered.starts_with("NAME  SECTION  CONFIDENCE  ANCHOR ID\n(no playlists observed)"));
   }
 
   #[test]
@@ -787,15 +857,6 @@ mod tests {
 
     assert_eq!(output.result.match_count, 0);
     assert_eq!(output.query_resolution, Some(QueryResolutionKind::NotFound));
-  }
-
-  #[test]
-  fn playlist_ls_json_does_not_embed_view_memory_write_state() {
-    let scan = PlaylistSidebarScan::from_projection_for_tests(projection());
-
-    let output = build_playlist_json_output(&scan, Some("daily"), None, None);
-    let json: serde_json::Value = serde_json::to_value(&output).expect("serialize output");
-    assert!(json.get("view_memory").is_none(), "store write state must stay in tracing/Inspect");
   }
 
   #[test]

@@ -1,104 +1,24 @@
 // File: crates/auv-netease-music/src/cli.rs
+mod input;
+mod presentation;
+
 use std::num::{NonZeroU64, NonZeroUsize};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use auv_driver::RatioRect;
-use auv_driver::vision::TextRecognitionOptions;
 use auv_media_macos::OutputFormat;
 use auv_tracing::ArtifactUri;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
-use crate::output::{build_playlist_json_output, render_playlist_human_output};
+use crate::output::{build_playlist_json_output, render_playlist_human_output, render_song_list_human};
 use crate::{
   Confidence, DailyRecommendedPlayInputs, Inputs, OpenWindowInputs, PlaybackStatusInputs, PlaylistCategory, SongListInputs,
   run_daily_recommended_play, run_daily_recommended_songs_scan, run_live_scan, run_live_scan_until_query, run_open_window,
   run_playback_status_probe,
 };
-
-pub(crate) fn positive_scroll_amount(raw: &str) -> Result<f64, String> {
-  let parsed = raw.parse::<f64>().map_err(|_| "expects a number".to_string())?;
-  if !parsed.is_finite() || parsed <= 0.0 {
-    return Err("must be greater than 0".to_string());
-  }
-  Ok(parsed)
-}
-
-pub(crate) fn zero_to_one(raw: &str) -> Result<f64, String> {
-  let parsed = raw.parse::<f64>().map_err(|_| "expects a number".to_string())?;
-  if !parsed.is_finite() || !(0.0..=1.0).contains(&parsed) {
-    return Err("must be between 0 and 1".to_string());
-  }
-  Ok(parsed)
-}
-
-pub(crate) fn split_csv(value: &str) -> Vec<String> {
-  value.split(',').map(str::trim).filter(|part| !part.is_empty()).map(ToOwned::to_owned).collect()
-}
-
-pub(crate) fn push_trimmed(values: &mut Vec<String>, value: String) {
-  let value = value.trim();
-  if !value.is_empty() && !values.iter().any(|existing| existing == value) {
-    values.push(value.to_string());
-  }
-}
-
-pub(crate) fn push_csv(values: &mut Vec<String>, value: &str) {
-  for part in split_csv(value) {
-    push_trimmed(values, part);
-  }
-}
-
-pub(crate) fn push_ocr_language(options: &mut TextRecognitionOptions, language: String) {
-  let language = language.trim();
-  if language.is_empty() {
-    return;
-  }
-  let languages = options.recognition_languages.get_or_insert_with(Vec::new);
-  if !languages.iter().any(|existing| existing == language) {
-    languages.push(language.to_string());
-  }
-}
-
-pub(crate) fn load_custom_words_file(values: &mut Vec<String>, path: PathBuf) -> Result<(), String> {
-  let content = std::fs::read_to_string(&path).map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-  for line in content.lines() {
-    let word = line.trim();
-    if !word.is_empty() && !word.starts_with('#') {
-      push_trimmed(values, word.to_string());
-    }
-  }
-  Ok(())
-}
-
-pub(crate) fn parse_ratio_region(value: String) -> Result<RatioRect, String> {
-  let parts = value
-    .split(',')
-    .map(str::trim)
-    .map(|part| part.parse::<f64>().map_err(|_| "--sidebar-region expects x,y,width,height".to_string()))
-    .collect::<Result<Vec<_>, _>>()?;
-
-  if parts.len() != 4 {
-    return Err("--sidebar-region expects x,y,width,height".to_string());
-  }
-
-  if parts.iter().any(|part| !part.is_finite()) {
-    return Err("--sidebar-region expects finite x,y,width,height".to_string());
-  }
-
-  if parts[2] <= 0.0 || parts[3] <= 0.0 {
-    return Err("--sidebar-region width and height must be greater than 0".to_string());
-  }
-
-  Ok(RatioRect::new(parts[0], parts[1], parts[2], parts[3]))
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum OutputMode {
-  Human,
-  Json,
-  JsonFile(PathBuf),
-}
+use input::{AppTargetArgs, OcrHintArgs, ScrollArgs, parse_ratio_region, positive_scroll_amount, zero_to_one};
+pub(crate) use presentation::OutputMode;
+use presentation::{OutputArgs, emit};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 enum PlaylistOutputFormat {
@@ -174,13 +94,7 @@ pub(crate) struct PlaybackStatusCommand {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct SongsLsCommand {
   pub inputs: SongListInputs,
-  pub target: SongsLsTarget,
   pub output: OutputMode,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum SongsLsTarget {
-  DailyRecommended,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -193,7 +107,7 @@ pub(crate) struct NowPlayingCommand {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct OpenWindowCommand {
   pub inputs: OpenWindowInputs,
-  pub json: bool,
+  pub output: OutputMode,
 }
 
 /// A transport command, scoped to act only when `app_id` owns the now-playing
@@ -228,11 +142,14 @@ pub(crate) enum Command {
 #[derive(Clone, Debug, Parser)]
 #[command(
   name = "auv-netease-music",
+  version,
   disable_help_subcommand = true,
-  about = "NetEase Cloud Music CLI"
+  about = "Inspect and control NetEase Cloud Music through AUV",
+  long_about = "Inspect and control NetEase Cloud Music through AUV.\n\nThe CLI exposes typed operations for playlist discovery and playback, song-list scanning, now-playing inspection, transport control, and registered app-local operations. Human-readable output is the default; use --json or --json-out on commands that expose structured results.",
+  after_long_help = "Examples:\n  # List playlists detected in the NetEase sidebar\n  auv-netease-music playlist ls\n\n  # Find a playlist and keep its scan URI for a later action\n  auv-netease-music playlist ls \"Trance vol.2\" --json\n\n  # Scan songs from the Daily Recommendations view\n  auv-netease-music playlist songs ls\n\n  # Read the system now-playing state when NetEase owns it\n  auv-netease-music now-playing"
 )]
 struct CliArgs {
-  /// Run-store authority selected by this standalone frontend.
+  /// Directory containing the run store used to record and read artifacts.
   #[arg(long = "store-root", global = true)]
   store_root: Option<PathBuf>,
   #[command(subcommand)]
@@ -242,8 +159,11 @@ struct CliArgs {
 #[derive(Clone, Debug, Subcommand)]
 enum CliSubcommand {
   /// Ensure NetEase Cloud Music is running and its window is visible.
+  ///
+  /// Launches the application when needed, resolves its main window, and
+  /// reports the resolved application and window metadata.
   OpenWindow(OpenWindowArgs),
-  /// Work with NetEase Cloud Music playlists.
+  /// Discover, open, play, and inspect NetEase playlists.
   Playlist(PlaylistArgs),
   /// Read the system now-playing state (via the macOS media API).
   #[command(name = "now-playing")]
@@ -260,13 +180,17 @@ enum CliSubcommand {
   Previous(ControlArgs),
   /// Seek to a position in seconds (only when NetEase owns the now-playing slot).
   Seek(SeekArgs),
-  /// Experimental current playback probes.
+  /// Inspect playback information visible inside the NetEase application.
   Playback(PlaybackArgs),
-  /// App-local invoke commands (hermetic proof surfaces).
+  /// Invoke registered application operations through the shared AUV runtime.
+  #[command(disable_help_flag = true)]
   Invoke(InvokeArgs),
 }
 
 #[derive(Clone, Debug, Args)]
+#[command(
+  after_long_help = "Examples:\n  auv-netease-music open-window\n  auv-netease-music open-window --json\n  auv-netease-music open-window --exe 'C:\\\\Program Files\\\\NetEase\\\\cloudmusic.exe'"
+)]
 struct OpenWindowArgs {
   /// How long to wait for the window to appear after launch.
   #[arg(long = "settle-ms", default_value_t = 8_000)]
@@ -286,10 +210,14 @@ struct OpenWindowArgs {
 }
 
 #[derive(Clone, Debug, Args)]
+#[command(
+  after_long_help = "Examples:\n  auv-netease-music now-playing\n  auv-netease-music now-playing --format json\n  auv-netease-music now-playing --format json --json-out now-playing.json"
+)]
 struct NowPlayingArgs {
   /// Output format on stdout.
   #[arg(long = "format", value_enum, default_value_t = OutputFormat::Summary)]
   format: OutputFormat,
+  /// Write the now-playing result as JSON to this file.
   #[arg(long = "json-out")]
   json_out: Option<PathBuf>,
   /// Only report now-playing when this app owns the slot (default: NetEase).
@@ -300,17 +228,18 @@ struct NowPlayingArgs {
 #[derive(Clone, Debug, Args)]
 struct ControlArgs {
   /// Only act when this app owns the now-playing slot (default: NetEase).
-  #[arg(long = "app-id")]
-  app_id: Option<String>,
+  #[command(flatten)]
+  app: AppTargetArgs,
 }
 
 #[derive(Clone, Debug, Args)]
 struct SeekArgs {
-  #[arg(value_name = "seconds")]
+  /// Absolute playback position in seconds.
+  #[arg(value_name = "SECONDS")]
   seconds: f64,
   /// Only act when this app owns the now-playing slot (default: NetEase).
-  #[arg(long = "app-id")]
-  app_id: Option<String>,
+  #[command(flatten)]
+  app: AppTargetArgs,
 }
 
 #[derive(Clone, Debug, PartialEq, Args)]
@@ -328,35 +257,33 @@ struct PlaybackArgs {
 
 #[derive(Clone, Debug, Subcommand)]
 enum PlaybackSubcommand {
-  /// Open the current song detail view and read the source label.
+  /// Open the current song detail view and inspect its playback metadata.
   Status(PlaybackStatusArgs),
 }
 
 #[derive(Clone, Debug, Args)]
+#[command(
+  after_long_help = "Examples:\n  auv-netease-music playback status\n  auv-netease-music playback status --wide\n  auv-netease-music playback status --json"
+)]
 struct PlaybackStatusArgs {
-  #[arg(long = "json")]
-  json: bool,
-  #[arg(long = "json-out")]
-  json_out: Option<PathBuf>,
-  #[arg(long = "app-id")]
-  app_id: Option<String>,
+  #[command(flatten)]
+  output: OutputArgs,
+  #[command(flatten)]
+  app: AppTargetArgs,
+  /// Delay in milliseconds after opening the song detail view.
   #[arg(long = "settle-ms")]
   settle_ms: Option<u64>,
+  /// Include the full set of observed playback fields.
   #[arg(long = "wide", alias = "detailed")]
   wide: bool,
-  #[arg(long = "hint-ocr-custom-word")]
-  custom_words: Vec<String>,
-  #[arg(long = "hint-ocr-custom-words")]
-  custom_word_csvs: Vec<String>,
-  #[arg(long = "hint-ocr-custom-words-file")]
-  custom_word_files: Vec<PathBuf>,
-  #[arg(long = "hint-ocr-language")]
-  ocr_languages: Vec<String>,
-  #[arg(long = "hint-ocr-languages")]
-  ocr_language_csvs: Vec<String>,
+  #[command(flatten)]
+  ocr: OcrHintArgs,
 }
 
 #[derive(Clone, Debug, Args)]
+#[command(
+  after_long_help = "Examples:\n  auv-netease-music playlist ls\n  auv-netease-music playlist ls \"Trance vol.2\" --json\n  auv-netease-music playlist songs ls"
+)]
 struct PlaylistArgs {
   #[command(subcommand)]
   command: PlaylistSubcommand,
@@ -364,17 +291,20 @@ struct PlaylistArgs {
 
 #[derive(Clone, Debug, Subcommand)]
 enum PlaylistSubcommand {
-  /// List NetEase Cloud Music sidebar playlists.
+  /// Scan and list playlists visible in the NetEase sidebar.
   Ls(PlaylistLsArgs),
-  /// Open a playlist from the sidebar without starting playback.
+  /// Open a sidebar playlist without starting playback.
   Select(PlaylistSelectArgs),
-  /// Play a built-in playlist.
+  /// Open a playlist and start playback.
   Play(PlaylistPlayArgs),
-  /// Scan songs from a playlist-like song table.
+  /// Inspect songs shown in supported NetEase list views.
   Songs(PlaylistSongsArgs),
 }
 
 #[derive(Clone, Debug, Args)]
+#[command(
+  after_long_help = "Examples:\n  # Scan the Daily Recommendations song table\n  auv-netease-music playlist songs ls\n\n  # Save the complete structured result\n  auv-netease-music playlist songs ls --json-out songs.json"
+)]
 struct PlaylistSongsArgs {
   #[command(subcommand)]
   command: PlaylistSongsSubcommand,
@@ -382,163 +312,126 @@ struct PlaylistSongsArgs {
 
 #[derive(Clone, Debug, Subcommand)]
 enum PlaylistSongsSubcommand {
-  /// List songs from a supported song list.
+  /// Scan and list songs from the Daily Recommendations view.
   Ls(SongsLsArgs),
 }
 
 #[derive(Clone, Debug, Args)]
+#[command(
+  after_long_help = "Examples:\n  auv-netease-music playlist songs ls\n  auv-netease-music playlist songs ls --json\n  auv-netease-music playlist songs ls --max-scrolls 20 --json-out songs.json"
+)]
 struct SongsLsArgs {
-  #[arg(value_name = "daily-recommended")]
-  target: String,
-  #[arg(long = "json")]
-  json: bool,
-  #[arg(long = "json-out")]
-  json_out: Option<PathBuf>,
-  #[arg(long = "app-id")]
-  app_id: Option<String>,
-  #[arg(long = "max-scrolls")]
-  max_scrolls: Option<NonZeroUsize>,
-  #[arg(long = "scroll-amount", value_parser = positive_scroll_amount)]
-  scroll_amount: Option<f64>,
-  #[arg(long = "scroll-settle-ms")]
-  scroll_settle_ms: Option<u64>,
-  #[arg(long = "hint-ocr-custom-word")]
-  custom_words: Vec<String>,
-  #[arg(long = "hint-ocr-custom-words")]
-  custom_word_csvs: Vec<String>,
-  #[arg(long = "hint-ocr-custom-words-file")]
-  custom_word_files: Vec<PathBuf>,
-  #[arg(long = "hint-ocr-language")]
-  ocr_languages: Vec<String>,
-  #[arg(long = "hint-ocr-languages")]
-  ocr_language_csvs: Vec<String>,
+  #[command(flatten)]
+  output: OutputArgs,
+  #[command(flatten)]
+  app: AppTargetArgs,
+  #[command(flatten)]
+  scroll: ScrollArgs,
+  #[command(flatten)]
+  ocr: OcrHintArgs,
 }
 
 #[derive(Clone, Debug, Args)]
 #[command(
-  after_help = "Recommended playlist flow:\n  auv-netease-music --store-root <root> playlist ls \"Trance vol.2\" --json\n  auv-netease-music --store-root <root> playlist play --candidate-id <id> --scan-uri <auv-uri>\n\nUse the scan_uri returned by playlist ls. Candidate IDs are local to that scan."
+  override_usage = "auv-netease-music playlist play <QUERY> [OPTIONS]\n       auv-netease-music playlist play --candidate-id <ID> --scan-uri <URI> [OPTIONS]\n       auv-netease-music playlist play daily-recommended [OPTIONS]",
+  after_long_help = "Examples:\n  # Find and play a playlist by name\n  auv-netease-music playlist play \"Trance vol.2\"\n\n  # Play an exact candidate returned by playlist ls --json\n  auv-netease-music --store-root <ROOT> playlist play --candidate-id <ID> --scan-uri <URI>\n\n  # Open Daily Recommendations and start all songs\n  auv-netease-music playlist play daily-recommended\n\nCandidate IDs are local to the scan identified by --scan-uri."
 )]
 struct PlaylistPlayArgs {
   /// Playlist query. Convenience path; prefer --candidate-id after playlist ls --json for agent calls.
-  #[arg(value_name = "query")]
+  #[arg(value_name = "QUERY")]
   target: Option<String>,
-  /// Candidate id from `playlist ls <keyword> --json`.
-  #[arg(long = "candidate-id")]
+  /// Candidate ID returned by `playlist ls <KEYWORD> --json`.
+  #[arg(long = "candidate-id", value_name = "ID")]
   candidate_id: Option<String>,
-  #[arg(long = "json")]
-  json: bool,
-  #[arg(long = "json-out")]
-  json_out: Option<PathBuf>,
-  #[arg(long = "app-id")]
-  app_id: Option<String>,
+  #[command(flatten)]
+  output: OutputArgs,
+  #[command(flatten)]
+  app: AppTargetArgs,
   /// Canonical scan artifact returned by `playlist ls`.
-  #[arg(long = "scan-uri")]
+  #[arg(long = "scan-uri", value_name = "URI")]
   scan_uri: Option<ArtifactUri>,
-  #[arg(long = "max-scrolls")]
-  max_scrolls: Option<NonZeroUsize>,
-  #[arg(long = "scroll-amount", value_parser = positive_scroll_amount)]
-  scroll_amount: Option<f64>,
-  #[arg(long = "scroll-settle-ms")]
-  scroll_settle_ms: Option<u64>,
+  #[command(flatten)]
+  scroll: ScrollArgs,
+  /// Normalized sidebar rectangle as x,y,width,height.
   #[arg(long = "sidebar-region")]
   sidebar_region: Option<String>,
+  /// Maximum upward scroll steps used only by `daily-recommended`.
   #[arg(long = "max-top-scrolls")]
   max_top_scrolls: Option<NonZeroUsize>,
+  /// Upward scroll distance per step used only by `daily-recommended`.
   #[arg(long = "top-scroll-amount", value_parser = positive_scroll_amount)]
   top_scroll_amount: Option<f64>,
+  /// UI settle delay in milliseconds used only by `daily-recommended`.
   #[arg(long = "settle-ms")]
   settle_ms: Option<NonZeroU64>,
+  /// PNG template used to verify the playing-state icon for `daily-recommended`.
   #[arg(long = "play-icon-template")]
   play_icon_template: Option<PathBuf>,
+  /// Template-match threshold from 0 to 1 for `--play-icon-template`.
   #[arg(long = "play-icon-threshold", value_parser = zero_to_one)]
   play_icon_threshold: Option<f64>,
-  #[arg(long = "hint-ocr-custom-word")]
-  custom_words: Vec<String>,
-  #[arg(long = "hint-ocr-custom-words")]
-  custom_word_csvs: Vec<String>,
-  #[arg(long = "hint-ocr-custom-words-file")]
-  custom_word_files: Vec<PathBuf>,
-  #[arg(long = "hint-ocr-language")]
-  ocr_languages: Vec<String>,
-  #[arg(long = "hint-ocr-languages")]
-  ocr_language_csvs: Vec<String>,
+  #[command(flatten)]
+  ocr: OcrHintArgs,
 }
 
 #[derive(Clone, Debug, Args)]
 #[command(
-  after_help = "Recommended playlist flow:\n  auv-netease-music --store-root <root> playlist ls \"Trance vol.2\" --json\n  auv-netease-music --store-root <root> playlist play --candidate-id <id> --scan-uri <auv-uri>\n\nJSON output includes matches[].candidate_id and scan_uri. Candidate IDs are local to that scan."
+  after_long_help = "Examples:\n  # List all observed playlists as a table\n  auv-netease-music playlist ls\n\n  # Stop after resolving a playlist keyword and emit structured output\n  auv-netease-music playlist ls \"Trance vol.2\" --json\n\n  # Inspect scan evidence and artifact metadata\n  auv-netease-music playlist ls --detail\n\nJSON output includes result.matches[].candidate_id and scan_uri. Candidate IDs are local to that scan."
 )]
 struct PlaylistLsArgs {
   /// Optional playlist keyword. When present, scanning continues until the keyword is found or the list boundary is reached.
-  #[arg(value_name = "keyword")]
+  #[arg(value_name = "KEYWORD")]
   keyword: Option<String>,
+  /// Restrict collection to all, created, or favorite playlist sections.
   #[arg(long = "category")]
   category: Option<PlaylistCategory>,
+  /// Playlist keyword alias for callers that prefer an explicit option.
   #[arg(long = "filter")]
   filter: Option<String>,
-  #[arg(long = "json")]
-  json: bool,
-  #[arg(long = "json-out")]
-  json_out: Option<PathBuf>,
+  #[command(flatten)]
+  output: OutputArgs,
+  /// Output-format alias; `json` is equivalent to `--json`.
   #[arg(long = "format", value_enum)]
   format: Option<PlaylistOutputFormat>,
+  /// Include per-playlist evidence, diagnostics, and scan artifact metadata.
   #[arg(long = "detail")]
   detail: bool,
+  /// Hide playlist matches below this confidence level.
   #[arg(long = "min-confidence", value_enum)]
   min_confidence: Option<PlaylistConfidenceArg>,
-  #[arg(long = "app-id")]
-  app_id: Option<String>,
-  #[arg(long = "max-scrolls")]
-  max_scrolls: Option<NonZeroUsize>,
-  #[arg(long = "scroll-amount", value_parser = positive_scroll_amount)]
-  scroll_amount: Option<f64>,
-  #[arg(long = "scroll-settle-ms")]
-  scroll_settle_ms: Option<u64>,
+  #[command(flatten)]
+  app: AppTargetArgs,
+  #[command(flatten)]
+  scroll: ScrollArgs,
+  /// Normalized sidebar rectangle as x,y,width,height.
   #[arg(long = "sidebar-region")]
   sidebar_region: Option<String>,
-  #[arg(long = "hint-ocr-custom-word")]
-  custom_words: Vec<String>,
-  #[arg(long = "hint-ocr-custom-words")]
-  custom_word_csvs: Vec<String>,
-  #[arg(long = "hint-ocr-custom-words-file")]
-  custom_word_files: Vec<PathBuf>,
-  #[arg(long = "hint-ocr-language")]
-  ocr_languages: Vec<String>,
-  #[arg(long = "hint-ocr-languages")]
-  ocr_language_csvs: Vec<String>,
+  #[command(flatten)]
+  ocr: OcrHintArgs,
 }
 
 #[derive(Clone, Debug, Args)]
+#[command(
+  after_long_help = "Examples:\n  # Resolve and open a playlist by name\n  auv-netease-music playlist select \"Trance vol.2\"\n\n  # Reuse the canonical scan returned by playlist ls\n  auv-netease-music --store-root <ROOT> playlist select \"Trance vol.2\" --scan-uri <URI>"
+)]
 struct PlaylistSelectArgs {
-  #[arg(value_name = "query")]
+  /// Playlist name or substring to resolve in the sidebar.
+  #[arg(value_name = "QUERY")]
   query: String,
-  #[arg(long = "json")]
-  json: bool,
-  #[arg(long = "json-out")]
-  json_out: Option<PathBuf>,
-  #[arg(long = "app-id")]
-  app_id: Option<String>,
+  #[command(flatten)]
+  output: OutputArgs,
+  #[command(flatten)]
+  app: AppTargetArgs,
   /// Canonical scan artifact returned by `playlist ls`.
-  #[arg(long = "scan-uri")]
+  #[arg(long = "scan-uri", value_name = "URI")]
   scan_uri: Option<ArtifactUri>,
-  #[arg(long = "max-scrolls")]
-  max_scrolls: Option<NonZeroUsize>,
-  #[arg(long = "scroll-amount", value_parser = positive_scroll_amount)]
-  scroll_amount: Option<f64>,
-  #[arg(long = "scroll-settle-ms")]
-  scroll_settle_ms: Option<u64>,
+  #[command(flatten)]
+  scroll: ScrollArgs,
+  /// Normalized sidebar rectangle as x,y,width,height.
   #[arg(long = "sidebar-region")]
   sidebar_region: Option<String>,
-  #[arg(long = "hint-ocr-custom-word")]
-  custom_words: Vec<String>,
-  #[arg(long = "hint-ocr-custom-words")]
-  custom_word_csvs: Vec<String>,
-  #[arg(long = "hint-ocr-custom-words-file")]
-  custom_word_files: Vec<PathBuf>,
-  #[arg(long = "hint-ocr-language")]
-  ocr_languages: Vec<String>,
-  #[arg(long = "hint-ocr-languages")]
-  ocr_language_csvs: Vec<String>,
+  #[command(flatten)]
+  ocr: OcrHintArgs,
 }
 
 fn command_from_args(parsed: CliArgs) -> Result<Command, String> {
@@ -552,7 +445,9 @@ fn command_from_args(parsed: CliArgs) -> Result<Command, String> {
     CliSubcommand::Next(args) => Ok(control(auv_media_macos::MediaCommand::NextTrack, args)),
     CliSubcommand::Previous(args) => Ok(control(auv_media_macos::MediaCommand::PreviousTrack, args)),
     CliSubcommand::Seek(args) => parse_seek(args),
-    CliSubcommand::Playback(args) => parse_playback(args),
+    CliSubcommand::Playback(args) => match args.command {
+      PlaybackSubcommand::Status(args) => parse_playback_status(args).map(Command::PlaybackStatus),
+    },
     CliSubcommand::Invoke(args) => Ok(Command::Invoke(args)),
   }
 }
@@ -569,13 +464,11 @@ fn parse_open_window(args: OpenWindowArgs) -> OpenWindowCommand {
   }
   OpenWindowCommand {
     inputs,
-    json: args.json,
-  }
-}
-
-fn parse_playback(args: PlaybackArgs) -> Result<Command, String> {
-  match args.command {
-    PlaybackSubcommand::Status(args) => parse_playback_status(args).map(Command::PlaybackStatus),
+    output: if args.json {
+      OutputMode::Json
+    } else {
+      OutputMode::Human
+    },
   }
 }
 
@@ -587,7 +480,7 @@ fn resolve_app_id(app_id: Option<String>) -> String {
 fn control(control: auv_media_macos::MediaCommand, args: ControlArgs) -> Command {
   Command::Control(ControlCommand {
     control,
-    app_id: resolve_app_id(args.app_id),
+    app_id: resolve_app_id(args.app.app_id),
   })
 }
 
@@ -614,7 +507,7 @@ fn parse_seek(args: SeekArgs) -> Result<Command, String> {
   }
   Ok(Command::Seek(SeekCommand {
     seconds: args.seconds,
-    app_id: resolve_app_id(args.app_id),
+    app_id: resolve_app_id(args.app.app_id),
   }))
 }
 
@@ -623,7 +516,9 @@ fn parse_playlist(args: PlaylistArgs) -> Result<Command, String> {
     PlaylistSubcommand::Ls(ls) => parse_playlist_ls(ls).map(Command::PlaylistLs),
     PlaylistSubcommand::Select(select) => parse_playlist_select(select).map(Command::PlaylistSelect),
     PlaylistSubcommand::Play(play) => parse_playlist_play(play),
-    PlaylistSubcommand::Songs(songs) => parse_playlist_songs(songs),
+    PlaylistSubcommand::Songs(songs) => match songs.command {
+      PlaylistSongsSubcommand::Ls(args) => parse_songs_ls(args).map(Command::PlaylistSongsLs),
+    },
   }
 }
 
@@ -631,16 +526,16 @@ fn parse_playlist_ls(args: PlaylistLsArgs) -> Result<PlaylistCommand, String> {
   let mut inputs = Inputs::with_defaults();
   let query = args.keyword;
 
-  if let Some(app_id) = args.app_id {
+  if let Some(app_id) = args.app.app_id {
     inputs.app_id = app_id;
   }
-  if let Some(max_scrolls) = args.max_scrolls {
+  if let Some(max_scrolls) = args.scroll.max_scrolls {
     inputs.max_scrolls = max_scrolls.get();
   }
-  if let Some(scroll_amount) = args.scroll_amount {
+  if let Some(scroll_amount) = args.scroll.scroll_amount {
     inputs.scroll_amount = scroll_amount;
   }
-  if let Some(scroll_settle_ms) = args.scroll_settle_ms {
+  if let Some(scroll_settle_ms) = args.scroll.scroll_settle_ms {
     inputs.scroll_settle_ms = scroll_settle_ms;
   }
   if let Some(category) = args.category {
@@ -649,29 +544,9 @@ fn parse_playlist_ls(args: PlaylistLsArgs) -> Result<PlaylistCommand, String> {
   if let Some(sidebar_region) = args.sidebar_region {
     inputs.sidebar_region = Some(parse_ratio_region(sidebar_region)?);
   }
-  for word in args.custom_words {
-    push_trimmed(&mut inputs.ocr_options.custom_words, word);
-  }
-  for csv in args.custom_word_csvs {
-    push_csv(&mut inputs.ocr_options.custom_words, &csv);
-  }
-  for path in args.custom_word_files {
-    load_custom_words_file(&mut inputs.ocr_options.custom_words, path)?;
-  }
-  for language in args.ocr_languages {
-    push_ocr_language(&mut inputs.ocr_options, language);
-  }
-  for csv in args.ocr_language_csvs {
-    for language in split_csv(&csv) {
-      push_ocr_language(&mut inputs.ocr_options, language);
-    }
-  }
+  args.ocr.apply(&mut inputs.ocr_options)?;
   let query = args.filter.or(query);
-  let mode = match args.json_out {
-    Some(path) => OutputMode::JsonFile(path),
-    None if args.json || args.format == Some(PlaylistOutputFormat::Json) => OutputMode::Json,
-    None => OutputMode::Human,
-  };
+  let mode = args.output.mode_with_json_alias(args.format == Some(PlaylistOutputFormat::Json));
   let output = PlaylistOutputOptions {
     mode,
     detail: args.detail,
@@ -686,44 +561,23 @@ fn parse_playlist_ls(args: PlaylistLsArgs) -> Result<PlaylistCommand, String> {
 
 fn parse_playlist_select(args: PlaylistSelectArgs) -> Result<PlaylistSelectCommand, String> {
   let mut inputs = Inputs::with_defaults();
-  if let Some(app_id) = args.app_id {
+  if let Some(app_id) = args.app.app_id {
     inputs.app_id = app_id;
   }
-  if let Some(max_scrolls) = args.max_scrolls {
+  if let Some(max_scrolls) = args.scroll.max_scrolls {
     inputs.max_scrolls = max_scrolls.get();
   }
-  if let Some(scroll_amount) = args.scroll_amount {
+  if let Some(scroll_amount) = args.scroll.scroll_amount {
     inputs.scroll_amount = scroll_amount;
   }
-  if let Some(scroll_settle_ms) = args.scroll_settle_ms {
+  if let Some(scroll_settle_ms) = args.scroll.scroll_settle_ms {
     inputs.scroll_settle_ms = scroll_settle_ms;
   }
   if let Some(sidebar_region) = args.sidebar_region {
     inputs.sidebar_region = Some(parse_ratio_region(sidebar_region)?);
   }
-  for word in args.custom_words {
-    push_trimmed(&mut inputs.ocr_options.custom_words, word);
-  }
-  for csv in args.custom_word_csvs {
-    push_csv(&mut inputs.ocr_options.custom_words, &csv);
-  }
-  for path in args.custom_word_files {
-    load_custom_words_file(&mut inputs.ocr_options.custom_words, path)?;
-  }
-  for language in args.ocr_languages {
-    push_ocr_language(&mut inputs.ocr_options, language);
-  }
-  for csv in args.ocr_language_csvs {
-    for language in split_csv(&csv) {
-      push_ocr_language(&mut inputs.ocr_options, language);
-    }
-  }
-
-  let output = match args.json_out {
-    Some(path) => OutputMode::JsonFile(path),
-    None if args.json => OutputMode::Json,
-    None => OutputMode::Human,
-  };
+  args.ocr.apply(&mut inputs.ocr_options)?;
+  let output = args.output.mode();
   Ok(PlaylistSelectCommand {
     inputs,
     query: args.query,
@@ -733,6 +587,10 @@ fn parse_playlist_select(args: PlaylistSelectArgs) -> Result<PlaylistSelectComma
 }
 
 fn parse_playlist_play(args: PlaylistPlayArgs) -> Result<Command, String> {
+  // TODO(playlist-play-command-shape): daily-recommended still shares one
+  // option surface with scanned-playlist playback. Splitting that public
+  // command path is deferred from this help-contract slice until the owner
+  // approves the replacement command hierarchy.
   if args.target.as_deref() == Some("daily-recommended") && args.candidate_id.is_none() {
     return parse_daily_recommended(args).map(Command::PlaylistPlayDailyRecommended);
   }
@@ -761,44 +619,23 @@ fn parse_playlist_play_query(args: PlaylistPlayArgs) -> Result<PlaylistPlayComma
     return Err("playlist play --candidate-id requires --scan-uri".to_string());
   }
   let mut inputs = Inputs::with_defaults();
-  if let Some(app_id) = args.app_id {
+  if let Some(app_id) = args.app.app_id {
     inputs.app_id = app_id;
   }
-  if let Some(max_scrolls) = args.max_scrolls {
+  if let Some(max_scrolls) = args.scroll.max_scrolls {
     inputs.max_scrolls = max_scrolls.get();
   }
-  if let Some(scroll_amount) = args.scroll_amount {
+  if let Some(scroll_amount) = args.scroll.scroll_amount {
     inputs.scroll_amount = scroll_amount;
   }
-  if let Some(scroll_settle_ms) = args.scroll_settle_ms {
+  if let Some(scroll_settle_ms) = args.scroll.scroll_settle_ms {
     inputs.scroll_settle_ms = scroll_settle_ms;
   }
   if let Some(sidebar_region) = args.sidebar_region {
     inputs.sidebar_region = Some(parse_ratio_region(sidebar_region)?);
   }
-  for word in args.custom_words {
-    push_trimmed(&mut inputs.ocr_options.custom_words, word);
-  }
-  for csv in args.custom_word_csvs {
-    push_csv(&mut inputs.ocr_options.custom_words, &csv);
-  }
-  for path in args.custom_word_files {
-    load_custom_words_file(&mut inputs.ocr_options.custom_words, path)?;
-  }
-  for language in args.ocr_languages {
-    push_ocr_language(&mut inputs.ocr_options, language);
-  }
-  for csv in args.ocr_language_csvs {
-    for language in split_csv(&csv) {
-      push_ocr_language(&mut inputs.ocr_options, language);
-    }
-  }
-
-  let output = match args.json_out {
-    Some(path) => OutputMode::JsonFile(path),
-    None if args.json => OutputMode::Json,
-    None => OutputMode::Human,
-  };
+  args.ocr.apply(&mut inputs.ocr_options)?;
+  let output = args.output.mode();
   Ok(PlaylistPlayCommand {
     inputs,
     target,
@@ -807,59 +644,23 @@ fn parse_playlist_play_query(args: PlaylistPlayArgs) -> Result<PlaylistPlayComma
   })
 }
 
-fn parse_playlist_songs(args: PlaylistSongsArgs) -> Result<Command, String> {
-  match args.command {
-    PlaylistSongsSubcommand::Ls(args) => parse_songs_ls(args).map(Command::PlaylistSongsLs),
-  }
-}
-
 fn parse_songs_ls(args: SongsLsArgs) -> Result<SongsLsCommand, String> {
-  let target = match args.target.as_str() {
-    "daily-recommended" => SongsLsTarget::DailyRecommended,
-    other => {
-      return Err(format!("unsupported songs ls target {other:?}; expected \"daily-recommended\""));
-    }
-  };
   let mut inputs = SongListInputs::with_defaults();
-  if let Some(app_id) = args.app_id {
+  if let Some(app_id) = args.app.app_id {
     inputs.app_id = app_id;
   }
-  if let Some(max_scrolls) = args.max_scrolls {
+  if let Some(max_scrolls) = args.scroll.max_scrolls {
     inputs.max_scrolls = max_scrolls.get();
   }
-  if let Some(scroll_amount) = args.scroll_amount {
+  if let Some(scroll_amount) = args.scroll.scroll_amount {
     inputs.scroll_amount = scroll_amount;
   }
-  if let Some(scroll_settle_ms) = args.scroll_settle_ms {
+  if let Some(scroll_settle_ms) = args.scroll.scroll_settle_ms {
     inputs.scroll_settle_ms = scroll_settle_ms;
   }
-  for word in args.custom_words {
-    push_trimmed(&mut inputs.ocr_options.custom_words, word);
-  }
-  for csv in args.custom_word_csvs {
-    push_csv(&mut inputs.ocr_options.custom_words, &csv);
-  }
-  for path in args.custom_word_files {
-    load_custom_words_file(&mut inputs.ocr_options.custom_words, path)?;
-  }
-  for language in args.ocr_languages {
-    push_ocr_language(&mut inputs.ocr_options, language);
-  }
-  for csv in args.ocr_language_csvs {
-    for language in split_csv(&csv) {
-      push_ocr_language(&mut inputs.ocr_options, language);
-    }
-  }
-  let output = match args.json_out {
-    Some(path) => OutputMode::JsonFile(path),
-    None if args.json => OutputMode::Json,
-    None => OutputMode::Human,
-  };
-  Ok(SongsLsCommand {
-    inputs,
-    target,
-    output,
-  })
+  args.ocr.apply(&mut inputs.ocr_options)?;
+  let output = args.output.mode();
+  Ok(SongsLsCommand { inputs, output })
 }
 
 fn parse_daily_recommended(args: PlaylistPlayArgs) -> Result<DailyRecommendedPlayCommand, String> {
@@ -867,7 +668,7 @@ fn parse_daily_recommended(args: PlaylistPlayArgs) -> Result<DailyRecommendedPla
     return Err("playlist play daily-recommended does not accept --scan-uri because it does not consume a playlist scan".to_string());
   }
   let mut inputs = DailyRecommendedPlayInputs::with_defaults();
-  if let Some(app_id) = args.app_id {
+  if let Some(app_id) = args.app.app_id {
     inputs.app_id = app_id;
   }
   if let Some(max_top_scrolls) = args.max_top_scrolls {
@@ -883,63 +684,21 @@ fn parse_daily_recommended(args: PlaylistPlayArgs) -> Result<DailyRecommendedPla
   if let Some(threshold) = args.play_icon_threshold {
     inputs.play_icon_threshold = threshold;
   }
-  for word in args.custom_words {
-    push_trimmed(&mut inputs.ocr_options.custom_words, word);
-  }
-  for csv in args.custom_word_csvs {
-    push_csv(&mut inputs.ocr_options.custom_words, &csv);
-  }
-  for path in args.custom_word_files {
-    load_custom_words_file(&mut inputs.ocr_options.custom_words, path)?;
-  }
-  for language in args.ocr_languages {
-    push_ocr_language(&mut inputs.ocr_options, language);
-  }
-  for csv in args.ocr_language_csvs {
-    for language in split_csv(&csv) {
-      push_ocr_language(&mut inputs.ocr_options, language);
-    }
-  }
-
-  let output = match args.json_out {
-    Some(path) => OutputMode::JsonFile(path),
-    None if args.json => OutputMode::Json,
-    None => OutputMode::Human,
-  };
+  args.ocr.apply(&mut inputs.ocr_options)?;
+  let output = args.output.mode();
   Ok(DailyRecommendedPlayCommand { inputs, output })
 }
 
 fn parse_playback_status(args: PlaybackStatusArgs) -> Result<PlaybackStatusCommand, String> {
   let mut inputs = PlaybackStatusInputs::with_defaults();
-  if let Some(app_id) = args.app_id {
+  if let Some(app_id) = args.app.app_id {
     inputs.app_id = app_id;
   }
   if let Some(settle_ms) = args.settle_ms {
     inputs.settle_ms = settle_ms;
   }
-  for word in args.custom_words {
-    push_trimmed(&mut inputs.ocr_options.custom_words, word);
-  }
-  for csv in args.custom_word_csvs {
-    push_csv(&mut inputs.ocr_options.custom_words, &csv);
-  }
-  for path in args.custom_word_files {
-    load_custom_words_file(&mut inputs.ocr_options.custom_words, path)?;
-  }
-  for language in args.ocr_languages {
-    push_ocr_language(&mut inputs.ocr_options, language);
-  }
-  for csv in args.ocr_language_csvs {
-    for language in split_csv(&csv) {
-      push_ocr_language(&mut inputs.ocr_options, language);
-    }
-  }
-
-  let output = match args.json_out {
-    Some(path) => OutputMode::JsonFile(path),
-    None if args.json => OutputMode::Json,
-    None => OutputMode::Human,
-  };
+  args.ocr.apply(&mut inputs.ocr_options)?;
+  let output = args.output.mode();
   Ok(PlaybackStatusCommand {
     inputs,
     output,
@@ -1052,15 +811,7 @@ async fn read_canonical_playlist_artifacts(
       )]);
     }
   };
-  match crate::run_artifacts::read_canonical_playlist_artifacts(
-    store,
-    &scan_snapshot,
-    scan_uri,
-    expected_app_id,
-    crate::view_memory::enabled(),
-  )
-  .await
-  {
+  match crate::run_artifacts::read_canonical_playlist_artifacts(store, &scan_snapshot, scan_uri, expected_app_id).await {
     Ok(artifacts) => artifacts,
     Err(error) => {
       crate::run_artifacts::CanonicalPlaylistArtifacts::unavailable(vec![format!("canonical playlist artifact read failed: {error}")])
@@ -1071,6 +822,7 @@ async fn read_canonical_playlist_artifacts(
 #[cfg(test)]
 mod tests {
   use super::*;
+  use clap::CommandFactory;
   use std::path::{Path, PathBuf};
   use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1085,21 +837,14 @@ mod tests {
       keyword: None,
       category: None,
       filter: None,
-      json: false,
-      json_out: None,
+      output: OutputArgs::default(),
       format: None,
       detail: false,
       min_confidence: None,
-      app_id: None,
-      max_scrolls: None,
-      scroll_amount: None,
-      scroll_settle_ms: None,
+      app: AppTargetArgs::default(),
+      scroll: ScrollArgs::default(),
       sidebar_region: None,
-      custom_words: Vec::new(),
-      custom_word_csvs: Vec::new(),
-      custom_word_files: Vec::new(),
-      ocr_languages: Vec::new(),
-      ocr_language_csvs: Vec::new(),
+      ocr: OcrHintArgs::default(),
     }
   }
 
@@ -1151,6 +896,44 @@ mod tests {
     }
   }
 
+  fn assert_command_help_contract(command: &clap::Command, path: &str) {
+    assert!(command.get_about().is_some(), "{path} must describe what the command does");
+    for argument in command.get_arguments().filter(|argument| !argument.is_hide_set()) {
+      assert!(argument.get_help().is_some(), "{path} argument {:?} must have a user-facing description", argument.get_id());
+    }
+    for subcommand in command.get_subcommands() {
+      let subcommand_path = format!("{path} {}", subcommand.get_name());
+      assert_command_help_contract(subcommand, &subcommand_path);
+    }
+  }
+
+  #[test]
+  fn clap_help_contract_describes_every_visible_argument() {
+    assert_command_help_contract(&CliArgs::command(), "auv-netease-music");
+  }
+
+  #[test]
+  fn clap_root_help_introduces_workflows_examples_and_version() {
+    let help = CliArgs::command().render_long_help().to_string();
+
+    assert!(help.contains("typed operations for playlist discovery and playback"));
+    assert!(help.contains("Examples:"));
+    assert!(help.contains("auv-netease-music playlist songs ls"));
+    assert!(help.contains("--version"));
+  }
+
+  #[test]
+  fn clap_playlist_songs_ls_help_has_no_meaningless_target_argument() {
+    let help = CliArgs::try_parse_from(["auv-netease-music", "playlist", "songs", "ls", "--help"])
+      .expect_err("--help exits before command execution")
+      .to_string();
+
+    assert!(help.contains("Usage: auv-netease-music playlist songs ls [OPTIONS]"));
+    assert!(!help.contains("<daily-recommended>"));
+    assert!(help.contains("Scan and list songs from the Daily Recommendations view"));
+    assert!(help.contains("Examples:"));
+  }
+
   #[test]
   fn clap_open_window_maps_windows_launch_options() {
     let parsed = CliArgs::try_parse_from([
@@ -1175,7 +958,7 @@ mod tests {
     assert_eq!(command.inputs.executable, Some(PathBuf::from("C:\\Apps\\cloudmusic.exe")));
     assert_eq!(command.inputs.resolve.process_name, "music.exe");
     assert_eq!(command.inputs.resolve.title, "NetEase");
-    assert!(command.json);
+    assert_eq!(command.output, OutputMode::Json);
   }
 
   struct TempWordsFile {
@@ -1536,13 +1319,12 @@ mod tests {
   }
 
   #[test]
-  fn clap_playlist_songs_ls_daily_recommended_maps_flags() {
+  fn clap_playlist_songs_ls_defaults_to_daily_recommended_and_maps_flags() {
     let command = parse_songs_ls_command(&[
       "auv-netease-music",
       "playlist",
       "songs",
       "ls",
-      "daily-recommended",
       "--json-out",
       "/tmp/songs.json",
       "--max-scrolls",
@@ -1551,7 +1333,6 @@ mod tests {
       "0",
     ]);
 
-    assert_eq!(command.target, SongsLsTarget::DailyRecommended);
     assert_eq!(command.output, OutputMode::JsonFile(PathBuf::from("/tmp/songs.json")));
     assert_eq!(command.inputs.max_scrolls, 42);
     assert_eq!(command.inputs.scroll_settle_ms, 0);
@@ -1583,12 +1364,17 @@ mod tests {
   }
 
   #[test]
-  fn playlist_songs_ls_rejects_unknown_target() {
-    let parsed = CliArgs::try_parse_from(["auv-netease-music", "playlist", "songs", "ls", "current"])
-      .expect("unknown target is rejected by semantic parser");
-    let error = command_from_args(parsed).expect_err("unknown target should fail");
+  fn playlist_songs_ls_rejects_obsolete_target_argument() {
+    let error = CliArgs::try_parse_from([
+      "auv-netease-music",
+      "playlist",
+      "songs",
+      "ls",
+      "daily-recommended",
+    ])
+    .expect_err("songs ls no longer requires a target argument");
 
-    assert_eq!(error, "unsupported songs ls target \"current\"; expected \"daily-recommended\"");
+    assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
   }
 
   #[test]
@@ -1613,6 +1399,16 @@ mod tests {
 
     assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
   }
+
+  #[test]
+  fn clap_invoke_forwards_help_to_the_registry_cli() {
+    let args = CliArgs::try_parse_from(["auv-netease-music", "invoke", "--help"]).expect("invoke help should reach registry CLI");
+
+    let CliSubcommand::Invoke(invoke) = args.command else {
+      panic!("expected invoke command");
+    };
+    assert_eq!(invoke.args, ["--help"]);
+  }
 }
 
 async fn run_playlist(cmd: PlaylistCommand) -> ExitCode {
@@ -1629,9 +1425,7 @@ async fn run_playlist(cmd: PlaylistCommand) -> ExitCode {
   };
 
   let mut scan_uri = None;
-  let gate_enabled = crate::view_memory::enabled();
-
-  match crate::run_artifacts::persist_playlist_ls_artifacts(&scan, &cmd.inputs, gate_enabled).await {
+  match crate::run_artifacts::persist_playlist_ls_artifacts(&scan).await {
     Ok(Some(persisted)) => {
       scan_uri = Some(persisted.scan_uri.to_string());
     }
@@ -1644,39 +1438,9 @@ async fn run_playlist(cmd: PlaylistCommand) -> ExitCode {
 
   let output = build_playlist_json_output(&scan, cmd.query.as_deref(), cmd.output.min_confidence, scan_uri.clone());
 
-  match &cmd.output.mode {
-    OutputMode::Human => {
-      println!(
-        "{}",
-        render_playlist_human_output(&scan, cmd.query.as_deref(), cmd.output.min_confidence, cmd.output.detail, scan_uri.as_deref(),)
-      );
-      ExitCode::SUCCESS
-    }
-    OutputMode::Json => match serde_json::to_string_pretty(&output) {
-      Ok(json) => {
-        println!("{json}");
-        ExitCode::SUCCESS
-      }
-      Err(error) => {
-        eprintln!("encode failed: {error}");
-        ExitCode::from(1)
-      }
-    },
-    OutputMode::JsonFile(path) => {
-      let json = match serde_json::to_string_pretty(&output) {
-        Ok(json) => json,
-        Err(error) => {
-          eprintln!("encode failed: {error}");
-          return ExitCode::from(1);
-        }
-      };
-      if let Err(error) = std::fs::write(path, json) {
-        eprintln!("failed to write {}: {error}", path.display());
-        return ExitCode::from(1);
-      }
-      ExitCode::SUCCESS
-    }
-  }
+  emit(&cmd.output.mode, &output, || {
+    render_playlist_human_output(&scan, cmd.query.as_deref(), cmd.output.min_confidence, cmd.output.detail, scan_uri.as_deref())
+  })
 }
 
 fn run_open_window_command(cmd: OpenWindowCommand) -> ExitCode {
@@ -1688,32 +1452,25 @@ fn run_open_window_command(cmd: OpenWindowCommand) -> ExitCode {
     }
   };
 
-  if cmd.json {
-    match serde_json::to_string_pretty(&result) {
-      Ok(json) => println!("{json}"),
-      Err(error) => {
-        eprintln!("encode failed: {error}");
-        return ExitCode::from(1);
-      }
-    }
-  } else {
-    println!(
+  let success = result.window_found;
+  let exit = emit(&cmd.output, &result, || {
+    let mut lines = vec![format!(
       "window: {}",
       if result.window_found {
         "visible"
       } else {
         "not found"
       }
-    );
+    )];
     if let Some(title) = &result.window_title {
-      println!("title: {title}");
+      lines.push(format!("title: {title}"));
     }
-  }
-
-  if result.window_found {
-    ExitCode::SUCCESS
-  } else {
+    lines.join("\n")
+  });
+  if exit == ExitCode::SUCCESS && !success {
     ExitCode::from(1)
+  } else {
+    exit
   }
 }
 
@@ -1734,36 +1491,7 @@ async fn run_playlist_select_command(cmd: PlaylistSelectCommand, artifacts: &cra
 
   publish_playlist_select_result(&result).await;
 
-  match &cmd.output {
-    OutputMode::Human => {
-      println!("{}", result.to_human_readable());
-      ExitCode::SUCCESS
-    }
-    OutputMode::Json => match serde_json::to_string_pretty(&result) {
-      Ok(json) => {
-        println!("{json}");
-        ExitCode::SUCCESS
-      }
-      Err(error) => {
-        eprintln!("encode failed: {error}");
-        ExitCode::from(1)
-      }
-    },
-    OutputMode::JsonFile(path) => {
-      let json = match serde_json::to_string_pretty(&result) {
-        Ok(json) => json,
-        Err(error) => {
-          eprintln!("encode failed: {error}");
-          return ExitCode::from(1);
-        }
-      };
-      if let Err(error) = std::fs::write(path, json) {
-        eprintln!("failed to write {}: {error}", path.display());
-        return ExitCode::from(1);
-      }
-      ExitCode::SUCCESS
-    }
-  }
+  emit(&cmd.output, &result, || result.to_human_readable().to_string())
 }
 
 fn run_playlist_play_command(cmd: PlaylistPlayCommand, artifacts: &crate::run_artifacts::CanonicalPlaylistArtifacts) -> ExitCode {
@@ -1781,36 +1509,7 @@ fn run_playlist_play_command(cmd: PlaylistPlayCommand, artifacts: &crate::run_ar
     }
   };
 
-  match &cmd.output {
-    OutputMode::Human => {
-      println!("{}", result.to_human_readable());
-      ExitCode::SUCCESS
-    }
-    OutputMode::Json => match serde_json::to_string_pretty(&result) {
-      Ok(json) => {
-        println!("{json}");
-        ExitCode::SUCCESS
-      }
-      Err(error) => {
-        eprintln!("encode failed: {error}");
-        ExitCode::from(1)
-      }
-    },
-    OutputMode::JsonFile(path) => {
-      let json = match serde_json::to_string_pretty(&result) {
-        Ok(json) => json,
-        Err(error) => {
-          eprintln!("encode failed: {error}");
-          return ExitCode::from(1);
-        }
-      };
-      if let Err(error) = std::fs::write(path, json) {
-        eprintln!("failed to write {}: {error}", path.display());
-        return ExitCode::from(1);
-      }
-      ExitCode::SUCCESS
-    }
-  }
+  emit(&cmd.output, &result, || result.to_human_readable().to_string())
 }
 
 #[cfg(target_os = "macos")]
@@ -1829,36 +1528,7 @@ fn run_now_playing(cmd: NowPlayingCommand) -> ExitCode {
   };
   let output = crate::output::build_now_playing_output(&state);
 
-  match &cmd.output {
-    OutputMode::Human => {
-      println!("{}", auv_media_macos::output::render_human_summary(&state));
-      ExitCode::SUCCESS
-    }
-    OutputMode::Json => match serde_json::to_string_pretty(&output) {
-      Ok(json) => {
-        println!("{json}");
-        ExitCode::SUCCESS
-      }
-      Err(error) => {
-        eprintln!("encode failed: {error}");
-        ExitCode::from(1)
-      }
-    },
-    OutputMode::JsonFile(path) => {
-      let json = match serde_json::to_string_pretty(&output) {
-        Ok(json) => json,
-        Err(error) => {
-          eprintln!("encode failed: {error}");
-          return ExitCode::from(1);
-        }
-      };
-      if let Err(error) = std::fs::write(path, json) {
-        eprintln!("failed to write {}: {error}", path.display());
-        return ExitCode::from(1);
-      }
-      ExitCode::SUCCESS
-    }
-  }
+  emit(&cmd.output, &output, || auv_media_macos::output::render_human_summary(&state))
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -1978,36 +1648,7 @@ fn run_daily_recommended(cmd: DailyRecommendedPlayCommand) -> ExitCode {
     }
   };
 
-  match &cmd.output {
-    OutputMode::Human => {
-      println!("{}", result.to_human_readable());
-      ExitCode::SUCCESS
-    }
-    OutputMode::Json => match serde_json::to_string_pretty(&result) {
-      Ok(json) => {
-        println!("{json}");
-        ExitCode::SUCCESS
-      }
-      Err(error) => {
-        eprintln!("encode failed: {error}");
-        ExitCode::from(1)
-      }
-    },
-    OutputMode::JsonFile(path) => {
-      let json = match serde_json::to_string_pretty(&result) {
-        Ok(json) => json,
-        Err(error) => {
-          eprintln!("encode failed: {error}");
-          return ExitCode::from(1);
-        }
-      };
-      if let Err(error) = std::fs::write(path, json) {
-        eprintln!("failed to write {}: {error}", path.display());
-        return ExitCode::from(1);
-      }
-      ExitCode::SUCCESS
-    }
-  }
+  emit(&cmd.output, &result, || result.to_human_readable().to_string())
 }
 
 fn run_playback_status(cmd: PlaybackStatusCommand) -> ExitCode {
@@ -2019,88 +1660,18 @@ fn run_playback_status(cmd: PlaybackStatusCommand) -> ExitCode {
     }
   };
 
-  match &cmd.output {
-    OutputMode::Human => {
-      println!("{}", result.to_human_readable(cmd.wide));
-      ExitCode::SUCCESS
-    }
-    OutputMode::Json => match serde_json::to_string_pretty(&result.to_json()) {
-      Ok(json) => {
-        println!("{json}");
-        ExitCode::SUCCESS
-      }
-      Err(error) => {
-        eprintln!("encode failed: {error}");
-        ExitCode::from(1)
-      }
-    },
-    OutputMode::JsonFile(path) => {
-      let json = match serde_json::to_string_pretty(&result.to_json()) {
-        Ok(json) => json,
-        Err(error) => {
-          eprintln!("encode failed: {error}");
-          return ExitCode::from(1);
-        }
-      };
-      if let Err(error) = std::fs::write(path, json) {
-        eprintln!("failed to write {}: {error}", path.display());
-        return ExitCode::from(1);
-      }
-      ExitCode::SUCCESS
-    }
-  }
+  let json = result.to_json();
+  emit(&cmd.output, &json, || result.to_human_readable(cmd.wide).to_string())
 }
 
 fn run_songs_ls(cmd: SongsLsCommand) -> ExitCode {
-  let result = match cmd.target {
-    SongsLsTarget::DailyRecommended => match run_daily_recommended_songs_scan(&cmd.inputs) {
-      Ok(result) => result,
-      Err(error) => {
-        eprintln!("songs ls failed: {error}");
-        return ExitCode::from(1);
-      }
-    },
+  let result = match run_daily_recommended_songs_scan(&cmd.inputs) {
+    Ok(result) => result,
+    Err(error) => {
+      eprintln!("songs ls failed: {error}");
+      return ExitCode::from(1);
+    }
   };
 
-  match &cmd.output {
-    OutputMode::Human => {
-      println!("NetEase song list scan");
-      println!("target: {}", result.target);
-      println!("items: {}", result.items.len());
-      println!("observations: {}", result.observations.len());
-      if result.known_limits.is_empty() {
-        println!("known_limits: (none)");
-      } else {
-        println!("known_limits:");
-        for limit in &result.known_limits {
-          println!("  - {limit}");
-        }
-      }
-      ExitCode::SUCCESS
-    }
-    OutputMode::Json => match serde_json::to_string_pretty(&result) {
-      Ok(json) => {
-        println!("{json}");
-        ExitCode::SUCCESS
-      }
-      Err(error) => {
-        eprintln!("encode failed: {error}");
-        ExitCode::from(1)
-      }
-    },
-    OutputMode::JsonFile(path) => {
-      let json = match serde_json::to_string_pretty(&result) {
-        Ok(json) => json,
-        Err(error) => {
-          eprintln!("encode failed: {error}");
-          return ExitCode::from(1);
-        }
-      };
-      if let Err(error) = std::fs::write(path, json) {
-        eprintln!("failed to write {}: {error}", path.display());
-        return ExitCode::from(1);
-      }
-      ExitCode::SUCCESS
-    }
-  }
+  emit(&cmd.output, &result, || render_song_list_human(&result))
 }

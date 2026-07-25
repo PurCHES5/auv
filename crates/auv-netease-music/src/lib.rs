@@ -9,7 +9,7 @@ pub mod invoke;
 pub mod output;
 pub mod run_artifacts;
 pub mod scroll;
-pub mod view_memory;
+mod telemetry;
 pub mod view_parsers;
 pub mod views;
 pub mod windows;

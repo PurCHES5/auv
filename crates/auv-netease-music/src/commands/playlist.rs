@@ -22,8 +22,6 @@ pub struct PlaylistSelectResult {
   pub verification: PlaylistSelectVerification,
   pub diagnostics: Vec<ParserDiagnostic>,
   pub known_limits: Vec<String>,
-  #[serde(default, skip_serializing_if = "Option::is_none")]
-  pub reacquire: Option<crate::view_memory::PlaylistReacquireResult>,
 }
 
 impl PlaylistSelectResult {
@@ -101,7 +99,6 @@ const PLAYLIST_SELECT_TARGET_FROM_RUN_ARTIFACT_MARKER: &str = "playlist_select_t
 pub struct PlaylistPlayCandidate {
   scan: crate::PlaylistSidebarScan,
   target: PlaylistSelectTarget,
-  memory: Option<auv_view::memory::ViewMemory>,
 }
 
 #[cfg(feature = "tracing")]
@@ -114,12 +111,8 @@ impl PlaylistPlayCandidate {
     &self.target
   }
 
-  pub fn memory(&self) -> Option<&auv_view::memory::ViewMemory> {
-    self.memory.as_ref()
-  }
-
-  fn into_parts(self) -> (crate::PlaylistSidebarScan, PlaylistSelectTarget, Option<auv_view::memory::ViewMemory>) {
-    (self.scan, self.target, self.memory)
+  fn into_parts(self) -> (crate::PlaylistSidebarScan, PlaylistSelectTarget) {
+    (self.scan, self.target)
   }
 }
 
@@ -131,11 +124,7 @@ pub fn resolve_playlist_play_candidate(artifacts: &CanonicalPlaylistArtifacts, c
     .cloned()
     .ok_or_else(|| "playlist candidate resolution requires a caller-read canonical playlist scan URI".to_string())?;
   let target = scan.select_target_by_candidate_id(candidate_id)?;
-  Ok(PlaylistPlayCandidate {
-    scan,
-    target,
-    memory: artifacts.memory().cloned(),
-  })
+  Ok(PlaylistPlayCandidate { scan, target })
 }
 
 #[cfg(any(feature = "tracing", test))]
@@ -147,22 +136,19 @@ enum PlaylistSelectTargetResolveSource {
 
 #[cfg(any(feature = "tracing", test))]
 fn playlist_select_target_resolve_source(
-  gate_enabled: bool,
   run_artifact: Option<&crate::PlaylistSidebarScan>,
   query: &str,
 ) -> PlaylistSelectTargetResolveSource {
-  if gate_enabled {
-    if let Some(scan) = run_artifact {
-      let sidebar = crate::views::sidebar::SidebarView::from_projection(scan.projection().clone());
-      let resolution = sidebar.playlist_query_resolution(query);
-      // NOTICE(a7b-run-artifact-resolve-v1): query resolve only trusts a
-      // canonical run artifact when the query is unique-exact. A
-      // unique-contains match still falls back to live scan so A7 does not
-      // silently widen `playlist select/play <query>` semantics relative to
-      // `playlist ls`.
-      if crate::views::query_match::playlist_query_resolution_is_unique_exact(resolution) {
-        return PlaylistSelectTargetResolveSource::RunArtifact;
-      }
+  if let Some(scan) = run_artifact {
+    let sidebar = crate::views::sidebar::SidebarView::from_projection(scan.projection().clone());
+    let resolution = sidebar.playlist_query_resolution(query);
+    // NOTICE(a7b-run-artifact-resolve-v1): query resolve only trusts a
+    // canonical run artifact when the query is unique-exact. A
+    // unique-contains match still falls back to live scan so A7 does not
+    // silently widen `playlist select/play <query>` semantics relative to
+    // `playlist ls`.
+    if crate::views::query_match::playlist_query_resolution_is_unique_exact(resolution) {
+      return PlaylistSelectTargetResolveSource::RunArtifact;
     }
   }
   PlaylistSelectTargetResolveSource::LiveScan
@@ -863,46 +849,32 @@ mod tests {
   }
 
   #[test]
-  fn playlist_select_target_resolve_source_uses_run_artifact_when_gate_and_unique_match() {
+  fn playlist_select_target_resolve_source_uses_run_artifact_for_unique_match() {
     let scan = scan_with_playlist_labels(&["43", "3"]);
-    assert_eq!(playlist_select_target_resolve_source(true, Some(&scan), "3"), PlaylistSelectTargetResolveSource::RunArtifact);
-  }
-
-  #[test]
-  fn playlist_select_target_resolve_source_live_scan_when_gate_off() {
-    let scan = scan_with_playlist_labels(&["3"]);
-    assert_eq!(playlist_select_target_resolve_source(false, Some(&scan), "3"), PlaylistSelectTargetResolveSource::LiveScan);
+    assert_eq!(playlist_select_target_resolve_source(Some(&scan), "3"), PlaylistSelectTargetResolveSource::RunArtifact);
   }
 
   #[test]
   fn playlist_select_target_resolve_source_live_scan_when_run_artifact_missing() {
-    assert_eq!(playlist_select_target_resolve_source(true, None, "3"), PlaylistSelectTargetResolveSource::LiveScan);
+    assert_eq!(playlist_select_target_resolve_source(None, "3"), PlaylistSelectTargetResolveSource::LiveScan);
   }
 
   #[test]
   fn playlist_select_target_resolve_source_live_scan_when_select_target_ambiguous() {
     let scan = scan_with_playlist_labels(&["43", "13"]);
-    assert_eq!(playlist_select_target_resolve_source(true, Some(&scan), "3"), PlaylistSelectTargetResolveSource::LiveScan);
+    assert_eq!(playlist_select_target_resolve_source(Some(&scan), "3"), PlaylistSelectTargetResolveSource::LiveScan);
   }
 
   #[test]
   fn playlist_select_target_resolve_source_live_scan_when_unique_contains_only() {
     let scan = scan_with_playlist_labels(&["43"]);
-    assert_eq!(playlist_select_target_resolve_source(true, Some(&scan), "3"), PlaylistSelectTargetResolveSource::LiveScan);
+    assert_eq!(playlist_select_target_resolve_source(Some(&scan), "3"), PlaylistSelectTargetResolveSource::LiveScan);
   }
 
   #[test]
   fn playlist_select_target_resolve_source_live_scan_when_select_target_miss() {
     let scan = scan_with_playlist_labels(&["43", "13"]);
-    assert_eq!(playlist_select_target_resolve_source(true, Some(&scan), "99"), PlaylistSelectTargetResolveSource::LiveScan);
-  }
-
-  #[test]
-  fn playlist_select_target_resolve_source_ignores_memory_presence() {
-    // `playlist_select_target_resolve_source` only reads gate + canonical scan + query;
-    // view-memory presence is not an input to this resolver.
-    let scan = scan_with_playlist_labels(&["3"]);
-    assert_eq!(playlist_select_target_resolve_source(true, Some(&scan), "3"), PlaylistSelectTargetResolveSource::RunArtifact);
+    assert_eq!(playlist_select_target_resolve_source(Some(&scan), "99"), PlaylistSelectTargetResolveSource::LiveScan);
   }
 }
 
@@ -948,7 +920,7 @@ pub(crate) fn run_playlist_play_candidate_with_artifacts(
 pub fn run_playlist_select(inputs: &Inputs, query: &str) -> Result<PlaylistSelectResult, String> {
   let scan = run_live_scan_until_query(inputs, query)?;
   let target = scan.select_target(query)?;
-  run_playlist_select_resolved(inputs, query, scan, target, false, None, Vec::new())
+  run_playlist_select_resolved(inputs, query, scan, target, false, Vec::new())
 }
 
 #[cfg(all(target_os = "macos", feature = "tracing"))]
@@ -958,7 +930,7 @@ pub(crate) fn run_playlist_select_with_artifacts(
   artifacts: &CanonicalPlaylistArtifacts,
 ) -> Result<PlaylistSelectResult, String> {
   let (scan, target, target_from_run_artifact) = resolve_playlist_target_for_query(inputs, query, artifacts)?;
-  run_playlist_select_resolved(inputs, query, scan, target, target_from_run_artifact, artifacts.memory(), artifacts.read_limits().to_vec())
+  run_playlist_select_resolved(inputs, query, scan, target, target_from_run_artifact, artifacts.read_limits().to_vec())
 }
 
 #[cfg(all(target_os = "macos", feature = "tracing"))]
@@ -967,8 +939,7 @@ fn resolve_playlist_target_for_query(
   query: &str,
   artifacts: &CanonicalPlaylistArtifacts,
 ) -> Result<(crate::PlaylistSidebarScan, PlaylistSelectTarget, bool), String> {
-  let gate_enabled = crate::view_memory::enabled();
-  match playlist_select_target_resolve_source(gate_enabled, artifacts.scan(), query) {
+  match playlist_select_target_resolve_source(artifacts.scan(), query) {
     PlaylistSelectTargetResolveSource::RunArtifact => {
       let scan = artifacts.scan().cloned().expect("RunArtifact path requires caller-read scan");
       let target = scan.select_target(query)?;
@@ -989,12 +960,11 @@ fn run_playlist_select_resolved(
   scan: crate::PlaylistSidebarScan,
   target: PlaylistSelectTarget,
   target_from_run_artifact: bool,
-  memory: Option<&auv_view::memory::ViewMemory>,
   artifact_read_limits: Vec<String>,
 ) -> Result<PlaylistSelectResult, String> {
   use crate::LIVE_TOP_SEEK_SCROLL_DELTA_MULTIPLIER;
   use crate::delivery_path_label;
-  use crate::run_artifacts::{PlaylistSelectInputDelivered, PlaylistTargetResolved};
+  use crate::telemetry::{PlaylistSelectInputDelivered, PlaylistTargetResolved};
   use crate::view_parsers::sidebar::region::{broad_sidebar_probe_bounds, sidebar_scroll_anchor};
   use crate::view_parsers::sidebar::{
     SidebarTargetProbeScrollContext, SidebarTargetSeekStep, capture_sidebar_target_probe, next_sidebar_target_seek_step,
@@ -1016,7 +986,6 @@ fn run_playlist_select_resolved(
     session.window().resolve(Window::main_visible().owned_by(app)).map_err(|error| format!("failed to resolve NetEase window: {error}"))?;
   let window_size = Size::new(window.frame.size.width, window.frame.size.height);
   let sidebar_bounds = scan.sidebar_region().bounds.unwrap_or_else(|| broad_sidebar_probe_bounds(window_size));
-  let sidebar_baseline_width = Some(sidebar_bounds.width.round().max(1.0) as u32);
   let sidebar_anchor = sidebar_scroll_anchor(sidebar_bounds);
   let mut diagnostics = scan.diagnostics().to_vec();
   let mut known_limits = scan.known_limits().to_vec();
@@ -1024,60 +993,13 @@ fn run_playlist_select_resolved(
   if target_from_run_artifact {
     known_limits.insert(0, PLAYLIST_SELECT_TARGET_FROM_RUN_ARTIFACT_MARKER.to_string());
   }
-  let mut reacquire_result = None;
-  let mut skip_rescan_replay = false;
   let mut click_bounds = target_bounds;
-
-  if crate::view_memory::enabled() {
-    if let Some(memory) = memory {
-      let reacquire_bounds = memory
-        .scope_snapshot
-        .region_bounds_window_local
-        .width
-        .is_finite()
-        .then_some(memory.scope_snapshot.region_bounds_window_local)
-        .unwrap_or(sidebar_bounds);
-      let reacquire_anchor = sidebar_scroll_anchor(reacquire_bounds);
-      let read_config = auv_view::memory::MemoryReadConfig {
-        now_millis: crate::view_memory::system_time_millis(),
-        ..Default::default()
-      };
-      let reacquire = crate::view_parsers::sidebar::reacquire::try_reacquire_for_target(
-        inputs,
-        &session,
-        &window,
-        reacquire_bounds,
-        reacquire_anchor,
-        &memory,
-        &target,
-        &read_config,
-        sidebar_baseline_width,
-      );
-      match &reacquire {
-        crate::view_memory::PlaylistReacquireResult::Reacquired { bounds, .. } => {
-          click_bounds = *bounds;
-          skip_rescan_replay = true;
-          auv_tracing::emit_event!(PlaylistTargetResolved::ViewMemory {
-            bounds: click_bounds
-          });
-        }
-        crate::view_memory::PlaylistReacquireResult::Stale { reason, .. } => {
-          known_limits.push(format!("view-memory stale at reacquire ({}) — falling back to rescan replay", reason.as_str()));
-        }
-        crate::view_memory::PlaylistReacquireResult::NotFound { .. } => {
-          known_limits.push("view-memory reacquire missed target — falling back to rescan replay".to_string());
-        }
-      }
-      reacquire_result = Some(reacquire);
-    } else {
-      known_limits.push("canonical view-memory artifact unavailable; using rescan replay".to_string());
-    }
-  }
-
-  if !skip_rescan_replay {
-    // NOTICE(netease-playlist-select-reacquire): rescan replay path when view-memory
-    // is disabled, not loaded, or reacquire misses. Rewinds to top then scroll-seeks
-    // the target label instead of replaying a stale observation_index page count.
+  {
+    // NOTICE(netease-view-memory-retired): the default-off SceneBridge memory
+    // experiment was removed because it had no current production consumer.
+    // Reintroduce a memory shortcut only with an owner-approved runtime/read-side contract.
+    // Rescan replay rewinds to the top and scroll-seeks the target label instead
+    // of replaying a stale observation-index page count.
     // NOTICE(a6c-5): top rewind step size matches live top seek; motion stop deferred.
     let top_scroll_delta = inputs.scroll_amount * LIVE_TOP_SEEK_SCROLL_DELTA_MULTIPLIER;
     let top_scrolls = top_seek_scroll_budget(inputs.max_scrolls);
@@ -1366,7 +1288,6 @@ fn run_playlist_select_resolved(
     verification,
     diagnostics,
     known_limits,
-    reacquire: reacquire_result,
   })
 }
 
@@ -1382,7 +1303,7 @@ fn verify_playlist_select_title(
 ) -> Result<PlaylistSelectVerification, String> {
   auv_tracing::in_span!("auv.netease.playlist_select.verification", || {
     let capture = session.window().capture(window).map_err(|error| format!("playlist select verification capture failed: {error}"))?;
-    crate::run_artifacts::emit_png("auv.netease.playlist_select.verification_capture", &capture.image);
+    crate::telemetry::png_artifact("auv.netease.playlist_select.verification_capture", &capture.image);
 
     let ocr_options = build_playlist_select_verification_ocr_options(inputs, target_label);
     let ocr_tiers: [(PlaylistSelectTitleOcrTier, fn(ViewBounds, auv_driver::Size) -> auv_driver::RatioRect); 4] = [
@@ -1424,7 +1345,7 @@ fn verify_playlist_select_title(
         .recognize_text_in_capture_with_options(&capture, sidebar_ratio, ocr_options.clone())
         .map_err(|error| format!("playlist select verification sidebar echo OCR failed: {error}"))?;
       let sidebar_recognition = crate::recognition_in_window_space(sidebar_recognition, &capture);
-      crate::run_artifacts::emit_json("auv.netease.playlist_select.sidebar_echo_recognition", &sidebar_recognition);
+      crate::telemetry::json_artifact("auv.netease.playlist_select.sidebar_echo_recognition", &sidebar_recognition);
       if let Some(echo_title) = playlist_select_verification_sidebar_row_echo_from_recognition(
         &sidebar_recognition,
         &recognition,
@@ -1438,7 +1359,7 @@ fn verify_playlist_select_title(
       }
     }
 
-    crate::run_artifacts::emit_json("auv.netease.playlist_select.recognition", &recognition);
+    crate::telemetry::json_artifact("auv.netease.playlist_select.recognition", &recognition);
 
     let recognized_region_count = recognition.regions.len();
     let main_pane_match_count = playlist_select_verification_count_main_pane_guard_regions(&recognition, window_size, sidebar_bounds);
@@ -1470,7 +1391,7 @@ fn verify_playlist_select_title(
 pub fn run_playlist_play(inputs: &Inputs, query: &str) -> Result<PlaylistPlayResult, String> {
   let scan = run_live_scan_until_query(inputs, query)?;
   let target = scan.select_target(query)?;
-  run_playlist_play_resolved(inputs, query, scan, target, false, None, Vec::new())
+  run_playlist_play_resolved(inputs, query, scan, target, false, Vec::new())
 }
 
 #[cfg(all(target_os = "macos", feature = "tracing"))]
@@ -1480,7 +1401,7 @@ pub(crate) fn run_playlist_play_with_artifacts(
   artifacts: &CanonicalPlaylistArtifacts,
 ) -> Result<PlaylistPlayResult, String> {
   let (scan, target, target_from_run_artifact) = resolve_playlist_target_for_query(inputs, query, artifacts)?;
-  run_playlist_play_resolved(inputs, query, scan, target, target_from_run_artifact, artifacts.memory(), artifacts.read_limits().to_vec())
+  run_playlist_play_resolved(inputs, query, scan, target, target_from_run_artifact, artifacts.read_limits().to_vec())
 }
 
 #[cfg(all(target_os = "macos", feature = "tracing"))]
@@ -1489,8 +1410,8 @@ pub(crate) fn run_playlist_play_candidate_with_artifacts(
   candidate_id: &str,
   artifacts: &CanonicalPlaylistArtifacts,
 ) -> Result<PlaylistPlayResult, String> {
-  let (scan, target, memory) = resolve_playlist_play_candidate(artifacts, candidate_id)?.into_parts();
-  run_playlist_play_resolved(inputs, candidate_id, scan, target, true, memory.as_ref(), artifacts.read_limits().to_vec())
+  let (scan, target) = resolve_playlist_play_candidate(artifacts, candidate_id)?.into_parts();
+  run_playlist_play_resolved(inputs, candidate_id, scan, target, true, artifacts.read_limits().to_vec())
 }
 
 #[cfg(target_os = "macos")]
@@ -1500,15 +1421,14 @@ fn run_playlist_play_resolved(
   scan: crate::PlaylistSidebarScan,
   target: PlaylistSelectTarget,
   target_from_run_artifact: bool,
-  memory: Option<&auv_view::memory::ViewMemory>,
   artifact_read_limits: Vec<String>,
 ) -> Result<PlaylistPlayResult, String> {
   use crate::commands::daily_recommended::best_text_match;
-  use crate::run_artifacts::PlaylistPlayInputDelivered;
+  use crate::telemetry::PlaylistPlayInputDelivered;
   use auv_driver::selector::{App, Window};
   use auv_driver::{ActivationPolicy, Click, InputActionResult, InputDeliveryPath, PrepareForInputOptions, RatioRect, Size, WindowPoint};
 
-  let select = run_playlist_select_resolved(inputs, query, scan, target, target_from_run_artifact, memory, artifact_read_limits)?;
+  let select = run_playlist_select_resolved(inputs, query, scan, target, target_from_run_artifact, artifact_read_limits)?;
   if !select.verification.passed() {
     return Err(format!("playlist select verification failed before play: observed_title={:?}", select.verification.observed_title()));
   }
@@ -1522,7 +1442,7 @@ fn run_playlist_play_resolved(
   let mut known_limits = select.known_limits.clone();
 
   let capture = session.window().capture(&window).map_err(|error| format!("playlist play-all capture failed: {error}"))?;
-  crate::run_artifacts::emit_png("auv.netease.playlist_play.target_capture", &capture.image);
+  crate::telemetry::png_artifact("auv.netease.playlist_play.target_capture", &capture.image);
   let recognition = session
     .vision()
     .recognize_text_in_capture_with_options(&capture, RatioRect::new(0.0, 0.0, 1.0, 1.0), inputs.ocr_options.clone())
@@ -1610,7 +1530,7 @@ fn capture_playlist_play_verification(
 
   auv_tracing::in_span!("auv.netease.playlist_play.verification", || {
     let capture = session.window().capture(window).map_err(|error| format!("playlist play verification capture failed: {error}"))?;
-    crate::run_artifacts::emit_png("auv.netease.playlist_play.verification_capture", &capture.image);
+    crate::telemetry::png_artifact("auv.netease.playlist_play.verification_capture", &capture.image);
     let control_state = classify_bottom_playback_control_state(&capture.image);
     let bottom_text = recognize_playlist_bottom_text(session, &capture, inputs);
     let passed = playlist_play_verified_from_bottom_probe(control_state, before_bottom_text, bottom_text.as_deref());
@@ -1625,7 +1545,7 @@ fn capture_playlist_play_verification(
         observed_bottom_text: bottom_text,
       }
     };
-    crate::run_artifacts::emit_json(
+    crate::telemetry::json_artifact(
       "auv.netease.playlist_play.verification",
       &PlaylistPlayVerificationArtifact {
         before_bottom_text,

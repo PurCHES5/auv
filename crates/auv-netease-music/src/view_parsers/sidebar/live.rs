@@ -449,15 +449,15 @@ impl LiveSidebarObserver {
 
   fn publish_observation_artifacts(&mut self, image: RgbaImage, recognition: TextRecognition, observation: SidebarViewportObservation) {
     let sidebar_bounds = self.sidebar_bounds;
-    if let Some(task) = crate::run_artifacts::spawn_artifact_task(move || {
-      crate::run_artifacts::emit_png("auv.netease.sidebar.window_capture", &image);
+    if let Some(task) = crate::telemetry::spawn_artifact_task(move || {
+      crate::telemetry::png_artifact("auv.netease.sidebar.window_capture", &image);
 
       let mut overlay = image;
       draw_overlay(&mut overlay, sidebar_bounds, &observation);
-      crate::run_artifacts::emit_png("auv.netease.sidebar.overlay", &overlay);
+      crate::telemetry::png_artifact("auv.netease.sidebar.overlay", &overlay);
 
-      crate::run_artifacts::emit_json("auv.netease.sidebar.recognition", &recognition);
-      crate::run_artifacts::emit_json("auv.netease.sidebar.viewport_observation", &observation);
+      crate::telemetry::json_artifact("auv.netease.sidebar.recognition", &recognition);
+      crate::telemetry::json_artifact("auv.netease.sidebar.viewport_observation", &observation);
     }) {
       self.pending_artifacts.push(task);
     }
@@ -466,7 +466,7 @@ impl LiveSidebarObserver {
   fn finish_artifacts(self) {
     for handle in self.pending_artifacts {
       if handle.join().is_err() {
-        crate::run_artifacts::preparation_failed("auv.netease.sidebar.observation_artifacts", "background artifact preparation panicked");
+        crate::telemetry::preparation_failed("auv.netease.sidebar.observation_artifacts", "background artifact preparation panicked");
       }
     }
   }
