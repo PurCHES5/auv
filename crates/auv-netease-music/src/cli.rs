@@ -353,8 +353,8 @@ struct PlaylistPlayArgs {
   #[command(flatten)]
   scroll: ScrollArgs,
   /// Normalized sidebar rectangle as x,y,width,height.
-  #[arg(long = "sidebar-region")]
-  sidebar_region: Option<String>,
+  #[arg(long = "sidebar-region", value_parser = parse_ratio_region)]
+  sidebar_region: Option<auv_driver::RatioRect>,
   /// Maximum upward scroll steps used only by `daily-recommended`.
   #[arg(long = "max-top-scrolls")]
   max_top_scrolls: Option<NonZeroUsize>,
@@ -404,8 +404,8 @@ struct PlaylistLsArgs {
   #[command(flatten)]
   scroll: ScrollArgs,
   /// Normalized sidebar rectangle as x,y,width,height.
-  #[arg(long = "sidebar-region")]
-  sidebar_region: Option<String>,
+  #[arg(long = "sidebar-region", value_parser = parse_ratio_region)]
+  sidebar_region: Option<auv_driver::RatioRect>,
   #[command(flatten)]
   ocr: OcrHintArgs,
 }
@@ -428,8 +428,8 @@ struct PlaylistSelectArgs {
   #[command(flatten)]
   scroll: ScrollArgs,
   /// Normalized sidebar rectangle as x,y,width,height.
-  #[arg(long = "sidebar-region")]
-  sidebar_region: Option<String>,
+  #[arg(long = "sidebar-region", value_parser = parse_ratio_region)]
+  sidebar_region: Option<auv_driver::RatioRect>,
   #[command(flatten)]
   ocr: OcrHintArgs,
 }
@@ -541,9 +541,7 @@ fn parse_playlist_ls(args: PlaylistLsArgs) -> Result<PlaylistCommand, String> {
   if let Some(category) = args.category {
     inputs.category = category;
   }
-  if let Some(sidebar_region) = args.sidebar_region {
-    inputs.sidebar_region = Some(parse_ratio_region(sidebar_region)?);
-  }
+  inputs.sidebar_region = args.sidebar_region;
   args.ocr.apply(&mut inputs.ocr_options)?;
   let query = args.filter.or(query);
   let mode = args.output.mode_with_json_alias(args.format == Some(PlaylistOutputFormat::Json));
@@ -573,9 +571,7 @@ fn parse_playlist_select(args: PlaylistSelectArgs) -> Result<PlaylistSelectComma
   if let Some(scroll_settle_ms) = args.scroll.scroll_settle_ms {
     inputs.scroll_settle_ms = scroll_settle_ms;
   }
-  if let Some(sidebar_region) = args.sidebar_region {
-    inputs.sidebar_region = Some(parse_ratio_region(sidebar_region)?);
-  }
+  inputs.sidebar_region = args.sidebar_region;
   args.ocr.apply(&mut inputs.ocr_options)?;
   let output = args.output.mode();
   Ok(PlaylistSelectCommand {
@@ -631,9 +627,7 @@ fn parse_playlist_play_query(args: PlaylistPlayArgs) -> Result<PlaylistPlayComma
   if let Some(scroll_settle_ms) = args.scroll.scroll_settle_ms {
     inputs.scroll_settle_ms = scroll_settle_ms;
   }
-  if let Some(sidebar_region) = args.sidebar_region {
-    inputs.sidebar_region = Some(parse_ratio_region(sidebar_region)?);
-  }
+  inputs.sidebar_region = args.sidebar_region;
   args.ocr.apply(&mut inputs.ocr_options)?;
   let output = args.output.mode();
   Ok(PlaylistPlayCommand {
@@ -1160,7 +1154,21 @@ mod tests {
     assert_eq!(command.inputs.max_scrolls, 9);
     assert_eq!(command.inputs.scroll_amount, 512.0);
     assert_eq!(command.inputs.scroll_settle_ms, 750);
-    assert_eq!(command.inputs.sidebar_region, Some(parse_ratio_region("0.1,0.2,0.3,0.4".to_string()).expect("region should parse")));
+    assert_eq!(command.inputs.sidebar_region, Some(auv_driver::RatioRect::new(0.1, 0.2, 0.3, 0.4)));
+  }
+
+  #[test]
+  fn clap_playlist_rejects_invalid_sidebar_region_during_argument_parsing() {
+    let error = CliArgs::try_parse_from([
+      "auv-netease-music",
+      "playlist",
+      "ls",
+      "--sidebar-region",
+      "0.1,0.2,0,0.4",
+    ])
+    .expect_err("invalid sidebar region should fail clap parsing");
+
+    assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
   }
 
   #[test]

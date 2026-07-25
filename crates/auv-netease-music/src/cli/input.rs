@@ -27,21 +27,23 @@ pub(super) struct ScrollArgs {
 
 #[derive(Clone, Debug, Default, Args)]
 pub(super) struct OcrHintArgs {
-  /// Add one expected word to OCR recognition; may be repeated.
-  #[arg(long = "hint-ocr-custom-word")]
+  /// Add expected OCR words; accepts commas and may be repeated.
+  #[arg(
+    long = "hint-ocr-custom-word",
+    visible_alias = "hint-ocr-custom-words",
+    value_delimiter = ','
+  )]
   custom_words: Vec<String>,
-  /// Add comma-separated expected OCR words; may be repeated.
-  #[arg(long = "hint-ocr-custom-words")]
-  custom_word_csvs: Vec<String>,
   /// Load expected OCR words from a UTF-8 file, one word per line.
   #[arg(long = "hint-ocr-custom-words-file")]
   custom_word_files: Vec<PathBuf>,
-  /// Add one OCR recognition language tag; may be repeated.
-  #[arg(long = "hint-ocr-language")]
+  /// Add OCR recognition language tags; accepts commas and may be repeated.
+  #[arg(
+    long = "hint-ocr-language",
+    visible_alias = "hint-ocr-languages",
+    value_delimiter = ','
+  )]
   ocr_languages: Vec<String>,
-  /// Add comma-separated OCR recognition language tags; may be repeated.
-  #[arg(long = "hint-ocr-languages")]
-  ocr_language_csvs: Vec<String>,
 }
 
 impl OcrHintArgs {
@@ -50,24 +52,18 @@ impl OcrHintArgs {
     for word in self.custom_words {
       push_trimmed(&mut options.custom_words, word);
     }
-    for csv in self.custom_word_csvs {
-      push_csv(&mut options.custom_words, &csv);
-    }
     for path in self.custom_word_files {
       load_custom_words_file(&mut options.custom_words, path)?;
     }
     for language in self.ocr_languages {
       push_ocr_language(options, language);
     }
-    for csv in self.ocr_language_csvs {
-      for language in split_csv(&csv) {
-        push_ocr_language(options, language);
-      }
-    }
     Ok(())
   }
 }
 
+// NOTICE: clap's built-in ranged parsers cover integer types, so these
+// finite floating-point ranges remain explicit CLI validation.
 pub(super) fn positive_scroll_amount(raw: &str) -> Result<f64, String> {
   let parsed = raw.parse::<f64>().map_err(|_| "expects a number".to_string())?;
   if !parsed.is_finite() || parsed <= 0.0 {
@@ -84,7 +80,7 @@ pub(super) fn zero_to_one(raw: &str) -> Result<f64, String> {
   Ok(parsed)
 }
 
-pub(super) fn parse_ratio_region(value: String) -> Result<RatioRect, String> {
+pub(super) fn parse_ratio_region(value: &str) -> Result<RatioRect, String> {
   let parts = value
     .split(',')
     .map(str::trim)
@@ -103,20 +99,10 @@ pub(super) fn parse_ratio_region(value: String) -> Result<RatioRect, String> {
   Ok(RatioRect::new(parts[0], parts[1], parts[2], parts[3]))
 }
 
-fn split_csv(value: &str) -> impl Iterator<Item = String> + '_ {
-  value.split(',').map(str::trim).filter(|part| !part.is_empty()).map(ToOwned::to_owned)
-}
-
 fn push_trimmed(values: &mut Vec<String>, value: String) {
   let value = value.trim();
   if !value.is_empty() && !values.iter().any(|existing| existing == value) {
     values.push(value.to_string());
-  }
-}
-
-fn push_csv(values: &mut Vec<String>, value: &str) {
-  for part in split_csv(value) {
-    push_trimmed(values, part);
   }
 }
 
