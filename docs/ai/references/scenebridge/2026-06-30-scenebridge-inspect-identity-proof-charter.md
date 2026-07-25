@@ -1,5 +1,10 @@
 # SceneBridge A5: Inspect Identity Proof Charter
 
+> **Historical note (2026-07-25):** the NetEase ViewMemory, app-local
+> run-artifact reader, and select-proof persistence cited below were retired.
+> See
+> [`retired-app-local-invoke-and-run-artifact-reuse.md`](../../../archive/verticals/netease-music/retired-app-local-invoke-and-run-artifact-reuse.md).
+
 **Date:** 2026-06-30  
 **Status:** **owner-approved A5 docs-only** — freezes which JSON / trace / inspect fields
 count as identity proof vs run-time geometry or diagnostics on the NetEase playlist
@@ -250,8 +255,8 @@ deferred inspect surfaces for the NetEase playlist sidebar lane:
 
 | Surface | A5 status | A8 status |
 | --- | --- | --- |
-| `view.reacquire.*` spans (controlled subset) | deferred | **shipped** via `persist_playlist_select_proof` |
-| `list_view_memory_writes` | deferred | **shipped** on root inspect + `auv-view` memory read helpers |
+| `view.reacquire.*` spans (controlled subset) | deferred | retired with the NetEase app-local artifact seam |
+| `list_view_memory_writes` | deferred | retired with ViewMemory |
 | `view_parser` inspect (`ViewParserInspect` / resolution summaries) | deferred | **shipped** on CLI `inspect run`, inspect_server `GET /runs/{id}` |
 
 A5 proof tiers (I–IV) remain the vocabulary for field classification; A8 wires

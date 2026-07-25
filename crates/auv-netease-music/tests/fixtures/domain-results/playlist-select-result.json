@@ -1,6 +1,6 @@
 {
   "command": "playlist.select",
-  "query": "hermetic-fixture",
+  "query": "Fixture Playlist",
   "app": {
     "app_id": "com.netease.163music",
     "name": "网易云音乐",
@@ -43,8 +43,5 @@
     }
   },
   "diagnostics": [],
-  "known_limits": [
-    "hermetic_fixture_only",
-    "proof_class:hermetic"
-  ]
+  "known_limits": []
 }

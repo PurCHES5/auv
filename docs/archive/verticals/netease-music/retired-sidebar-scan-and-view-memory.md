@@ -15,10 +15,10 @@ may read that caller-supplied scan URI after authority, run, purpose, content
 type, digest, schema, and app validation. Selection then reacquires the live row
 through rescan replay.
 
-NetEase-specific tracing events and best-effort screenshot/JSON evidence now
-live in `src/telemetry.rs`. Durable application artifact purposes, publication,
-and typed reads remain in `src/run_artifacts.rs`; encoding/admission mechanics
-are delegated to `auv-tracing`.
+NetEase-specific tracing events and best-effort screenshot/JSON evidence moved
+to `src/telemetry.rs`. The remaining app-local artifact publication/read seam
+was subsequently retired; see
+[`retired-app-local-invoke-and-run-artifact-reuse.md`](retired-app-local-invoke-and-run-artifact-reuse.md).
 
 Reintroducing ViewMemory requires an owner-approved slice naming a current
 production consumer and a runtime/read-side contract. Reintroducing a scan

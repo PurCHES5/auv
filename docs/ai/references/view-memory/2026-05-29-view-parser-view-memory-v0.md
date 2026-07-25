@@ -2,11 +2,10 @@
 
 Date: 2026-05-29
 
-Status: historical v0 design input. Its filesystem persistence, duplicated
-`source_run_id`, and generic reconstruction-reference contract are superseded
-by `docs/TERMS_AND_CONCEPTS.md`: current `ViewMemory` carries one typed
-`source_scan_uri: ArtifactUri`, and the selected `RunStore` owns persistence.
-The original analysis below is retained as research context.
+Status: historical v0 design input. Its filesystem persistence and later
+run-artifact form were both retired on 2026-07-25. `ViewMemory` is not a current
+runtime or frontend contract; see `docs/TERMS_AND_CONCEPTS.md`. The original
+analysis below is retained as research context.
 
 This document originally pinned what `ViewMemory` stores, how it
 is keyed and evicted, and how it links to existing run storage.

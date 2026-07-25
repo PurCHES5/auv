@@ -220,7 +220,7 @@ fn verification_types_reject_passed_states_without_required_evidence() {
 }
 
 fn select_fixture() -> Value {
-  let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/select-proof/hermetic_v0/select-result.json");
+  let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/domain-results/playlist-select-result.json");
   serde_json::from_slice(&std::fs::read(path).expect("read playlist-select fixture")).expect("decode playlist-select fixture")
 }
 

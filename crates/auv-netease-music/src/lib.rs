@@ -4,10 +4,7 @@ pub mod app;
 #[cfg(feature = "tracing")]
 pub mod cli;
 pub mod commands;
-#[cfg(feature = "tracing")]
-pub mod invoke;
 pub mod output;
-pub mod run_artifacts;
 pub mod scroll;
 mod telemetry;
 pub mod view_parsers;
@@ -19,8 +16,6 @@ pub use commands::launch::{LaunchResult, OpenWindowInputs, run_open_window};
 pub use commands::playback::{
   PlaybackStatus, PlaybackStatusHumanReadable, PlaybackStatusInputs, PlaybackStatusJson, run_playback_status_probe,
 };
-#[cfg(feature = "tracing")]
-pub use commands::playlist::{PlaylistPlayCandidate, resolve_playlist_play_candidate};
 pub use commands::playlist::{
   PlaylistPlayResult, PlaylistPlayVerification, PlaylistSelectResult, PlaylistSelectTitleOcrTier, PlaylistSelectVerification,
   PlaylistSelectVerificationEvidence, run_playlist_play, run_playlist_select,

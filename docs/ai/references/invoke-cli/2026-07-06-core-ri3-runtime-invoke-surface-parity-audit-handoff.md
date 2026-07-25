@@ -70,7 +70,7 @@ Paths with **run recording + inspectable evidence + hermetic or structural test*
 | **scan.coverage** | full | `scan-coverage-v0` artifact | partial | registry + arg tests (`scan.rs` ~L254–275) | same |
 | **fixture.observe** | full | `command.verification` + `command.known_limit` span events | CLI `Command Boundary Claims` (`inspect.rs` ~L519–526) | registry/help tests (`lib.rs` ~L239–272) | `commands/fixture.rs` |
 | **input.typeText / input.key** (macOS) | full | typed `input-action-result` artifact via `input_action_output` | partial (IAR in artifacts; no ATL) | `input_action_output` unit tests (`input.rs` ~L618+) | `input.rs` ~L508–542 |
-| **netease.playlist.selectProof** | full (product store) | `netease-playlist-select-result` role | partial (product artifact; not in `run_read` generic join) | `select_proof_fixture_writes_run_and_artifact`, `select_proof_not_in_default_registry` | `invoke/select_proof.rs` |
+| ~~`netease.playlist.selectProof`~~ | retired 2026-07-25 | fixture-only archived proof; app-local invoke removed | n/a | retired with no real operation consumer | archived retirement record |
 | ~~`netease.playlist.sidebarScanProof`~~ | retired 2026-07-25 | fixture-only archived proof; product scan artifacts remain | n/a | retired with no production consumer | archived retirement record |
 | **Session API invoke** (any catalog command) | full | trace + handler artifacts + **synthetic** `operation-summary` + `operation-result` | `GetOperation` two-source join | transport doc + handler tests | `handler.rs` ~L125–150; `operation_result_store.rs`; `transport.rs` L6 |
 
@@ -105,7 +105,7 @@ Grouped by gap class. **Do not** treat API-R2b CLI/MCP persist gap as a defect (
 
 | Path | Gap | Evidence |
 |------|-----|----------|
-| **netease.playlist.*Proof** | Not in `default_registry()` — separate `netease_registry()` + `auv-netease-music invoke` CLI | `select_proof_not_in_default_registry` (`select_proof.rs` ~L175–179); `invoke/mod.rs` ~L42 |
+| ~~`netease.playlist.*Proof`~~ | Retired 2026-07-25 — the fixture-only commands and empty app-local invoke registry were removed | NetEase retirement record |
 | **auv-qqmusic** | No invoke registry; standalone CLI only | `crates/auv-qqmusic/src/cli.rs`; no `invoke/` module |
 | **ACP-B2c unified proof hint** | Deferred packaging | L9-R2 deferrals table |
 
@@ -186,8 +186,8 @@ cargo run --quiet -- invoke --help
 rg 'TODO\(invoke' crates/auv-cli-invoke/src
 rg 'invoke_recorded' src/main.rs src/mcp.rs src/api
 cargo test -p auv-cli-invoke scan_frame
-cargo test -p auv-netease-music select_proof
-# sidebarScanProof retired 2026-07-25; product scan artifact coverage lives in run_store_contract
+# NetEase fixture-only proof commands and app-owned artifact readers retired 2026-07-25.
+cargo test -p auv-netease-music --features tracing
 git diff --check -- docs/ai/references/
 ```
 

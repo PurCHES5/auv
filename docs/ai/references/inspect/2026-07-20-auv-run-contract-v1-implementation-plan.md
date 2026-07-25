@@ -1,5 +1,10 @@
 # AUV Tracing Contract V1 Implementation Plan
 
+> **NetEase retirement note (2026-07-25):** the fixture-only select proof and
+> NetEase-owned run-artifact read/reuse steps in this historical plan were
+> superseded by
+> [`retired-app-local-invoke-and-run-artifact-reuse.md`](../../../archive/verticals/netease-music/retired-app-local-invoke-and-run-artifact-reuse.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. In this completed plan, checkbox (`- [ ]`) steps preserve the approved procedure and are not a historical progress log.
 
 **Status:** Implementation in progress. The canonical `auv-tracing` core,

@@ -172,22 +172,19 @@ An `ArtifactUri` is the transport-independent identity of an artifact. Spans
 and events may add diagnostic links, but they do not own artifacts; large
 payloads remain authority-owned bytes rather than embedded event data.
 
-## View Memory
+## View Memory (retired experimental contract)
 
-`ViewMemory` is an app-neutral structured payload derived from one canonical
-view-scan artifact for later target reacquisition. `auv-view` owns its
-construction, freshness checks, and reacquisition semantics; it does not own a
-filesystem store or select a `RunStore`.
+`ViewMemory` previously named an app-neutral structured payload derived from a
+view-scan artifact for later target reacquisition. Its only application
+consumer and the app-local artifact read/reuse seam were retired on 2026-07-25.
+It is not a current runtime or frontend contract.
 
-The payload carries one typed `source_scan_uri: ArtifactUri`. The source run is
-derived from that URI rather than repeated as a second field. An app publishes
-the payload through its selected AUV tracing context and reads it from the
-authority `RunStore`.
-
-Candidate identifiers are local to the scan that produced them. A frontend
-using a candidate in a later call must carry the exact scan `ArtifactUri`
-explicitly; it must not guess a “latest scan” through an app-local manifest,
-artifact directory, or process-global cache.
+Candidate identifiers remain local observation facts. No current frontend may
+carry a candidate or scan artifact URI into a later application call. A future
+cross-run reacquisition contract requires owner approval and must live on the
+shared runtime and inspection model rather than an app-local manifest,
+artifact directory, process-global cache, or application-owned `RunStore`
+reader.
 
 ## Observation Scope
 
