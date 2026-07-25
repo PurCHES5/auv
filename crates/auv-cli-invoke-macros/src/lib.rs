@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use proc_macro::{TokenStream, TokenTree};
 
-const ALLOWED_ATTR_KEYS: &[&str] = &["id", "group", "summary", "args"];
+const ALLOWED_ATTR_KEYS: &[&str] = &["id", "group", "description", "args"];
 
 #[proc_macro_attribute]
 pub fn invoke_command(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -26,18 +26,25 @@ pub fn invoke_command(attr: TokenStream, item: TokenStream) -> TokenStream {
     Ok(namespace) => namespace,
     Err(error) => return compile_error(&error),
   };
-  let summary = &values["summary"];
+  let description = &values["description"];
   let args = &values["args"];
   let export_name = format!("{function_name}_invoke_command");
+  let handler_name = format!("__{function_name}_invoke_handler");
 
   let generated = format!(
-    "pub fn {export_name}() -> ::auv_cli_invoke::InvokeCommand {{
+    "fn {handler_name}(
+      input: ::auv_cli_invoke::InvokeCommandInput,
+    ) -> ::auv_cli_invoke::InvokeCommandFuture {{
+      Box::pin({function_name}(input))
+    }}
+
+    pub fn {export_name}() -> ::auv_cli_invoke::InvokeCommand {{
       ::auv_cli_invoke::command::spec(
         {id},
         ::auv_cli_invoke::InvokeNamespace::{namespace},
-        {summary},
+        {description},
         {args},
-        {function_name},
+        {handler_name},
       )
     }}"
   );
@@ -45,7 +52,7 @@ pub fn invoke_command(attr: TokenStream, item: TokenStream) -> TokenStream {
   let mut output = item.to_string();
   output.push('\n');
   output.push_str(&generated);
-  output.parse().map_or_else(|_| compile_error("invoke_command generated invalid Rust"), |tokens| tokens)
+  output.parse().unwrap_or_else(|_| compile_error("invoke_command generated invalid Rust"))
 }
 
 fn find_function_name(item: TokenStream) -> Option<String> {
@@ -114,7 +121,7 @@ fn validate_attr_key(key: &str) -> Result<(), String> {
   if ALLOWED_ATTR_KEYS.contains(&key) {
     Ok(())
   } else {
-    Err(format!("invoke_command unknown attribute `{key}`; expected only: id, group, summary, args"))
+    Err(format!("invoke_command unknown attribute `{key}`; expected only: id, group, description, args"))
   }
 }
 
@@ -129,12 +136,13 @@ fn namespace_for_group_literal(group: &str) -> Result<&'static str, String> {
     "\"window\"" => Ok("Window"),
     "\"input\"" => Ok("Input"),
     "\"app\"" => Ok("App"),
+    "\"game\"" => Ok("Game"),
     "\"overlay\"" => Ok("Overlay"),
     "\"mediaControl\"" => Ok("MediaControl"),
     "\"fixture\"" => Ok("Fixture"),
     "\"scan\"" => Ok("Scan"),
     _ => Err(format!(
-      "invoke_command unknown group {group}; expected one of: display, screen, window, input, app, overlay, mediaControl, fixture, scan"
+      "invoke_command unknown group {group}; expected one of: display, screen, window, input, app, game, overlay, mediaControl, fixture, scan"
     )),
   }
 }
@@ -152,6 +160,7 @@ mod tests {
     assert_eq!(namespace_for_group_literal("\"screen\""), Ok("Screen"));
     assert_eq!(namespace_for_group_literal("\"mediaControl\""), Ok("MediaControl"));
     assert_eq!(namespace_for_group_literal("\"scan\""), Ok("Scan"));
+    assert_eq!(namespace_for_group_literal("\"game\""), Ok("Game"));
   }
 
   #[test]
@@ -178,7 +187,7 @@ mod tests {
 
       assert!(error.contains("invoke_command unknown attribute"));
       assert!(error.contains(key));
-      assert!(error.contains("id, group, summary, args"));
+      assert!(error.contains("id, group, description, args"));
     }
   }
 }

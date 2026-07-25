@@ -5,7 +5,9 @@ mod sidebar_scan_proof;
 use std::collections::BTreeMap;
 use std::process::ExitCode;
 
-use auv_cli_invoke::{CommandGroup, InvokeCommandInput, InvokeNamespace, InvokeRegistry, command};
+use auv_cli_invoke::{
+  CommandGroup, InvokeCommandInput, InvokeNamespace, InvokeOutputOptions, InvokeRegistry, InvokeResult, command, render_invoke_result,
+};
 
 pub use help::{render_command_help, render_help_index};
 pub use select_proof::{
@@ -38,7 +40,17 @@ pub fn netease_registry() -> InvokeRegistry {
 }
 
 /// Dispatch `auv-netease-music invoke …` without touching root `default_registry()`.
-pub fn run(tokens: &[String]) -> ExitCode {
+pub async fn run(tokens: &[String]) -> ExitCode {
+  if auv_tracing::Context::current().run_id().is_some() {
+    return run_in_context(tokens).await;
+  }
+
+  let root = auv_tracing::Context::root(auv_tracing::RunId::new());
+  let future = root.in_scope(|| run_in_context(tokens));
+  root.instrument(future).await
+}
+
+async fn run_in_context(tokens: &[String]) -> ExitCode {
   let registry = netease_registry();
 
   if tokens.is_empty() || tokens == ["--help"] || tokens == ["-h"] {
@@ -105,25 +117,24 @@ pub fn run(tokens: &[String]) -> ExitCode {
     cursor += 2;
   }
 
-  match command.invoke(InvokeCommandInput {
-    command_id: command.id,
-    target_application_id: None,
-    inputs: &inputs,
-    dry_run,
-  }) {
-    Ok(output) => {
-      println!("{}", output.summary);
-      if let Some(run_id) = output.signals.get("run_id") {
-        println!("run_id={run_id}");
-      }
-      if let Some(store_root) = output.signals.get("store_root") {
-        println!("store_root={store_root}");
-      }
-      for limit in &output.known_limits {
-        println!("known_limit: {limit}");
-      }
-      ExitCode::SUCCESS
-    }
+  let direct_result = command
+    .invoke(InvokeCommandInput {
+      command_id: command.id.to_string(),
+      target_application_id: None,
+      inputs,
+      dry_run,
+      cancellation: auv_cli_invoke::InvokeCancellation::new(),
+    })
+    .await;
+  let context = auv_tracing::Context::current();
+  let run_id = context.run_id().expect("invoke installs or inherits a run context");
+  let result = InvokeResult::from_command_result(*run_id, command, direct_result);
+  let options = InvokeOutputOptions {
+    inspect_hint: context.can_publish_artifacts(),
+    ..InvokeOutputOptions::default()
+  };
+  match render_invoke_result(&result, options) {
+    Ok(outcome) => ExitCode::from(outcome.exit_code as u8),
     Err(error) => {
       eprintln!("error: {error}");
       ExitCode::from(1)
@@ -150,16 +161,16 @@ mod tests {
   }
 
   #[test]
-  fn invoke_run_requires_store_root() {
+  fn invoke_run_without_caller_context_preserves_direct_result() {
     use std::process::ExitCode;
 
     let fixture_dir = crate::invoke::hermetic_select_proof_fixture_dir();
-    let exit = run(&[
+    let exit = futures_executor::block_on(run(&[
       SELECT_PROOF_COMMAND_ID.to_string(),
       "--fixture-dir".to_string(),
       fixture_dir.display().to_string(),
-    ]);
-    assert_eq!(exit, ExitCode::from(1));
+    ]));
+    assert_eq!(exit, ExitCode::SUCCESS);
   }
 
   #[test]
@@ -167,12 +178,12 @@ mod tests {
     use std::process::ExitCode;
 
     let fixture_dir = crate::invoke::hermetic_select_proof_fixture_dir();
-    let exit = run(&[
+    let exit = futures_executor::block_on(run(&[
       SELECT_PROOF_COMMAND_ID.to_string(),
       "--fixture-dir".to_string(),
       fixture_dir.display().to_string(),
       "--help".to_string(),
-    ]);
+    ]));
     assert_eq!(exit, ExitCode::SUCCESS);
   }
 }

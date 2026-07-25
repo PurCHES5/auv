@@ -6,24 +6,18 @@
 //! Modules:
 //! - `registry`: lightweight in-memory session registry (API-P4 responsibility A).
 //! - `mapper`: proto <-> host mapping, isolated from handler code (API-P4 checklist).
-//! - `summary`: two-source `GetOperation` read path + join policy (API-P7/P12).
-//! - `summary_store`: persisted `operation-summary` write path (API-P11).
-//! - `operation_result_store`: persisted `operation-result` write path (API-R2).
 //! - `handler`: transport-agnostic handler skeleton wiring proto RPCs to the
 //!   internal seams (API-P8).
 //! - `transport`: loopback-only tonic gRPC adapter (API-P9).
 //! - `test_fixtures` (tests only): shared run/artifact staging helpers.
 //!
-//! TODO(api-p4-stream-events): `StreamSessionEvents` remains deferred to the
-//! event projector (API-P4 responsibility D); the transport returns
-//! `UNIMPLEMENTED` until that seam is wired.
+//! TODO(session-live-subscription): A session-scoped live stream is intentionally
+//! absent until a consumer requires cursor and gap recovery semantics over
+//! `auv_tracing::RunSubscription`; do not add a second generic event schema.
 
 pub mod handler;
 pub mod mapper;
-pub(crate) mod operation_result_store;
 pub mod registry;
-pub mod summary;
-pub mod summary_store;
 pub mod transport;
 
 #[cfg(test)]
@@ -36,7 +30,7 @@ use std::fmt;
 pub enum SessionApiError {
   /// A required proto field was absent.
   MissingField(&'static str),
-  /// `Invoke` / `StreamSessionEvents` referenced a session that was never created.
+  /// `Invoke` referenced a session that was never created.
   UnknownSession(String),
   /// `json_payload` could not be decoded into a host invoke request.
   PayloadDecode(String),
@@ -44,18 +38,6 @@ pub enum SessionApiError {
   Storage(String),
   /// Session-aware invoke execution failed after validation.
   InvokeExecution(String),
-  /// `GetOperation` referenced a run that was never recorded in the store.
-  RunNotFound(String),
-  /// The run exists but recorded no persisted `OperationResult` artifact.
-  PersistedOperationRequired(String),
-  /// `GetOperation` request `operation_id` does not match the resolved wire id.
-  OperationIdMismatch {
-    run_id: String,
-    requested: String,
-    resolved: String,
-  },
-  /// A seam this RPC depends on is not wired in the current skeleton.
-  NotWired { gate: &'static str },
 }
 
 impl fmt::Display for SessionApiError {
@@ -66,16 +48,6 @@ impl fmt::Display for SessionApiError {
       Self::PayloadDecode(message) => write!(f, "failed to decode json_payload: {message}"),
       Self::Storage(message) => write!(f, "storage error: {message}"),
       Self::InvokeExecution(message) => write!(f, "invoke execution failed: {message}"),
-      Self::RunNotFound(run_id) => write!(f, "run not found: {run_id}"),
-      Self::PersistedOperationRequired(run_id) => {
-        write!(f, "no persisted operation result for run: {run_id}")
-      }
-      Self::OperationIdMismatch {
-        run_id,
-        requested,
-        resolved,
-      } => write!(f, "operation_id mismatch for run {run_id}: requested {requested}, resolved {resolved}"),
-      Self::NotWired { gate } => write!(f, "session API seam not wired: {gate}"),
     }
   }
 }

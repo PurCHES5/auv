@@ -1,663 +1,351 @@
-//! Balatro ordinary run_read helpers for inspect composition.
-//!
-//! Depends on `auv-inspect-model` only (no `auv-cli`). Query-wired adapters stay in product (S3b).
+//! Canonical Balatro run-artifact transport shared by typed domain readers.
 
-use auv_inspect_model::{ArtifactRefView, artifact_record_view, is_json_mime, read_artifact_json};
-use auv_tracing_driver::store::{CanonicalRun, LocalStore};
+use auv_tracing::{
+  ArtifactMetadata, ArtifactPurpose, ArtifactUri, ArtifactWriteError, Attributes, ByteLength, Context, ErrorCode, EventPayload,
+  JsonArtifactError, JsonArtifactReadError, ReadArtifactError, RunSnapshot, RunStore, ValidationError,
+};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 
-pub(crate) struct BalatroCardDetectionSemanticManifestLineage {
-  pub artifact: ArtifactRefView,
-  pub manifest: Option<BalatroCardDetectionSemanticManifestSummary>,
-  pub issue: Option<String>,
+/// Balatro card-detection manifests are structured metadata, not bulk media.
+pub const BALATRO_STRUCTURED_ARTIFACT_JSON_BYTE_LIMIT: u64 = 4 * 1024 * 1024;
+pub const BALATRO_STRUCTURED_ARTIFACT_PAYLOAD_TOO_LARGE_CODE: &str = "auv.balatro.structured_artifact.payload_too_large";
+
+#[derive(Debug, thiserror::Error)]
+pub enum BalatroArtifactPublishError {
+  #[error("invalid Balatro artifact purpose {value:?}: {source}")]
+  InvalidPurpose {
+    value: &'static str,
+    #[source]
+    source: ValidationError,
+  },
+  #[error("failed to construct Balatro artifact {purpose}: {source}")]
+  Json {
+    purpose: ArtifactPurpose,
+    #[source]
+    source: JsonArtifactError,
+  },
+  #[error("failed to publish Balatro artifact {purpose}: {source}")]
+  Publication {
+    purpose: ArtifactPurpose,
+    #[source]
+    source: ArtifactWriteError,
+  },
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
-pub(crate) struct BalatroCardDetectionSemanticInspectReportLineage {
-  pub artifact: ArtifactRefView,
-  pub report: Option<BalatroCardDetectionSemanticInspectReportSummary>,
-  pub issue: Option<String>,
+#[derive(Debug, thiserror::Error)]
+pub enum BalatroArtifactReadError {
+  #[error("invalid expected Balatro artifact purpose {value:?}: {source}")]
+  InvalidExpectedPurpose {
+    value: &'static str,
+    #[source]
+    source: ValidationError,
+  },
+  #[error("failed to read Balatro artifact: {source}")]
+  Read {
+    #[from]
+    source: ReadArtifactError,
+  },
+  #[error("Balatro artifact {uri} is not the expected JSON type: {source}")]
+  MalformedJson {
+    uri: ArtifactUri,
+    #[source]
+    source: serde_json::Error,
+  },
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
-pub(crate) struct BalatroCardDetectionSpatialQueryManifestLineage {
-  pub artifact: ArtifactRefView,
-  pub manifest: Option<BalatroCardDetectionSpatialQueryManifestSummary>,
-  pub issue: Option<String>,
+impl BalatroArtifactReadError {
+  pub fn code(&self) -> ErrorCode {
+    let value = match self {
+      Self::InvalidExpectedPurpose { .. } => "auv.balatro.artifact.invalid_reader_contract",
+      Self::Read {
+        source: ReadArtifactError::PayloadTooLarge { .. },
+      } => BALATRO_STRUCTURED_ARTIFACT_PAYLOAD_TOO_LARGE_CODE,
+      Self::Read {
+        source: ReadArtifactError::SnapshotAuthorityMismatch { .. },
+      } => "auv.balatro.artifact.snapshot_authority_mismatch",
+      Self::Read {
+        source: ReadArtifactError::WrongRun { .. },
+      } => "auv.balatro.artifact.wrong_owner",
+      Self::Read {
+        source: ReadArtifactError::NotCommitted { .. },
+      } => "auv.balatro.artifact.dangling_uri",
+      Self::Read {
+        source: ReadArtifactError::WrongPurpose { .. },
+      } => "auv.balatro.artifact.wrong_purpose",
+      Self::Read {
+        source: ReadArtifactError::WrongContentType { .. },
+      } => "auv.balatro.artifact.wrong_content_type",
+      Self::Read {
+        source: ReadArtifactError::LengthOutOfRange { .. },
+      } => "auv.balatro.artifact.length_out_of_range",
+      Self::Read {
+        source: ReadArtifactError::Allocation { .. },
+      } => "auv.balatro.artifact.allocation_failed",
+      Self::Read {
+        source: ReadArtifactError::Open { .. },
+      } => "auv.balatro.artifact.open_failed",
+      Self::Read {
+        source: ReadArtifactError::Stream { .. },
+      } => "auv.balatro.artifact.stream_failed",
+      Self::Read {
+        source: ReadArtifactError::LengthMismatch { .. },
+      } => "auv.balatro.artifact.length_mismatch",
+      Self::Read {
+        source: ReadArtifactError::DigestMismatch { .. },
+      } => "auv.balatro.artifact.digest_mismatch",
+      Self::MalformedJson { .. } => "auv.balatro.artifact.malformed_json",
+    };
+    ErrorCode::parse(value).expect("static Balatro artifact error code is valid")
+  }
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
-pub(crate) struct BalatroCardDetectionSpatialQueryInspectReportLineage {
-  pub artifact: ArtifactRefView,
-  pub report: Option<BalatroCardDetectionSpatialQueryInspectReportSummary>,
-  pub issue: Option<String>,
+#[derive(Serialize)]
+struct BalatroArtifactPreparationFailed {
+  purpose: &'static str,
+  error: String,
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
-pub(crate) struct BalatroCardDetectionEvalWitnessManifestLineage {
-  pub artifact: ArtifactRefView,
-  pub manifest: Option<BalatroCardDetectionEvalWitnessManifestSummary>,
-  pub issue: Option<String>,
+impl EventPayload for BalatroArtifactPreparationFailed {
+  const NAME: &'static str = "auv.balatro.artifact_preparation_failed";
+  const VERSION: u32 = 1;
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
-pub(crate) struct BalatroCardDetectionEvalWitnessInspectReportLineage {
-  pub artifact: ArtifactRefView,
-  pub report: Option<BalatroCardDetectionEvalWitnessInspectReportSummary>,
-  pub issue: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
-pub(crate) struct BalatroCardDetectionQualityManifestLineage {
-  pub artifact: ArtifactRefView,
-  pub manifest: Option<BalatroCardDetectionQualityManifestSummary>,
-  pub issue: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
-pub(crate) struct BalatroCardDetectionQualityInspectReportLineage {
-  pub artifact: ArtifactRefView,
-  pub report: Option<BalatroCardDetectionQualityInspectReportSummary>,
-  pub issue: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct BalatroCardDetectionSemanticManifestSummary {
-  pub schema_version: u32,
-  pub source_detection_bundle_dir: String,
-  pub frame_source: String,
-  pub image_width: u32,
-  pub image_height: u32,
-  pub ui_detection_count: usize,
-  pub entities_detection_count: usize,
-  pub semantic_status: String,
-  pub semantic_reason: Option<String>,
-  pub known_limits: Vec<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct BalatroCardDetectionSemanticInspectReportSummary {
-  pub schema_version: u32,
-  pub card_detection_semantic_manifest_path: String,
-  pub semantic_status: String,
-  pub semantic_reason: Option<String>,
-  pub detection_bundle_readable: bool,
-  pub detection_sets_non_empty: bool,
-  pub warnings: Vec<String>,
-  pub known_limits: Vec<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct BalatroCardDetectionSpatialQueryManifestSummary {
-  pub schema_version: u32,
-  pub card_detection_semantic_manifest_path: String,
-  pub target_zone: String,
-  pub target_index: u32,
-  pub query_backend: String,
-  pub status: String,
-  pub reason: Option<String>,
-  pub pixel_x: Option<f32>,
-  pub pixel_y: Option<f32>,
-  pub known_limits: Vec<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct BalatroCardDetectionSpatialQueryInspectReportSummary {
-  pub schema_version: u32,
-  pub card_detection_spatial_query_manifest_path: String,
-  pub target_zone: String,
-  pub target_index: u32,
-  pub query_backend: String,
-  pub status: String,
-  pub reason: Option<String>,
-  pub semantic_status: String,
-  pub warnings: Vec<String>,
-  pub known_limits: Vec<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct BalatroCardDetectionEvalWitnessManifestSummary {
-  pub schema_version: u32,
-  pub card_detection_semantic_manifest_path: String,
-  pub card_detection_spatial_query_manifest_path: String,
-  pub expected_slots_path: String,
-  pub source_detection_bundle_dir: String,
-  pub expected_slot_count: usize,
-  pub scored_slot_count: usize,
-  pub unscored_slot_count: usize,
-  pub below_confidence_slot_count: usize,
-  pub quality_backend: String,
-  pub detector_model_id: Option<String>,
-  pub slot_score_count: usize,
-  pub status: String,
-  pub reason: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct BalatroCardDetectionEvalWitnessInspectReportSummary {
-  pub schema_version: u32,
-  pub card_detection_eval_witness_manifest_path: String,
-  pub card_detection_semantic_manifest_path: String,
-  pub card_detection_spatial_query_manifest_path: String,
-  pub expected_slots_path: String,
-  pub source_detection_bundle_dir: String,
-  pub expected_slot_count: usize,
-  pub scored_slot_count: usize,
-  pub unscored_slot_count: usize,
-  pub below_confidence_slot_count: usize,
-  pub quality_backend: String,
-  pub detector_model_id: Option<String>,
-  pub slot_score_count: usize,
-  pub semantic_manifest_readable: bool,
-  pub spatial_query_manifest_readable: bool,
-  pub expected_slots_readable: bool,
-  pub status: String,
-  pub reason: Option<String>,
-  pub warnings: Vec<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct BalatroCardDetectionQualityManifestSummary {
-  pub schema_version: u32,
-  pub card_detection_eval_witness_manifest_path: String,
-  pub witness_status: String,
-  pub status: String,
-  pub verdict: String,
-  pub quality_backend: Option<String>,
-  pub expected_slot_count: Option<usize>,
-  pub scored_slot_count: Option<usize>,
-  pub unscored_slot_count: Option<usize>,
-  pub slot_coverage_ratio: Option<f32>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct BalatroCardDetectionQualityInspectReportSummary {
-  pub schema_version: u32,
-  pub card_detection_quality_manifest_path: String,
-  pub card_detection_eval_witness_manifest_path: String,
-  pub witness_status: String,
-  pub status: String,
-  pub verdict: String,
-  pub quality_backend: Option<String>,
-  pub slot_coverage_ratio_available: bool,
-}
-
-pub(crate) fn extract_balatro_card_detection_semantic_manifests(
-  store: &LocalStore,
-  run: &CanonicalRun,
-) -> Result<Vec<BalatroCardDetectionSemanticManifestLineage>, String> {
-  use crate::CardDetectionSemanticManifest;
-  let mut manifests = Vec::new();
-  for artifact in &run.artifacts {
-    if artifact.role != crate::BALATRO_CARD_DETECTION_SEMANTIC_ROLE {
-      continue;
-    }
-    let artifact_ref = artifact_record_view(run.run.run_id.clone(), artifact);
-    if !is_json_mime(&artifact.mime_type) {
-      manifests.push(BalatroCardDetectionSemanticManifestLineage {
-        artifact: artifact_ref,
-        manifest: None,
-        issue: Some(format!("balatro card detection semantic manifest mime_type {} is not JSON", artifact.mime_type)),
+pub(crate) fn emit_json_artifact<T: Serialize>(purpose: &'static str, value: &T) {
+  let context = Context::current();
+  if !context.can_publish_artifacts() {
+    return;
+  }
+  match prepare_json_emission(purpose, value) {
+    Ok(emission) => drop(emission),
+    Err(error) => context.in_scope(|| {
+      auv_tracing::emit_event!(BalatroArtifactPreparationFailed {
+        purpose,
+        error: error.to_string(),
       });
-      continue;
-    }
-    let parsed = read_artifact_json::<CardDetectionSemanticManifest>(
-      store,
-      run.run.run_id.as_str(),
-      artifact,
-      crate::BALATRO_CARD_DETECTION_SEMANTIC_ROLE,
-    )
-    .map(|manifest| BalatroCardDetectionSemanticManifestSummary::from(&manifest));
-    match parsed {
-      Ok(manifest) => manifests.push(BalatroCardDetectionSemanticManifestLineage {
-        artifact: artifact_ref,
-        manifest: Some(manifest),
-        issue: None,
-      }),
-      Err(error) => manifests.push(BalatroCardDetectionSemanticManifestLineage {
-        artifact: artifact_ref,
-        manifest: None,
-        issue: Some(error),
-      }),
-    }
+    }),
   }
-  Ok(manifests)
 }
 
-pub(crate) fn extract_balatro_card_detection_semantic_inspect_reports(
-  store: &LocalStore,
-  run: &CanonicalRun,
-) -> Result<Vec<BalatroCardDetectionSemanticInspectReportLineage>, String> {
-  use crate::CardDetectionSemanticInspectReport;
-  let mut reports = Vec::new();
-  for artifact in &run.artifacts {
-    if artifact.role != crate::BALATRO_CARD_DETECTION_SEMANTIC_INSPECT_ROLE {
-      continue;
+pub(crate) async fn publish_json_artifact<T: Serialize>(
+  context: Option<&Context>,
+  purpose: &'static str,
+  value: &T,
+) -> Result<Option<ArtifactMetadata>, BalatroArtifactPublishError> {
+  // Contexts without artifact authority, including telemetry-only contexts,
+  // must not validate the contract or serialize the domain value.
+  let Some(context) = context.filter(|context| context.can_publish_artifacts()) else {
+    return Ok(None);
+  };
+
+  let purpose = parse_artifact_purpose(purpose)?;
+  let emission = context
+    .in_scope(|| {
+      auv_tracing::emit_json_artifact(
+        purpose.clone(),
+        Attributes::empty(),
+        ByteLength::new(BALATRO_STRUCTURED_ARTIFACT_JSON_BYTE_LIMIT).expect("static Balatro JSON limit is valid"),
+        value,
+      )
+    })
+    .map_err(|source| BalatroArtifactPublishError::Json {
+      purpose: purpose.clone(),
+      source,
+    })?;
+  emission.await.map_err(|source| BalatroArtifactPublishError::Publication { purpose, source })
+}
+
+fn parse_artifact_purpose(purpose: &'static str) -> Result<ArtifactPurpose, BalatroArtifactPublishError> {
+  ArtifactPurpose::parse(purpose).map_err(|source| BalatroArtifactPublishError::InvalidPurpose {
+    value: purpose,
+    source,
+  })
+}
+
+fn prepare_json_emission<T: Serialize>(
+  purpose: &'static str,
+  value: &T,
+) -> Result<auv_tracing::ArtifactEmission, BalatroArtifactPublishError> {
+  let purpose = parse_artifact_purpose(purpose)?;
+  auv_tracing::emit_json_artifact(
+    purpose.clone(),
+    Attributes::empty(),
+    ByteLength::new(BALATRO_STRUCTURED_ARTIFACT_JSON_BYTE_LIMIT).expect("static Balatro JSON limit is valid"),
+    value,
+  )
+  .map_err(|source| BalatroArtifactPublishError::Json { purpose, source })
+}
+
+pub(crate) fn artifact_uris_for_purpose(
+  store: &dyn RunStore,
+  snapshot: &RunSnapshot,
+  purpose: &'static str,
+) -> Result<Vec<ArtifactUri>, BalatroArtifactReadError> {
+  validate_snapshot_authority(store, snapshot)?;
+  let purpose = expected_artifact_purpose(purpose)?;
+  Ok(
+    snapshot
+      .artifacts()
+      .values()
+      .filter(|artifact| artifact.metadata().purpose() == &purpose)
+      .map(|artifact| artifact.metadata().uri().clone())
+      .collect(),
+  )
+}
+
+pub(crate) fn validate_snapshot_authority(store: &dyn RunStore, snapshot: &RunSnapshot) -> Result<(), BalatroArtifactReadError> {
+  let store_authority = store.authority_id();
+  if snapshot.authority_id() != store_authority {
+    return Err(
+      ReadArtifactError::SnapshotAuthorityMismatch {
+        snapshot_authority: snapshot.authority_id(),
+        store_authority,
+      }
+      .into(),
+    );
+  }
+  Ok(())
+}
+
+pub(crate) async fn read_json_artifact<T>(
+  store: &dyn RunStore,
+  snapshot: &RunSnapshot,
+  uri: &ArtifactUri,
+  expected_purpose: &'static str,
+) -> Result<T, BalatroArtifactReadError>
+where
+  T: DeserializeOwned,
+{
+  let expected_purpose = expected_artifact_purpose(expected_purpose)?;
+  auv_tracing::read_json_artifact(
+    store,
+    snapshot,
+    uri,
+    &expected_purpose,
+    ByteLength::new(BALATRO_STRUCTURED_ARTIFACT_JSON_BYTE_LIMIT).expect("static Balatro JSON limit is valid"),
+  )
+  .await
+  .map_err(|error| match error {
+    JsonArtifactReadError::Artifact(source) => BalatroArtifactReadError::Read { source },
+    JsonArtifactReadError::Decode { source, .. } => BalatroArtifactReadError::MalformedJson {
+      uri: uri.clone(),
+      source,
+    },
+  })
+}
+
+fn expected_artifact_purpose(value: &'static str) -> Result<ArtifactPurpose, BalatroArtifactReadError> {
+  ArtifactPurpose::parse(value).map_err(|source| BalatroArtifactReadError::InvalidExpectedPurpose { value, source })
+}
+
+#[cfg(test)]
+mod tests {
+  use std::error::Error as _;
+  use std::sync::Arc;
+
+  use auv_driver::{INPUT_ACTION_RESULT_PURPOSE, InputActionResult, InputDeliveryPath};
+  use auv_tracing::{
+    AuthorityId, BoxFuture, Context, MemoryRunStore, RunId, TelemetryError, TelemetryItem, TelemetryProjector, TelemetryRoutePolicy,
+    configure, dispatcher,
+  };
+  use serde::Serializer;
+
+  use super::*;
+
+  struct PanicOnSerialize;
+
+  impl Serialize for PanicOnSerialize {
+    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+    where
+      S: Serializer,
+    {
+      panic!("serializer must not run")
     }
-    let artifact_ref = artifact_record_view(run.run.run_id.clone(), artifact);
-    if !is_json_mime(&artifact.mime_type) {
-      reports.push(BalatroCardDetectionSemanticInspectReportLineage {
-        artifact: artifact_ref,
-        report: None,
-        issue: Some(format!("balatro card detection semantic inspect mime_type {} is not JSON", artifact.mime_type)),
+  }
+
+  struct NoopProjector;
+
+  impl TelemetryProjector for NoopProjector {
+    fn project(&self, _item: TelemetryItem) -> BoxFuture<'_, Result<(), TelemetryError>> {
+      Box::pin(async { Ok(()) })
+    }
+
+    fn flush(&self) -> BoxFuture<'_, Result<(), TelemetryError>> {
+      Box::pin(async { Ok(()) })
+    }
+  }
+
+  #[test]
+  fn disabled_publication_does_not_parse_or_serialize() {
+    futures_executor::block_on(async {
+      let published =
+        publish_json_artifact(None, "not a valid purpose", &PanicOnSerialize).await.expect("disabled publication must short-circuit");
+
+      assert!(published.is_none());
+    });
+  }
+
+  #[test]
+  fn telemetry_only_publication_does_not_parse_or_serialize() {
+    futures_executor::block_on(async {
+      let dispatch = configure()
+        .project_telemetry(Arc::new(NoopProjector), TelemetryRoutePolicy::fixed_fields_only())
+        .build()
+        .expect("telemetry-only dispatch");
+      let root = dispatcher::with_default(&dispatch, || Context::root(RunId::new()));
+
+      let published = publish_json_artifact(Some(&root), "not a valid purpose", &PanicOnSerialize)
+        .await
+        .expect("telemetry-only publication must short-circuit");
+
+      assert!(published.is_none());
+    });
+  }
+
+  #[test]
+  fn enabled_publication_validates_purpose_before_serializing() {
+    futures_executor::block_on(async {
+      let store = Arc::new(MemoryRunStore::new(AuthorityId::new()));
+      let dispatch = configure().run_store(store).build().expect("memory dispatch");
+      let root = dispatcher::with_default(&dispatch, || Context::root(RunId::new()));
+
+      let error = publish_json_artifact(Some(&root), "not a valid purpose", &PanicOnSerialize)
+        .await
+        .expect_err("invalid purpose must fail before serialization");
+
+      assert!(error.source().and_then(|source| source.downcast_ref::<ValidationError>()).is_some());
+      match error {
+        BalatroArtifactPublishError::InvalidPurpose { value, source } => {
+          assert_eq!(value, "not a valid purpose");
+          assert_eq!(source, ArtifactPurpose::parse(value).expect_err("fixture purpose is invalid"));
+        }
+        other => panic!("expected invalid-purpose error, got {other:?}"),
+      }
+    });
+  }
+
+  #[test]
+  fn detached_delivery_recording_keeps_the_direct_value_and_uses_the_active_run_store() {
+    futures_executor::block_on(async {
+      let store = Arc::new(MemoryRunStore::new(AuthorityId::new()));
+      let dispatch = configure().run_store(store.clone()).build().expect("memory dispatch");
+      let run_id = RunId::new();
+      let root = dispatcher::with_default(&dispatch, || Context::root(run_id));
+      let delivery = InputActionResult::single_success(InputDeliveryPath::WindowTargetedMouse);
+
+      let direct = root.in_scope(|| {
+        emit_json_artifact(INPUT_ACTION_RESULT_PURPOSE, &delivery);
+        42
       });
-      continue;
-    }
-    let parsed = read_artifact_json::<CardDetectionSemanticInspectReport>(
-      store,
-      run.run.run_id.as_str(),
-      artifact,
-      crate::BALATRO_CARD_DETECTION_SEMANTIC_INSPECT_ROLE,
-    )
-    .map(|report| BalatroCardDetectionSemanticInspectReportSummary::from(&report));
-    match parsed {
-      Ok(report) => reports.push(BalatroCardDetectionSemanticInspectReportLineage {
-        artifact: artifact_ref,
-        report: Some(report),
-        issue: None,
-      }),
-      Err(error) => reports.push(BalatroCardDetectionSemanticInspectReportLineage {
-        artifact: artifact_ref,
-        report: None,
-        issue: Some(error),
-      }),
-    }
-  }
-  Ok(reports)
-}
+      dispatch.flush().await.expect("flush delivery artifact");
+      let snapshot = store.load_snapshot(run_id).await.expect("load snapshot").expect("delivery run");
 
-pub(crate) fn extract_balatro_card_detection_spatial_query_manifests(
-  store: &LocalStore,
-  run: &CanonicalRun,
-) -> Result<Vec<BalatroCardDetectionSpatialQueryManifestLineage>, String> {
-  use crate::CardDetectionSpatialQueryManifest;
-  let mut manifests = Vec::new();
-  for artifact in &run.artifacts {
-    if artifact.role != crate::BALATRO_CARD_DETECTION_SPATIAL_QUERY_ROLE {
-      continue;
-    }
-    let artifact_ref = artifact_record_view(run.run.run_id.clone(), artifact);
-    if !is_json_mime(&artifact.mime_type) {
-      manifests.push(BalatroCardDetectionSpatialQueryManifestLineage {
-        artifact: artifact_ref,
-        manifest: None,
-        issue: Some(format!("balatro card detection spatial query manifest mime_type {} is not JSON", artifact.mime_type)),
-      });
-      continue;
-    }
-    let parsed = read_artifact_json::<CardDetectionSpatialQueryManifest>(
-      store,
-      run.run.run_id.as_str(),
-      artifact,
-      crate::BALATRO_CARD_DETECTION_SPATIAL_QUERY_ROLE,
-    )
-    .map(|manifest| BalatroCardDetectionSpatialQueryManifestSummary::from(&manifest));
-    match parsed {
-      Ok(manifest) => manifests.push(BalatroCardDetectionSpatialQueryManifestLineage {
-        artifact: artifact_ref,
-        manifest: Some(manifest),
-        issue: None,
-      }),
-      Err(error) => manifests.push(BalatroCardDetectionSpatialQueryManifestLineage {
-        artifact: artifact_ref,
-        manifest: None,
-        issue: Some(error),
-      }),
-    }
-  }
-  Ok(manifests)
-}
-
-pub(crate) fn extract_balatro_card_detection_spatial_query_inspect_reports(
-  store: &LocalStore,
-  run: &CanonicalRun,
-) -> Result<Vec<BalatroCardDetectionSpatialQueryInspectReportLineage>, String> {
-  use crate::CardDetectionSpatialQueryInspectReport;
-  let mut reports = Vec::new();
-  for artifact in &run.artifacts {
-    if artifact.role != crate::BALATRO_CARD_DETECTION_SPATIAL_QUERY_INSPECT_ROLE {
-      continue;
-    }
-    let artifact_ref = artifact_record_view(run.run.run_id.clone(), artifact);
-    if !is_json_mime(&artifact.mime_type) {
-      reports.push(BalatroCardDetectionSpatialQueryInspectReportLineage {
-        artifact: artifact_ref,
-        report: None,
-        issue: Some(format!("balatro card detection spatial query inspect mime_type {} is not JSON", artifact.mime_type)),
-      });
-      continue;
-    }
-    let parsed = read_artifact_json::<CardDetectionSpatialQueryInspectReport>(
-      store,
-      run.run.run_id.as_str(),
-      artifact,
-      crate::BALATRO_CARD_DETECTION_SPATIAL_QUERY_INSPECT_ROLE,
-    )
-    .map(|report| BalatroCardDetectionSpatialQueryInspectReportSummary::from(&report));
-    match parsed {
-      Ok(report) => reports.push(BalatroCardDetectionSpatialQueryInspectReportLineage {
-        artifact: artifact_ref,
-        report: Some(report),
-        issue: None,
-      }),
-      Err(error) => reports.push(BalatroCardDetectionSpatialQueryInspectReportLineage {
-        artifact: artifact_ref,
-        report: None,
-        issue: Some(error),
-      }),
-    }
-  }
-  Ok(reports)
-}
-
-pub(crate) fn extract_balatro_card_detection_eval_witness_manifests(
-  store: &LocalStore,
-  run: &CanonicalRun,
-) -> Result<Vec<BalatroCardDetectionEvalWitnessManifestLineage>, String> {
-  use crate::CardDetectionEvalWitnessManifest;
-  let mut manifests = Vec::new();
-  for artifact in &run.artifacts {
-    if artifact.role != crate::BALATRO_CARD_DETECTION_EVAL_WITNESS_ROLE {
-      continue;
-    }
-    let artifact_ref = artifact_record_view(run.run.run_id.clone(), artifact);
-    if !is_json_mime(&artifact.mime_type) {
-      manifests.push(BalatroCardDetectionEvalWitnessManifestLineage {
-        artifact: artifact_ref,
-        manifest: None,
-        issue: Some(format!("balatro card detection eval witness manifest mime_type {} is not JSON", artifact.mime_type)),
-      });
-      continue;
-    }
-    let parsed = read_artifact_json::<CardDetectionEvalWitnessManifest>(
-      store,
-      run.run.run_id.as_str(),
-      artifact,
-      crate::BALATRO_CARD_DETECTION_EVAL_WITNESS_ROLE,
-    )
-    .map(|manifest| BalatroCardDetectionEvalWitnessManifestSummary::from(&manifest));
-    match parsed {
-      Ok(manifest) => manifests.push(BalatroCardDetectionEvalWitnessManifestLineage {
-        artifact: artifact_ref,
-        manifest: Some(manifest),
-        issue: None,
-      }),
-      Err(error) => manifests.push(BalatroCardDetectionEvalWitnessManifestLineage {
-        artifact: artifact_ref,
-        manifest: None,
-        issue: Some(error),
-      }),
-    }
-  }
-  Ok(manifests)
-}
-
-pub(crate) fn extract_balatro_card_detection_eval_witness_inspect_reports(
-  store: &LocalStore,
-  run: &CanonicalRun,
-) -> Result<Vec<BalatroCardDetectionEvalWitnessInspectReportLineage>, String> {
-  use crate::CardDetectionEvalWitnessInspectReport;
-  let mut reports = Vec::new();
-  for artifact in &run.artifacts {
-    if artifact.role != crate::BALATRO_CARD_DETECTION_EVAL_WITNESS_INSPECT_ROLE {
-      continue;
-    }
-    let artifact_ref = artifact_record_view(run.run.run_id.clone(), artifact);
-    if !is_json_mime(&artifact.mime_type) {
-      reports.push(BalatroCardDetectionEvalWitnessInspectReportLineage {
-        artifact: artifact_ref,
-        report: None,
-        issue: Some(format!("balatro card detection eval witness inspect mime_type {} is not JSON", artifact.mime_type)),
-      });
-      continue;
-    }
-    let parsed = read_artifact_json::<CardDetectionEvalWitnessInspectReport>(
-      store,
-      run.run.run_id.as_str(),
-      artifact,
-      crate::BALATRO_CARD_DETECTION_EVAL_WITNESS_INSPECT_ROLE,
-    )
-    .map(|report| BalatroCardDetectionEvalWitnessInspectReportSummary::from(&report));
-    match parsed {
-      Ok(report) => reports.push(BalatroCardDetectionEvalWitnessInspectReportLineage {
-        artifact: artifact_ref,
-        report: Some(report),
-        issue: None,
-      }),
-      Err(error) => reports.push(BalatroCardDetectionEvalWitnessInspectReportLineage {
-        artifact: artifact_ref,
-        report: None,
-        issue: Some(error),
-      }),
-    }
-  }
-  Ok(reports)
-}
-
-pub(crate) fn extract_balatro_card_detection_quality_manifests(
-  store: &LocalStore,
-  run: &CanonicalRun,
-) -> Result<Vec<BalatroCardDetectionQualityManifestLineage>, String> {
-  use crate::CardDetectionQualityManifest;
-  let mut manifests = Vec::new();
-  for artifact in &run.artifacts {
-    if artifact.role != crate::BALATRO_CARD_DETECTION_QUALITY_ROLE {
-      continue;
-    }
-    let artifact_ref = artifact_record_view(run.run.run_id.clone(), artifact);
-    if !is_json_mime(&artifact.mime_type) {
-      manifests.push(BalatroCardDetectionQualityManifestLineage {
-        artifact: artifact_ref,
-        manifest: None,
-        issue: Some(format!("balatro card detection quality manifest mime_type {} is not JSON", artifact.mime_type)),
-      });
-      continue;
-    }
-    let parsed = read_artifact_json::<CardDetectionQualityManifest>(
-      store,
-      run.run.run_id.as_str(),
-      artifact,
-      crate::BALATRO_CARD_DETECTION_QUALITY_ROLE,
-    )
-    .map(|manifest| BalatroCardDetectionQualityManifestSummary::from(&manifest));
-    match parsed {
-      Ok(manifest) => manifests.push(BalatroCardDetectionQualityManifestLineage {
-        artifact: artifact_ref,
-        manifest: Some(manifest),
-        issue: None,
-      }),
-      Err(error) => manifests.push(BalatroCardDetectionQualityManifestLineage {
-        artifact: artifact_ref,
-        manifest: None,
-        issue: Some(error),
-      }),
-    }
-  }
-  Ok(manifests)
-}
-
-pub(crate) fn extract_balatro_card_detection_quality_inspect_reports(
-  store: &LocalStore,
-  run: &CanonicalRun,
-) -> Result<Vec<BalatroCardDetectionQualityInspectReportLineage>, String> {
-  use crate::CardDetectionQualityInspectReport;
-  let mut reports = Vec::new();
-  for artifact in &run.artifacts {
-    if artifact.role != crate::BALATRO_CARD_DETECTION_QUALITY_INSPECT_ROLE {
-      continue;
-    }
-    let artifact_ref = artifact_record_view(run.run.run_id.clone(), artifact);
-    if !is_json_mime(&artifact.mime_type) {
-      reports.push(BalatroCardDetectionQualityInspectReportLineage {
-        artifact: artifact_ref,
-        report: None,
-        issue: Some(format!("balatro card detection quality inspect mime_type {} is not JSON", artifact.mime_type)),
-      });
-      continue;
-    }
-    let parsed = read_artifact_json::<CardDetectionQualityInspectReport>(
-      store,
-      run.run.run_id.as_str(),
-      artifact,
-      crate::BALATRO_CARD_DETECTION_QUALITY_INSPECT_ROLE,
-    )
-    .map(|report| BalatroCardDetectionQualityInspectReportSummary::from(&report));
-    match parsed {
-      Ok(report) => reports.push(BalatroCardDetectionQualityInspectReportLineage {
-        artifact: artifact_ref,
-        report: Some(report),
-        issue: None,
-      }),
-      Err(error) => reports.push(BalatroCardDetectionQualityInspectReportLineage {
-        artifact: artifact_ref,
-        report: None,
-        issue: Some(error),
-      }),
-    }
-  }
-  Ok(reports)
-}
-
-impl From<&crate::CardDetectionSemanticManifest> for BalatroCardDetectionSemanticManifestSummary {
-  fn from(manifest: &crate::CardDetectionSemanticManifest) -> Self {
-    Self {
-      schema_version: manifest.schema_version,
-      source_detection_bundle_dir: manifest.source_detection_bundle_dir.clone(),
-      frame_source: manifest.frame_source.clone(),
-      image_width: manifest.image_width,
-      image_height: manifest.image_height,
-      ui_detection_count: manifest.ui_detection_count,
-      entities_detection_count: manifest.entities_detection_count,
-      semantic_status: manifest.semantic_status.as_str().to_string(),
-      semantic_reason: manifest.semantic_reason.map(|reason| reason.as_str().to_string()),
-      known_limits: manifest.known_limits.clone(),
-    }
-  }
-}
-
-impl From<&crate::CardDetectionSemanticInspectReport> for BalatroCardDetectionSemanticInspectReportSummary {
-  fn from(report: &crate::CardDetectionSemanticInspectReport) -> Self {
-    Self {
-      schema_version: report.schema_version,
-      card_detection_semantic_manifest_path: report.card_detection_semantic_manifest_path.clone(),
-      semantic_status: report.semantic_status.as_str().to_string(),
-      semantic_reason: report.semantic_reason.map(|reason| reason.as_str().to_string()),
-      detection_bundle_readable: report.detection_bundle_readable,
-      detection_sets_non_empty: report.detection_sets_non_empty,
-      warnings: report.warnings.clone(),
-      known_limits: report.known_limits.clone(),
-    }
-  }
-}
-
-impl From<&crate::CardDetectionSpatialQueryManifest> for BalatroCardDetectionSpatialQueryManifestSummary {
-  fn from(manifest: &crate::CardDetectionSpatialQueryManifest) -> Self {
-    Self {
-      schema_version: manifest.schema_version,
-      card_detection_semantic_manifest_path: manifest.card_detection_semantic_manifest_path.clone(),
-      target_zone: manifest.target_zone.clone(),
-      target_index: manifest.target_index,
-      query_backend: manifest.query_backend.as_str().to_string(),
-      status: manifest.status.as_str().to_string(),
-      reason: manifest.reason.map(|reason| reason.as_str().to_string()),
-      pixel_x: manifest.pixel_x,
-      pixel_y: manifest.pixel_y,
-      known_limits: manifest.known_limits.clone(),
-    }
-  }
-}
-
-impl From<&crate::CardDetectionSpatialQueryInspectReport> for BalatroCardDetectionSpatialQueryInspectReportSummary {
-  fn from(report: &crate::CardDetectionSpatialQueryInspectReport) -> Self {
-    Self {
-      schema_version: report.schema_version,
-      card_detection_spatial_query_manifest_path: report.card_detection_spatial_query_manifest_path.clone(),
-      target_zone: report.target_zone.clone(),
-      target_index: report.target_index,
-      query_backend: report.query_backend.as_str().to_string(),
-      status: report.status.as_str().to_string(),
-      reason: report.reason.map(|reason| reason.as_str().to_string()),
-      semantic_status: report.semantic_status.as_str().to_string(),
-      warnings: report.warnings.clone(),
-      known_limits: report.known_limits.clone(),
-    }
-  }
-}
-
-impl From<&crate::CardDetectionEvalWitnessManifest> for BalatroCardDetectionEvalWitnessManifestSummary {
-  fn from(manifest: &crate::CardDetectionEvalWitnessManifest) -> Self {
-    Self {
-      schema_version: manifest.schema_version,
-      card_detection_semantic_manifest_path: manifest.card_detection_semantic_manifest_path.clone(),
-      card_detection_spatial_query_manifest_path: manifest.card_detection_spatial_query_manifest_path.clone(),
-      expected_slots_path: manifest.expected_slots_path.clone(),
-      source_detection_bundle_dir: manifest.source_detection_bundle_dir.clone(),
-      expected_slot_count: manifest.expected_slot_count,
-      scored_slot_count: manifest.scored_slot_count,
-      unscored_slot_count: manifest.unscored_slot_count,
-      below_confidence_slot_count: manifest.below_confidence_slot_count,
-      quality_backend: manifest.quality_backend.as_str().to_string(),
-      detector_model_id: manifest.detector_model_id.clone(),
-      slot_score_count: manifest.slot_scores.len(),
-      status: manifest.status.as_str().to_string(),
-      reason: manifest.reason.map(|reason| reason.as_str().to_string()),
-    }
-  }
-}
-
-impl From<&crate::CardDetectionEvalWitnessInspectReport> for BalatroCardDetectionEvalWitnessInspectReportSummary {
-  fn from(report: &crate::CardDetectionEvalWitnessInspectReport) -> Self {
-    Self {
-      schema_version: report.schema_version,
-      card_detection_eval_witness_manifest_path: report.card_detection_eval_witness_manifest_path.clone(),
-      card_detection_semantic_manifest_path: report.card_detection_semantic_manifest_path.clone(),
-      card_detection_spatial_query_manifest_path: report.card_detection_spatial_query_manifest_path.clone(),
-      expected_slots_path: report.expected_slots_path.clone(),
-      source_detection_bundle_dir: report.source_detection_bundle_dir.clone(),
-      expected_slot_count: report.expected_slot_count,
-      scored_slot_count: report.scored_slot_count,
-      unscored_slot_count: report.unscored_slot_count,
-      below_confidence_slot_count: report.below_confidence_slot_count,
-      quality_backend: report.quality_backend.as_str().to_string(),
-      detector_model_id: report.detector_model_id.clone(),
-      slot_score_count: report.slot_score_count,
-      semantic_manifest_readable: report.semantic_manifest_readable,
-      spatial_query_manifest_readable: report.spatial_query_manifest_readable,
-      expected_slots_readable: report.expected_slots_readable,
-      status: report.status.as_str().to_string(),
-      reason: report.reason.map(|reason| reason.as_str().to_string()),
-      warnings: report.warnings.clone(),
-    }
-  }
-}
-
-impl From<&crate::CardDetectionQualityManifest> for BalatroCardDetectionQualityManifestSummary {
-  fn from(manifest: &crate::CardDetectionQualityManifest) -> Self {
-    Self {
-      schema_version: manifest.schema_version,
-      card_detection_eval_witness_manifest_path: manifest.card_detection_eval_witness_manifest_path.clone(),
-      witness_status: manifest.witness_status.as_str().to_string(),
-      status: manifest.status.as_str().to_string(),
-      verdict: manifest.verdict.as_str().to_string(),
-      quality_backend: manifest.quality_backend.map(|backend| backend.as_str().to_string()),
-      expected_slot_count: manifest.metrics.as_ref().map(|m| m.expected_slot_count),
-      scored_slot_count: manifest.metrics.as_ref().map(|m| m.scored_slot_count),
-      unscored_slot_count: manifest.metrics.as_ref().map(|m| m.unscored_slot_count),
-      slot_coverage_ratio: manifest.metrics.as_ref().and_then(|m| m.slot_coverage_ratio),
-    }
-  }
-}
-
-impl From<&crate::CardDetectionQualityInspectReport> for BalatroCardDetectionQualityInspectReportSummary {
-  fn from(report: &crate::CardDetectionQualityInspectReport) -> Self {
-    Self {
-      schema_version: report.schema_version,
-      card_detection_quality_manifest_path: report.card_detection_quality_manifest_path.clone(),
-      card_detection_eval_witness_manifest_path: report.card_detection_eval_witness_manifest_path.clone(),
-      witness_status: report.witness_status.as_str().to_string(),
-      status: report.status.as_str().to_string(),
-      verdict: report.verdict.as_str().to_string(),
-      quality_backend: report.quality_backend.map(|backend| backend.as_str().to_string()),
-      slot_coverage_ratio_available: report.slot_coverage_ratio_available,
-    }
+      assert_eq!(direct, 42);
+      assert_eq!(snapshot.artifacts().len(), 1);
+      assert_eq!(
+        snapshot.artifacts().values().next().expect("delivery artifact").metadata().purpose().as_str(),
+        INPUT_ACTION_RESULT_PURPOSE
+      );
+    });
   }
 }

@@ -1,13 +1,15 @@
 //! Subprocess loopback smoke (API-S1).
 //!
 //! Spawns the built `auv` binary via `CARGO_BIN_EXE_auv` and exercises
-//! CreateSession → Invoke → GetOperation through the real `session serve` entry.
+//! CreateSession and Invoke through the real `session serve` entry, then reads
+//! the independently recorded canonical run from the configured authority.
 
 use std::path::PathBuf;
 use std::time::Duration;
 
 use auv_api_proto::v1::session as proto;
 use auv_api_proto::v1::session::session_service_client::SessionServiceClient;
+use auv_tracing::{FileRunStore, RunId, RunStore};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::time::timeout;
@@ -15,10 +17,10 @@ use tonic::transport::Channel;
 
 const SERVER_READY_PREFIX: &str = "session API: grpc://";
 const SERVER_READY_TIMEOUT: Duration = Duration::from_secs(30);
-const INVOKE_SYNTHETIC_OPERATION_RESULT_KNOWN_LIMIT: &str = "auv.api.session.invoke_synthetic_operation_result";
 
 fn temp_store_root(label: &str) -> PathBuf {
   let dir = std::env::temp_dir().join(format!("auv-session-api-{label}-{}", std::process::id()));
+  let _ = std::fs::remove_dir_all(&dir);
   std::fs::create_dir_all(&dir).expect("create temp store_root");
   dir
 }
@@ -62,7 +64,7 @@ async fn invoke_sample_command(client: &mut SessionServiceClient<Channel>, sessi
 }
 
 #[tokio::test]
-async fn session_api_subprocess_smoke_invoke_then_get_operation_round_trips() {
+async fn session_api_subprocess_smoke_returns_direct_value_and_records_canonical_run() {
   let store_root = temp_store_root("subprocess-smoke");
   struct Cleanup(PathBuf);
   impl Drop for Cleanup {
@@ -101,21 +103,20 @@ async fn session_api_subprocess_smoke_invoke_then_get_operation_round_trips() {
   assert!(!session.session_id.is_empty());
 
   let invoke_response = invoke_sample_command(&mut client, session).await;
-  assert_eq!(invoke_response.status, "completed");
-  let operation = invoke_response.operation.expect("operation ref");
+  assert!(matches!(invoke_response.terminal, Some(auv_api_proto::v1::session::invoke_response::Terminal::Completed(_))));
+  assert!(invoke_response.recording_failure.is_empty());
+  let run_id = invoke_response.run_id.parse::<RunId>().expect("canonical run id");
 
-  let response = client
-    .get_operation(proto::GetOperationRequest {
-      operation: Some(operation),
-    })
-    .await
-    .expect("get_operation should succeed after invoke")
-    .into_inner();
-
-  assert_eq!(response.status, "completed");
-  assert_eq!(response.output_summary, "scan.coverage dry-run");
-  assert_eq!(response.operation.expect("operation ref").operation_id, "scan.coverage");
-  assert!(response.known_limits.iter().any(|limit| limit == INVOKE_SYNTHETIC_OPERATION_RESULT_KNOWN_LIMIT));
+  let store = FileRunStore::open(&store_root).expect("open session run authority");
+  let snapshot = store.load_snapshot(run_id).await.expect("load session run").expect("recorded session run");
+  assert_eq!(snapshot.run_id(), run_id);
+  assert!(snapshot.artifacts().is_empty());
+  assert_eq!(snapshot.events().len(), 1);
+  assert_eq!(snapshot.events()[0].schema().name().as_str(), "auv.frontend.lifecycle");
+  assert_eq!(
+    serde_json::from_str::<serde_json::Value>(snapshot.events()[0].payload().get()).expect("frontend lifecycle payload"),
+    serde_json::json!({ "frontend": "session-api" })
+  );
 
   child.kill().await.expect("kill session serve child");
   let _ = child.wait().await;

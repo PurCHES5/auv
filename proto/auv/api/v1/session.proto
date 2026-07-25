@@ -8,34 +8,16 @@ syntax = "proto3";
 
 package auv.api.session.v1;
 
-// SessionService exposes synchronous invoke and read-back over a session scope.
+// SessionService exposes synchronous invoke over a session scope.
 service SessionService {
   rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
   // Blocking terminal invoke: the RPC does not return until the command finishes
   // or fails on the synchronous path (not a fire-and-forget job submit).
   rpc Invoke(InvokeRequest) returns (InvokeResponse);
-  // Idempotent read-back summary for a prior invoke result (not an async polling
-  // model unless status or transport docs say otherwise).
-  rpc GetOperation(GetOperationRequest) returns (GetOperationResponse);
-  rpc StreamSessionEvents(StreamSessionEventsRequest)
-      returns (stream SessionEvent);
 }
 
 message SessionRef {
   string session_id = 1;
-}
-
-message OperationRef {
-  string run_id = 1;
-  // v1 maps operation_id to command_id from InvokeRequest (not span_id, and not
-  // the internal OperationResult.operation_id domain label).
-  string operation_id = 2;
-}
-
-message ArtifactRef {
-  string run_id = 1;
-  string artifact_id = 2;
-  string role = 3;
 }
 
 message CreateSessionRequest {
@@ -54,59 +36,24 @@ message InvokeRequest {
 }
 
 message InvokeResponse {
-  OperationRef operation = 1;
-  string status = 2; // "completed" | "failed" (string, not enum — experimental)
-  repeated ArtifactRef artifacts = 3;
-  repeated string known_limits = 4;
-  string failure_message = 5; // empty when absent; failure detail on sync path
+  // Canonical run identity for inspection. Invoke is synchronous; its direct
+  // result does not depend on reading the run store.
+  string run_id = 1;
+  oneof terminal {
+    InvokeCompleted completed = 2;
+    InvokeFailed failed = 3;
+  }
+  // Non-authoritative post-execution recording failure. Direct command status
+  // and terminal value remain unchanged when recording fails.
+  string recording_failure = 4;
 }
 
-message GetOperationRequest {
-  OperationRef operation = 1;
+message InvokeCompleted {
+  // UTF-8 JSON for the command's typed direct result. Commands without a
+  // result encode JSON null so all frontends preserve the same result shape.
+  bytes result_json = 1;
 }
 
-// Typed control-layer failure classification, projected read-side from the
-// persisted OperationResult.control_failure. Present only when a control step
-// (activate / focus / paste, etc.) failed before any verification ran, so the
-// failure cannot be expressed as a verification outcome.
-message ControlFailure {
-  // Which pipeline layer failed, as a snake_case string from the internal
-  // FailureLayer taxonomy (e.g. "control_failed"). String, not enum, matching
-  // the experimental status-as-string convention on this surface.
-  string layer = 1;
-  string message = 2; // human-readable failure detail
-  string recovery = 3; // optional recovery hint; empty when absent
-}
-
-message GetOperationResponse {
-  OperationRef operation = 1;
-  string status = 2; // same vocabulary as InvokeResponse: "completed" | "failed"
-  string output_summary = 3;
-  map<string, string> signals = 4;
-  repeated ArtifactRef artifacts = 5;
-  string failure_message = 6; // empty when absent
-  repeated string known_limits = 7; // aligns with InvokeResponse / internal OperationResult
-  // Typed control-layer failure from the persisted OperationResult; unset when
-  // the operation had no control-layer failure (proto3 message presence).
-  ControlFailure control_failure = 8;
-}
-
-message StreamSessionEventsRequest {
-  SessionRef session = 1;
-}
-
-// Stream events are typed by event_type; only the nested refs listed per type are
-// valid (others must be empty/default). No oneof or sequence field in v1 — clients
-// must not infer ordering guarantees beyond transport delivery.
-message SessionEvent {
-  string event_type = 1;
-  // session_created: session set; operation, artifact empty.
-  // invoke_started: session + operation set; artifact empty.
-  // invoke_completed: session + operation set; artifact empty; summary optional.
-  // invoke_failed: session + operation set; artifact empty; summary may hold failure detail.
-  // artifact_recorded: session + operation + artifact set.
-  SessionRef session = 2;
-  OperationRef operation = 3;
-  ArtifactRef artifact = 4;
-  string summary = 5;
+message InvokeFailed {
+  string message = 1;
 }

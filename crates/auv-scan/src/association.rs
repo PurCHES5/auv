@@ -1,18 +1,21 @@
 //! Adjacent-frame observation association (crate-local read-model).
 
+use serde::{Deserialize, Serialize};
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FrameObservation {
   pub observation_id: String,
   pub label: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AssociationDiagnostic {
   pub code: String,
   pub message: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
 pub enum AssociationResult {
   Linked {
     track_id: String,

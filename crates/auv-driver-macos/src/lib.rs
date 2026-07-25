@@ -24,12 +24,10 @@ pub mod types;
 #[doc(hidden)]
 pub mod native;
 
-pub use accessibility::{AxFocusObservation, AxTextObservation, DEFAULT_AX_MAX_CHILDREN, DEFAULT_AX_MAX_DEPTH};
+pub use accessibility::{AxFocusResult, AxTextRead, DEFAULT_AX_MAX_CHILDREN, DEFAULT_AX_MAX_DEPTH};
 pub use application::ApplicationControl;
 pub use auv_driver_common::vision::{OcrMatch, OcrMatches};
 pub use descriptor::{MacosDriverDescriptor, macos_driver_descriptor};
-#[doc(hidden)]
-pub use descriptor::{MacosLegacyDescriptorMetadata, macos_legacy_descriptor_metadata};
 pub use driver::{MacosDriver, MacosDriverSession};
 pub use readiness::assess_readiness;
 pub use session::{AccessibilityApi, ClipboardApi, InputApi, PermissionApi, VisionApi, WindowApi};

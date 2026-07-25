@@ -4,13 +4,12 @@ mod invoke_report;
 mod invoke_result;
 
 pub use invoke_report::{InvokeReport, InvokeReportField, InvokeReportSection, InvokeReportTable, InvokeReportTableRow};
-pub(crate) use invoke_report::{InvokeReportLabels, InvokeReportValue, InvokeSignalValue, OptionalReportText};
-pub use invoke_result::{InvokeResult, RunStatus};
+pub(crate) use invoke_report::{InvokeReportLabels, InvokeReportValue, OptionalReportText};
+pub use invoke_result::{InvokeResult, InvokeStatus};
 
 #[derive(Clone, Debug, Default)]
 pub struct ExecutionTarget {
   pub application_id: Option<String>,
-  pub target_label: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -26,6 +25,7 @@ pub struct InvokeOutputOptions {
   pub json: bool,
   pub detail: bool,
   pub wide: bool,
+  pub inspect_hint: bool,
 }
 
 impl Default for InvokeOutputOptions {
@@ -34,6 +34,7 @@ impl Default for InvokeOutputOptions {
       json: false,
       detail: false,
       wide: false,
+      inspect_hint: true,
     }
   }
 }

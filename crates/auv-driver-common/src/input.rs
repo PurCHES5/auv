@@ -252,6 +252,26 @@ pub enum InputDeliveryPath {
   Unsupported,
 }
 
+impl InputDeliveryPath {
+  pub const fn as_str(self) -> &'static str {
+    match self {
+      Self::Noop => "noop",
+      Self::AxPress => "ax_press",
+      Self::AxFocus => "ax_focus",
+      Self::AxSetValue => "ax_set_value",
+      Self::AxScroll => "ax_scroll",
+      Self::AxSelectedText => "ax_selected_text",
+      Self::WindowTargetedMouse => "window_targeted_mouse",
+      Self::WindowTargetedWheel => "window_targeted_wheel",
+      Self::WindowTargetedKeyboard => "window_targeted_keyboard",
+      Self::WindowTargetedKeyboardScroll => "window_targeted_keyboard_scroll",
+      Self::ClipboardPaste => "clipboard_paste",
+      Self::ForegroundSystemEvents => "foreground_system_events",
+      Self::Unsupported => "unsupported",
+    }
+  }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DisturbanceLevel {
@@ -260,6 +280,17 @@ pub enum DisturbanceLevel {
   Temporary,
   Foreground,
   Unknown,
+}
+
+impl DisturbanceLevel {
+  pub const fn as_str(self) -> &'static str {
+    match self {
+      Self::None => "none",
+      Self::Temporary => "temporary",
+      Self::Foreground => "foreground",
+      Self::Unknown => "unknown",
+    }
+  }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -287,8 +318,9 @@ impl InputAttempt {
   }
 }
 
-/// Artifact role for persisted [`InputActionResult`] JSON records.
-pub const INPUT_ACTION_RESULT_ARTIFACT_ROLE: &str = "input-action-result";
+/// Canonical artifact purpose used by recording adapters for
+/// [`InputActionResult`] JSON.
+pub const INPUT_ACTION_RESULT_PURPOSE: &str = "auv.driver.input_action_result";
 
 /// Persisted record of one driver input delivery — clicks, scrolls,
 /// text submission, etc. Captures the attempt sequence, the path that
@@ -310,7 +342,7 @@ pub const INPUT_ACTION_RESULT_ARTIFACT_ROLE: &str = "input-action-result";
 ///   construct `InputActionResult` the same way.
 /// - **Downstream**: persisted as a standalone `input-action-result` JSON
 ///   artifact — **not** embedded in `OperationResult`. Read-side seam:
-///   see `src/contract.rs` module docs.
+///   see the owning runtime or frontend's purpose-specific reader.
 ///
 /// Do not introduce a new action-result schema beside `InputActionResult`
 /// without owner approval.
@@ -325,7 +357,6 @@ pub const INPUT_ACTION_RESULT_ARTIFACT_ROLE: &str = "input-action-result";
 pub struct InputActionResult {
   pub selected_path: InputDeliveryPath,
   pub attempts: Vec<InputAttempt>,
-  pub fallback_reason: Option<String>,
   pub mouse_disturbance: DisturbanceLevel,
   pub focus_disturbance: DisturbanceLevel,
   pub clipboard_disturbance: DisturbanceLevel,
@@ -336,17 +367,38 @@ impl InputActionResult {
     Self {
       selected_path: path,
       attempts: vec![InputAttempt::success(path)],
-      fallback_reason: None,
       mouse_disturbance: DisturbanceLevel::None,
       focus_disturbance: DisturbanceLevel::None,
       clipboard_disturbance: DisturbanceLevel::None,
     }
+  }
+
+  /// Returns the first failed delivery attempt's diagnostic.
+  pub fn fallback_reason(&self) -> Option<&str> {
+    self.attempts.iter().find(|attempt| !attempt.succeeded).and_then(|attempt| attempt.message.as_deref())
   }
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn fallback_reason_is_derived_from_attempts_and_not_duplicated_on_the_wire() {
+    let result = InputActionResult {
+      selected_path: InputDeliveryPath::ForegroundSystemEvents,
+      attempts: vec![
+        InputAttempt::failure(InputDeliveryPath::WindowTargetedMouse, "background delivery failed"),
+        InputAttempt::success(InputDeliveryPath::ForegroundSystemEvents),
+      ],
+      mouse_disturbance: DisturbanceLevel::Temporary,
+      focus_disturbance: DisturbanceLevel::Foreground,
+      clipboard_disturbance: DisturbanceLevel::None,
+    };
+
+    assert_eq!(result.fallback_reason(), Some("background delivery failed"));
+    assert!(serde_json::to_value(result).expect("serialize input action result").get("fallback_reason").is_none());
+  }
 
   #[test]
   fn click_and_click_options_serde_roundtrip() {
@@ -424,13 +476,42 @@ mod tests {
   }
 
   #[test]
-  fn scroll_delivery_path_variants_serde_as_snake_case() {
-    assert_eq!(serde_json::to_string(&InputDeliveryPath::AxScroll).expect("serialize ax scroll"), "\"ax_scroll\"");
-    assert_eq!(serde_json::to_string(&InputDeliveryPath::WindowTargetedWheel).expect("serialize window wheel"), "\"window_targeted_wheel\"");
-    assert_eq!(
-      serde_json::to_string(&InputDeliveryPath::WindowTargetedKeyboardScroll).expect("serialize keyboard scroll"),
-      "\"window_targeted_keyboard_scroll\""
-    );
+  fn input_delivery_path_serde_matches_every_explicit_wire_value() {
+    let cases = [
+      (InputDeliveryPath::Noop, "noop"),
+      (InputDeliveryPath::AxPress, "ax_press"),
+      (InputDeliveryPath::AxFocus, "ax_focus"),
+      (InputDeliveryPath::AxSetValue, "ax_set_value"),
+      (InputDeliveryPath::AxScroll, "ax_scroll"),
+      (InputDeliveryPath::AxSelectedText, "ax_selected_text"),
+      (InputDeliveryPath::WindowTargetedMouse, "window_targeted_mouse"),
+      (InputDeliveryPath::WindowTargetedWheel, "window_targeted_wheel"),
+      (InputDeliveryPath::WindowTargetedKeyboard, "window_targeted_keyboard"),
+      (InputDeliveryPath::WindowTargetedKeyboardScroll, "window_targeted_keyboard_scroll"),
+      (InputDeliveryPath::ClipboardPaste, "clipboard_paste"),
+      (InputDeliveryPath::ForegroundSystemEvents, "foreground_system_events"),
+      (InputDeliveryPath::Unsupported, "unsupported"),
+    ];
+
+    for (path, expected) in cases {
+      assert_eq!(path.as_str(), expected);
+      assert_eq!(serde_json::to_value(path).expect("serialize input delivery path"), serde_json::Value::String(expected.to_string()));
+    }
+  }
+
+  #[test]
+  fn disturbance_level_serde_matches_every_explicit_wire_value() {
+    let cases = [
+      (DisturbanceLevel::None, "none"),
+      (DisturbanceLevel::Temporary, "temporary"),
+      (DisturbanceLevel::Foreground, "foreground"),
+      (DisturbanceLevel::Unknown, "unknown"),
+    ];
+
+    for (level, expected) in cases {
+      assert_eq!(level.as_str(), expected);
+      assert_eq!(serde_json::to_value(level).expect("serialize disturbance level"), serde_json::Value::String(expected.to_string()));
+    }
   }
 
   #[test]
