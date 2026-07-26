@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::scroll::policies::detection_motion::MotionDetectionPolicy;
 use crate::scroll::policies::detection_motion::MotionEvidence;
 use crate::view_parsers::sidebar::classify_sidebar_text;
-use crate::{SidebarCandidateKind, SidebarViewportCandidate, SidebarViewportObservation, ViewBounds, normalize_identity};
+use crate::{SidebarCandidateKind, SidebarViewportObservation, ViewBounds, normalize_identity};
 use auv_driver::RatioRect;
 use auv_driver::vision::{TextRecognition, TextRecognitionOptions};
 
@@ -110,24 +110,6 @@ struct SidebarTargetProbeCandidateSummary {
   id: String,
   kind: String,
   label: Option<String>,
-}
-
-pub(crate) fn preceding_scroll_context(
-  step_name: impl Into<String>,
-  delta_y: f64,
-  policy: impl Into<String>,
-  settle_ms: u64,
-  delivery_path: Option<String>,
-  fallback_reason: Option<String>,
-) -> PrecedingScrollContext {
-  PrecedingScrollContext {
-    step_name: step_name.into(),
-    delta_y,
-    policy: policy.into(),
-    settle_ms,
-    delivery_path,
-    fallback_reason,
-  }
 }
 
 pub(crate) fn merge_custom_words(base: &[String], words: &[&str]) -> Vec<String> {
@@ -244,7 +226,11 @@ pub(crate) fn analyze_sidebar_target_probe(observation: &SidebarViewportObservat
   let playlist_items =
     observation.candidates.iter().filter(|candidate| candidate.kind == SidebarCandidateKind::PlaylistItem).collect::<Vec<_>>();
 
-  let result = playlist_items.iter().filter_map(|candidate| matching_playlist_bounds(candidate, &target_identity, &query_identity)).next();
+  let result = playlist_items.iter().find_map(|candidate| {
+    let label = candidate.label.as_deref()?;
+    let bounds = candidate.bounds?;
+    label_matches_target(label, &target_identity, &query_identity).then_some(bounds)
+  });
 
   let miss_reason = result.is_none().then(|| {
     if observation.evidence_nodes.is_empty() {
@@ -354,16 +340,6 @@ fn truncate_ocr_preview(text: &str) -> String {
   text.chars().take(OCR_TEXT_PREVIEW_LIMIT).collect::<String>() + "..."
 }
 
-fn capture_view_bounds(capture: &auv_driver::Capture) -> ViewBounds {
-  ViewBounds::new(capture.bounds.origin.x, capture.bounds.origin.y, capture.bounds.size.width, capture.bounds.size.height)
-}
-
-fn matching_playlist_bounds(candidate: &SidebarViewportCandidate, target_identity: &str, query_identity: &str) -> Option<ViewBounds> {
-  let label = candidate.label.as_deref()?;
-  let bounds = candidate.bounds?;
-  label_matches_target(label, target_identity, query_identity).then_some(bounds)
-}
-
 fn label_matches_target(label: &str, target_identity: &str, _query_identity: &str) -> bool {
   normalize_identity(label) == target_identity
 }
@@ -443,7 +419,7 @@ pub(crate) fn capture_sidebar_target_probe(
   *previous_sidebar_crop = Some(sidebar_crop.clone());
 
   let capture_context = build_probe_capture_context(
-    capture_view_bounds(&capture),
+    ViewBounds::new(capture.bounds.origin.x, capture.bounds.origin.y, capture.bounds.size.width, capture.bounds.size.height),
     capture.scale_factor,
     sidebar_bounds,
     sidebar_ratio,
@@ -628,14 +604,14 @@ mod tests {
       phase: "rescan".to_string(),
       attempt: 0,
       scroll_anchor: (160.0, 723.45),
-      preceding_scroll: Some(preceding_scroll_context(
-        "scroll-sidebar-top-11",
-        960.0,
-        "background_preferred",
-        120,
-        Some("window_targeted_wheel".to_string()),
-        Some("AX scroll is not implemented in this slice".to_string()),
-      )),
+      preceding_scroll: Some(PrecedingScrollContext {
+        step_name: "scroll-sidebar-top-11".to_string(),
+        delta_y: 960.0,
+        policy: "background_preferred".to_string(),
+        settle_ms: 120,
+        delivery_path: Some("window_targeted_wheel".to_string()),
+        fallback_reason: Some("AX scroll is not implemented in this slice".to_string()),
+      }),
     };
     let payload = sidebar_target_probe_artifact(&observation, &probe, &scroll_context, &capture_context);
 

@@ -264,10 +264,8 @@ fn normalize_section_label(label: &str) -> String {
     .trim()
     .to_string();
 
-  strip_leading_icon_noise(label)
-}
-
-fn strip_leading_icon_noise(label: String) -> String {
+  // NetEase's disclosure icon can be recognized as arbitrary prefix noise;
+  // the stable section suffix is sufficient to recover this app-local label.
   if label.ends_with("我的收藏") && label != "我的收藏" {
     return "我的收藏".to_string();
   }
@@ -279,6 +277,11 @@ mod tests {
   use super::*;
   use crate::{PlaylistSidebarItem, SidebarSection, SidebarSectionKind};
   use auv_view::Confidence;
+
+  #[test]
+  fn section_label_recovers_favorite_collection_from_ocr_prefix_noise() {
+    assert_eq!(normalize_section_label("噪声我的收藏"), "我的收藏");
+  }
 
   #[test]
   fn exists_when_projection_has_known_sidebar_playlist_section() {

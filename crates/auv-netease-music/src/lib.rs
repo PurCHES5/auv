@@ -708,25 +708,6 @@ fn empty_root() -> ViewNodeRecord {
 }
 
 #[cfg(target_os = "macos")]
-fn delivery_path_label(path: auv_driver::InputDeliveryPath) -> &'static str {
-  match path {
-    auv_driver::InputDeliveryPath::Noop => "noop",
-    auv_driver::InputDeliveryPath::AxPress => "ax_press",
-    auv_driver::InputDeliveryPath::AxFocus => "ax_focus",
-    auv_driver::InputDeliveryPath::AxSetValue => "ax_set_value",
-    auv_driver::InputDeliveryPath::AxScroll => "ax_scroll",
-    auv_driver::InputDeliveryPath::AxSelectedText => "ax_selected_text",
-    auv_driver::InputDeliveryPath::WindowTargetedMouse => "window_targeted_mouse",
-    auv_driver::InputDeliveryPath::WindowTargetedWheel => "window_targeted_wheel",
-    auv_driver::InputDeliveryPath::WindowTargetedKeyboard => "window_targeted_keyboard",
-    auv_driver::InputDeliveryPath::WindowTargetedKeyboardScroll => "window_targeted_keyboard_scroll",
-    auv_driver::InputDeliveryPath::ClipboardPaste => "clipboard_paste",
-    auv_driver::InputDeliveryPath::ForegroundSystemEvents => "foreground_system_events",
-    auv_driver::InputDeliveryPath::Unsupported => "unsupported",
-  }
-}
-
-#[cfg(target_os = "macos")]
 fn recognition_in_window_space(mut recognition: TextRecognition, capture: &Capture) -> TextRecognition {
   for region in &mut recognition.regions {
     region.bounds.origin.x -= capture.bounds.origin.x;

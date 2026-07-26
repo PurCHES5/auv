@@ -1,8 +1,10 @@
 use std::fmt;
 
+use auv_cli_common::TableRow;
+use auv_cli_common::outputs::cli::CliOutput;
+use auv_cli_common::outputs::formats::table::{self, TableOptions};
 use auv_driver::vision::TextRecognitionOptions;
 use auv_view::{ParserDiagnostic, ScanAppContext, ScanWindowContext};
-use comfy_table::{Cell, Table, presets::NOTHING};
 use serde::{Deserialize, Serialize};
 
 use crate::DEFAULT_APP_ID;
@@ -96,92 +98,98 @@ pub struct PlaybackStatusJson<'a> {
 
 impl fmt::Display for PlaybackStatusHumanReadable<'_> {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    let result = self.result;
-    let mut status = Table::new();
-    status.load_preset(NOTHING);
-    if self.wide {
-      status.set_header([
-        "PLAYBACK", "SCREEN", "PLAYING", "CONTROL", "CLICK", "SOURCE",
-      ]);
-      status.add_row([
-        Cell::new(playback_cell(result.playback_exists)),
-        Cell::new(screen_cell(result.detail_screen_detected)),
-        Cell::new(playing_cell(result.was_playing, result.control_state)),
-        Cell::new(control_state_cell(result.control_state)),
-        Cell::new(click_point_cell(result.click_point)),
-        Cell::new(result.source.as_deref().unwrap_or("-")),
-      ]);
-    } else {
-      status.set_header(["PLAYBACK", "SCREEN", "SOURCE"]);
-      status.add_row([
-        playback_cell(result.playback_exists),
-        screen_cell(result.detail_screen_detected),
-        result.source.as_deref().unwrap_or("-"),
-      ]);
-    }
-    write!(f, "{}", render_table(status))?;
+    write!(f, "{}", CliOutput::to_human(self.result, TableOptions::default().wide(self.wide)))
+  }
+}
 
-    if !result.known_limits.is_empty() {
-      writeln!(f)?;
-      writeln!(f)?;
-      let mut limits = Table::new();
-      limits.load_preset(NOTHING);
-      limits.set_header(["KNOWN LIMITS"]);
-      for limit in &result.known_limits {
-        limits.add_row([limit]);
+impl CliOutput for PlaybackStatus {
+  fn to_json(&self) -> impl Serialize {
+    PlaybackStatus::to_json(self)
+  }
+
+  fn to_table_print(&self, options: TableOptions<'_>) -> String {
+    let status = [PlaybackStatusRow {
+      playback: self.playback_exists,
+      screen: self.detail_screen_detected,
+      playing: self.was_playing,
+      control: self.control_state,
+      click: self.click_point.map(|point| format!("{:.1},{:.1}", point.x, point.y)).unwrap_or_else(|| "-".to_string()),
+      source: self.source.as_deref().unwrap_or("-"),
+    }];
+    table::render(&status, options)
+  }
+
+  fn human_details(&self, _options: TableOptions<'_>) -> Option<String> {
+    let mut sections = Vec::new();
+    if !self.known_limits.is_empty() {
+      let limits = self
+        .known_limits
+        .iter()
+        .map(|limit| KnownLimitRow {
+          known_limits: limit,
+        })
+        .collect::<Vec<_>>();
+      sections.push(table::render(&limits, TableOptions::default()));
+    }
+
+    if !self.diagnostics.is_empty() {
+      let diagnostics = self
+        .diagnostics
+        .iter()
+        .map(|diagnostic| DiagnosticRow {
+          diagnostic: &diagnostic.code,
+          message: &diagnostic.message,
+        })
+        .collect::<Vec<_>>();
+      sections.push(table::render(&diagnostics, TableOptions::default()));
+    }
+    (!sections.is_empty()).then(|| sections.join("\n\n"))
+  }
+}
+
+#[derive(TableRow)]
+struct PlaybackStatusRow<'a> {
+  #[table(display_zero = "N/A", display_with = |_: &bool| "Detected")]
+  playback: bool,
+  #[table(display_zero = "N/A", display_with = |_: &bool| "Details")]
+  screen: bool,
+  #[table(
+    wide,
+    display_with = |is_playing: &bool| {
+      if *is_playing {
+        "Playing"
+      } else if self.control == Some(PlaybackControlState::PlayVisible) {
+        "Paused"
+      } else {
+        "N/A"
       }
-      write!(f, "{}", render_table(limits))?;
     }
-
-    if !result.diagnostics.is_empty() {
-      writeln!(f)?;
-      writeln!(f)?;
-      let mut diagnostics = Table::new();
-      diagnostics.load_preset(NOTHING);
-      diagnostics.set_header(["DIAGNOSTIC", "MESSAGE"]);
-      for diagnostic in &result.diagnostics {
-        diagnostics.add_row([Cell::new(&diagnostic.code), Cell::new(&diagnostic.message)]);
-      }
-      write!(f, "{}", render_table(diagnostics))?;
+  )]
+  playing: bool,
+  #[table(
+    wide,
+    display_with = |value: &Option<PlaybackControlState>| match value {
+      Some(PlaybackControlState::PlayVisible) => "play_visible",
+      Some(PlaybackControlState::PauseVisible) => "pause_visible",
+      Some(PlaybackControlState::Unknown) => "unknown",
+      None => "-",
     }
-
-    Ok(())
-  }
+  )]
+  control: Option<PlaybackControlState>,
+  #[table(wide)]
+  click: String,
+  source: &'a str,
 }
 
-fn playback_cell(value: bool) -> &'static str {
-  if value { "Detected" } else { "N/A" }
+#[derive(TableRow)]
+struct KnownLimitRow<'a> {
+  known_limits: &'a str,
 }
 
-fn screen_cell(value: bool) -> &'static str {
-  if value { "Details" } else { "N/A" }
-}
-
-fn playing_cell(is_playing: bool, control_state: Option<PlaybackControlState>) -> &'static str {
-  if is_playing {
-    "Playing"
-  } else if control_state == Some(PlaybackControlState::PlayVisible) {
-    "Paused"
-  } else {
-    "N/A"
-  }
-}
-
-fn control_state_cell(value: Option<PlaybackControlState>) -> &'static str {
-  match value {
-    Some(PlaybackControlState::PlayVisible) => "play_visible",
-    Some(PlaybackControlState::PauseVisible) => "pause_visible",
-    Some(PlaybackControlState::Unknown) => "unknown",
-    None => "-",
-  }
-}
-
-fn click_point_cell(value: Option<auv_driver::Point>) -> String {
-  value.map(|point| format!("{:.1},{:.1}", point.x, point.y)).unwrap_or_else(|| "-".to_string())
-}
-
-fn render_table(table: Table) -> String {
-  table.to_string().lines().map(str::trim).collect::<Vec<_>>().join("\n")
+#[derive(TableRow)]
+struct DiagnosticRow<'a> {
+  diagnostic: &'a str,
+  message: &'a str,
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]

@@ -76,18 +76,15 @@ pub(crate) fn candidate_from_evidence(observation_index: usize, node: &ViewEvide
     return None;
   }
 
+  let source_component = node.id.strip_prefix(&format!("obs{observation_index}.")).unwrap_or(&node.id);
   Some(SidebarViewportCandidate {
-    id: format!("obs{observation_index}.candidate.{}.{}", candidate_source_component(observation_index, &node.id), slug(label)),
+    id: format!("obs{observation_index}.candidate.{source_component}.{}", slug(label)),
     kind,
     label: Some(label.to_string()),
     bounds: Some(bounds),
     evidence_ids: vec![node.id.clone()],
     confidence: node.confidence,
   })
-}
-
-pub(crate) fn candidate_source_component(observation_index: usize, evidence_id: &str) -> &str {
-  evidence_id.strip_prefix(&format!("obs{observation_index}.")).unwrap_or(evidence_id)
 }
 
 pub(crate) fn classify_sidebar_text(label: &str, x: f64) -> SidebarCandidateKind {

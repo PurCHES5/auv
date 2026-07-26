@@ -21,6 +21,7 @@ path = "src/bin/auv-netease-music.rs"
 required-features = ["tracing"]
 
 [dependencies]
+auv-cli-common = { path = "../auv-cli-common" }
 auv-driver = { path = "../auv-driver" }
 # auv-media-macos compiles on all targets (non-macOS calls return Unsupported),
 # so it is a normal dependency — this lets the platform-neutral CLI reuse its
@@ -29,7 +30,6 @@ auv-media-macos = { path = "../auv-media-macos" }
 auv-view = { path = "../auv-view" }
 auv-tracing = { path = "../auv-tracing", features = ["file-store"] }
 clap = { version = "4.5", features = ["derive"] }
-comfy-table = "7"
 futures-executor = "0.3"
 futures-util = { workspace = true, features = ["io"] }
 serde.workspace = true

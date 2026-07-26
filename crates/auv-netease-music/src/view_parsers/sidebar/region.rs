@@ -38,7 +38,7 @@ pub(crate) fn detect_sidebar_region(
   let usable_height = window_size.height.max(0.0);
   let y_marker = markers
     .iter()
-    .filter(|marker| is_playlist_section_marker(marker.2))
+    .filter(|marker| SidebarSectionKind::from_label(marker.2).is_playlist_collection())
     .map(|marker| marker.1)
     .min_by(|left, right| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal))
     .unwrap_or(0.0)
@@ -196,10 +196,6 @@ pub(crate) fn ratio_to_window_bounds(region: RatioRect, window_size: Size) -> Vi
 
 pub(crate) fn is_sidebar_marker(label: &str) -> bool {
   SidebarSectionKind::from_label(label).is_known() || matches!(label, "推荐" | "发现音乐" | "最近播放")
-}
-
-pub(crate) fn is_playlist_section_marker(label: &str) -> bool {
-  SidebarSectionKind::from_label(label).is_playlist_collection()
 }
 
 pub(crate) fn detect_blocking_modal(recognition: &TextRecognition) -> Option<ParserDiagnostic> {

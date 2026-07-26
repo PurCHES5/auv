@@ -1,4 +1,6 @@
-use comfy_table::{Cell, Table, presets::NOTHING};
+use auv_cli_common::TableRow;
+use auv_cli_common::outputs::cli::CliOutput;
+use auv_cli_common::outputs::formats::table::{self, TableOptions};
 use serde::Serialize;
 
 use crate::views::query_match::{PlaylistQueryMatchMode, PlaylistQueryResolution};
@@ -118,7 +120,7 @@ pub fn build_playlist_json_output(
   PlaylistJsonOutput {
     command: "playlist.ls",
     query: keyword.map(str::to_string),
-    min_confidence: min_confidence.map(confidence_name),
+    min_confidence: min_confidence.map(|confidence| confidence.to_string()),
     result: PlaylistJsonResult {
       item_count,
       match_count: matches.len(),
@@ -127,6 +129,23 @@ pub fn build_playlist_json_output(
     },
     query_resolution,
     known_limits: scan.known_limits().to_vec(),
+  }
+}
+
+/// One computed playlist listing shared by JSON, table, and human routes.
+pub(crate) struct PlaylistOutput<'a> {
+  json: PlaylistJsonOutput,
+  scan: &'a PlaylistSidebarScan,
+  detail: bool,
+}
+
+impl<'a> PlaylistOutput<'a> {
+  pub(crate) fn new(scan: &'a PlaylistSidebarScan, keyword: Option<&str>, min_confidence: Option<Confidence>, detail: bool) -> Self {
+    Self {
+      json: build_playlist_json_output(scan, keyword, min_confidence),
+      scan,
+      detail,
+    }
   }
 }
 
@@ -152,7 +171,7 @@ fn collect_matches_from_sidebar(sidebar: &SidebarView, keyword: Option<&str>) ->
         candidate_id: playlist.item.candidate_id.clone(),
         anchor_id: playlist.item.anchor_id.clone(),
         confidence: ConfidenceRef {
-          level: confidence_code(confidence).to_string(),
+          level: confidence.short_code().to_string(),
           reason: "existing scan confidence and query match",
         },
         source_evidence: MatchSourceEvidence {
@@ -183,146 +202,115 @@ fn filter_matches(matches: Vec<MatchRef>, min_confidence: Option<Confidence>) ->
   };
   matches
     .into_iter()
-    .filter(|candidate| {
-      let confidence = match candidate.confidence.level.as_str() {
-        "H" => Confidence::High,
-        "M" => Confidence::Medium,
-        _ => Confidence::Low,
-      };
-      confidence_rank(confidence) >= confidence_rank(min_confidence)
-    })
+    .filter(|candidate| Confidence::from_short_code(&candidate.confidence.level).unwrap_or_default() >= min_confidence)
     .collect()
-}
-
-pub(crate) fn confidence_code(confidence: Confidence) -> &'static str {
-  // TODO(playlist-confidence-scale-v1): XH/XL and numeric scores are deferred
-  // until raw OCR/source scores are approved for playlist match refs.
-  match confidence {
-    Confidence::High => "H",
-    Confidence::Medium => "M",
-    Confidence::Low => "L",
-  }
-}
-
-pub(crate) fn confidence_name(confidence: Confidence) -> String {
-  match confidence {
-    Confidence::High => "high",
-    Confidence::Medium => "medium",
-    Confidence::Low => "low",
-  }
-  .to_string()
-}
-
-fn confidence_rank(confidence: Confidence) -> u8 {
-  match confidence {
-    Confidence::High => 3,
-    Confidence::Medium => 2,
-    Confidence::Low => 1,
-  }
 }
 
 fn is_zero(value: &usize) -> bool {
   *value == 0
 }
 
-pub(crate) fn render_playlist_human_output(
-  scan: &PlaylistSidebarScan,
-  keyword: Option<&str>,
-  min_confidence: Option<Confidence>,
-  detail: bool,
-) -> String {
-  let sidebar = SidebarView::from_projection(scan.projection().clone());
-  let item_count = collect_matches_from_sidebar(&sidebar, None).len();
-  let raw_matches = collect_matches_from_sidebar(&sidebar, keyword);
-  let raw_match_count = raw_matches.len();
-  let matches = assign_scan_refs(filter_matches(raw_matches, min_confidence));
-  let filtered_count = raw_match_count.saturating_sub(matches.len());
-  let mut output = String::new();
+impl CliOutput for PlaylistOutput<'_> {
+  fn to_json(&self) -> impl Serialize {
+    &self.json
+  }
 
-  match keyword {
-    Some(query) => {
-      output.push_str(&format!("{item_count} playlists observed. {} matches for {query:?}.\n", matches.len()));
-      if filtered_count > 0 {
-        if let Some(min_confidence) = min_confidence {
-          output.push_str(&format!("filtered {filtered_count} below min-confidence {}\n", confidence_name(min_confidence)));
-        }
-      }
-      output.push('\n');
-      for candidate in &matches {
-        output.push_str(&format!("* {:<3} {:<5} {}\n", candidate.confidence.level, candidate.scan_ref, candidate.label));
-        if detail {
-          output.push_str(&format!(
-            "      source=playlist_sidebar_projection section={:?} item_id={} candidate_id={} anchor_id={}\n",
-            candidate.section_kind,
-            candidate.item_id,
-            optional(candidate.candidate_id.as_deref()),
-            optional(candidate.anchor_id.as_deref())
-          ));
-        }
-      }
-      if detail {
-        if let Some(query) = keyword {
-          output.push_str(&format!(
-            "query_resolution={}\n",
-            query_resolution_name(query_resolution_kind(sidebar.playlist_query_resolution(query)))
-          ));
-        }
-        append_detail_footer(&mut output, scan);
-      } else {
-        output.push_str("\nMore: --detail, --json\n");
-      }
-    }
-    None => {
-      if detail {
-        output.push_str(&format!("{item_count} playlists observed.\n\nSections:\n"));
-        for (kind, count) in section_counts(scan) {
-          output.push_str(&format!("  {kind:?}: {count}\n"));
+  fn to_table_print(&self, options: TableOptions<'_>) -> String {
+    render_playlist_table(&self.json.result.matches, options)
+  }
+
+  fn to_human(&self, options: TableOptions<'_>) -> String {
+    let scan = self.scan;
+    let detail = self.detail;
+    let keyword = self.json.query.as_deref();
+    let item_count = self.json.result.item_count;
+    let matches = &self.json.result.matches;
+    let filtered_count = self.json.result.filtered_count;
+    let mut output = String::new();
+
+    match keyword {
+      Some(query) => {
+        output.push_str(&format!("{item_count} playlists observed. {} matches for {query:?}.\n", matches.len()));
+        if filtered_count > 0 {
+          if let Some(min_confidence) = &self.json.min_confidence {
+            output.push_str(&format!("filtered {filtered_count} below min-confidence {min_confidence}\n"));
+          }
         }
         output.push('\n');
-        for candidate in &matches {
+        for candidate in matches {
           output.push_str(&format!("* {:<3} {:<5} {}\n", candidate.confidence.level, candidate.scan_ref, candidate.label));
-          output.push_str(&format!(
-            "      source=playlist_sidebar_projection section={:?} item_id={} candidate_id={} anchor_id={}\n",
-            candidate.section_kind,
-            candidate.item_id,
-            optional(candidate.candidate_id.as_deref()),
-            optional(candidate.anchor_id.as_deref())
-          ));
+          if detail {
+            output.push_str(&format!(
+              "      source=playlist_sidebar_projection section={:?} item_id={} candidate_id={} anchor_id={}\n",
+              candidate.section_kind,
+              candidate.item_id,
+              optional(candidate.candidate_id.as_deref()),
+              optional(candidate.anchor_id.as_deref())
+            ));
+          }
         }
-        append_detail_footer(&mut output, scan);
-      } else {
-        output.push_str(&render_playlist_table(&matches));
-        output.push_str("\n\nMore: use a keyword, --detail, or --json.\n");
+        if detail {
+          if let Some(query_resolution) = self.json.query_resolution {
+            output.push_str(&format!("query_resolution={}\n", query_resolution_name(query_resolution)));
+          }
+          append_detail_footer(&mut output, scan);
+        } else {
+          output.push_str("\nMore: --detail, --json\n");
+        }
+      }
+      None => {
+        if detail {
+          output.push_str(&format!("{item_count} playlists observed.\n\nSections:\n"));
+          for section in &scan.projection().sections {
+            output.push_str(&format!("  {:?}: {}\n", section.kind, section.items.len()));
+          }
+          output.push('\n');
+          for candidate in matches {
+            output.push_str(&format!("* {:<3} {:<5} {}\n", candidate.confidence.level, candidate.scan_ref, candidate.label));
+            output.push_str(&format!(
+              "      source=playlist_sidebar_projection section={:?} item_id={} candidate_id={} anchor_id={}\n",
+              candidate.section_kind,
+              candidate.item_id,
+              optional(candidate.candidate_id.as_deref()),
+              optional(candidate.anchor_id.as_deref())
+            ));
+          }
+          append_detail_footer(&mut output, scan);
+        } else {
+          output.push_str(&self.to_table_print(options.empty_message("(no playlists observed)")));
+          output.push_str("\n\nMore: use a keyword, --detail, or --json.\n");
+        }
       }
     }
-  }
 
-  output.trim_end().to_string()
+    output.trim_end().to_string()
+  }
 }
 
-fn render_playlist_table(matches: &[MatchRef]) -> String {
-  let mut table = Table::new();
-  table.load_preset(NOTHING);
-  table.set_header(["NAME", "SECTION", "CONFIDENCE", "ANCHOR ID"]);
-
-  if matches.is_empty() {
-    let mut output = render_table(table);
-    output.push_str("\n(no playlists observed)");
-    return output;
-  }
-
-  for candidate in matches {
-    table.add_row([
-      Cell::new(&candidate.label),
-      Cell::new(section_kind_name(candidate.section_kind)),
-      Cell::new(confidence_level_name(&candidate.confidence.level)),
-      Cell::new(candidate.anchor_id.as_deref().unwrap_or("-")),
-    ]);
-  }
-  render_table(table)
+fn render_playlist_table(matches: &[MatchRef], options: TableOptions<'_>) -> String {
+  let rows = matches
+    .iter()
+    .map(|candidate| PlaylistTableRow {
+      name: &candidate.label,
+      section: candidate.section_kind,
+      confidence: &candidate.confidence.level,
+      anchor_id: candidate.anchor_id.as_deref(),
+    })
+    .collect::<Vec<_>>();
+  table::render(&rows, options)
 }
 
-fn section_kind_name(kind: SidebarSectionKind) -> &'static str {
+#[derive(TableRow)]
+struct PlaylistTableRow<'a> {
+  name: &'a str,
+  #[table(display_with = "section_kind_name")]
+  section: SidebarSectionKind,
+  #[table(display_with = "confidence_level_name")]
+  confidence: &'a str,
+  anchor_id: Option<&'a str>,
+}
+
+fn section_kind_name(kind: &SidebarSectionKind) -> &'static str {
   match kind {
     SidebarSectionKind::FeatureNav => "feature_nav",
     SidebarSectionKind::LibraryNav => "library_nav",
@@ -339,14 +327,6 @@ fn confidence_level_name(level: &str) -> &'static str {
     "M" => "medium",
     _ => "low",
   }
-}
-
-fn render_table(table: Table) -> String {
-  table.to_string().lines().map(str::trim).collect::<Vec<_>>().join("\n")
-}
-
-fn section_counts(scan: &PlaylistSidebarScan) -> Vec<(SidebarSectionKind, usize)> {
-  scan.projection().sections.iter().map(|section| (section.kind, section.items.len())).collect()
 }
 
 fn append_detail_footer(output: &mut String, scan: &PlaylistSidebarScan) {
@@ -381,46 +361,63 @@ fn optional(value: Option<&str>) -> &str {
   value.unwrap_or("(none)")
 }
 
-/// Agent-facing now-playing JSON for the netease CLI. Deliberately a subset of
-/// `auv_media_macos`'s output: the like/favorite fields are omitted because
-/// NetEase never reports them, so they would always be null here.
-#[cfg(target_os = "macos")]
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct NowPlayingOutput {
-  pub schema_version: &'static str,
-  pub present: bool,
-  pub is_playing: bool,
-  pub source_bundle_id: Option<String>,
-  pub title: Option<String>,
-  pub artist: Option<String>,
-  pub album: Option<String>,
-  pub duration_seconds: Option<f64>,
-  pub elapsed_seconds: Option<f64>,
-  pub playback_rate: Option<f64>,
-  pub content_item_id: Option<String>,
-}
-
-#[cfg(target_os = "macos")]
-pub fn build_now_playing_output(state: &auv_media_macos::NowPlayingState) -> NowPlayingOutput {
-  NowPlayingOutput {
-    schema_version: "now-playing-v0",
-    present: state.present,
-    is_playing: state.is_playing,
-    source_bundle_id: state.source_bundle_id.clone(),
-    title: state.title.clone(),
-    artist: state.artist.clone(),
-    album: state.album.clone(),
-    duration_seconds: state.duration_seconds,
-    elapsed_seconds: state.elapsed_seconds,
-    playback_rate: state.playback_rate,
-    content_item_id: state.content_item_id.clone(),
-  }
+#[cfg(all(target_os = "macos", any(feature = "tracing", test)))]
+pub(crate) fn now_playing_for_app(
+  state: auv_media_macos::NowPlayingState,
+  app_id: &str,
+) -> (auv_media_macos::NowPlayingState, auv_media_macos::output::NowPlayingOutput) {
+  let state = if state.source_bundle_id.as_deref() == Some(app_id) {
+    state
+  } else {
+    auv_media_macos::NowPlayingState::default()
+  };
+  let output = auv_media_macos::output::build_now_playing_output(&state);
+  (state, output)
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
   use crate::{Confidence, PlaylistSidebarItem, SidebarSection};
+
+  #[cfg(target_os = "macos")]
+  #[test]
+  fn now_playing_output_matches_media_owner_contract() {
+    // ROOT CAUSE:
+    //
+    // If the NetEase CLI copied the shared now-playing output type, the same
+    // schema version could serialize different fields because the local copy
+    // drifted from the owner crate.
+    //
+    // Before the fix, NetEase omitted supports_like and is_liked.
+    // The fix keeps embedding output identical to the auv-media-macos contract.
+    let state = auv_media_macos::NowPlayingState {
+      source_bundle_id: Some(crate::DEFAULT_APP_ID.to_string()),
+      ..Default::default()
+    };
+
+    let (_, output) = now_playing_for_app(state.clone(), crate::DEFAULT_APP_ID);
+    assert_eq!(
+      serde_json::to_value(output).expect("NetEase output should serialize"),
+      serde_json::to_value(auv_media_macos::output::build_now_playing_output(&state)).expect("media output should serialize"),
+    );
+  }
+
+  #[cfg(target_os = "macos")]
+  #[test]
+  fn now_playing_for_another_app_remains_idle() {
+    let state = auv_media_macos::NowPlayingState {
+      present: true,
+      source_bundle_id: Some("com.example.other-player".to_string()),
+      title: Some("Other track".to_string()),
+      ..Default::default()
+    };
+
+    let (filtered_state, output) = now_playing_for_app(state, crate::DEFAULT_APP_ID);
+
+    assert_eq!(filtered_state, auv_media_macos::NowPlayingState::default());
+    assert_eq!(output, auv_media_macos::output::build_now_playing_output(&filtered_state));
+  }
 
   fn projection() -> PlaylistSidebarProjection {
     PlaylistSidebarProjection {
@@ -562,9 +559,9 @@ mod tests {
 
   #[test]
   fn confidence_codes_map_existing_levels() {
-    assert_eq!(confidence_code(Confidence::High), "H");
-    assert_eq!(confidence_code(Confidence::Medium), "M");
-    assert_eq!(confidence_code(Confidence::Low), "L");
+    assert_eq!(Confidence::High.short_code(), "H");
+    assert_eq!(Confidence::Medium.short_code(), "M");
+    assert_eq!(Confidence::Low.short_code(), "L");
   }
 
   #[test]
@@ -635,7 +632,7 @@ mod tests {
   fn no_query_human_output_lists_playlists_as_a_compact_table() {
     let scan = PlaylistSidebarScan::from_projection_for_tests(projection());
 
-    let rendered = render_playlist_human_output(&scan, None, None, false);
+    let rendered = PlaylistOutput::new(&scan, None, None, false).to_human(TableOptions::default());
 
     assert!(rendered.starts_with("NAME       SECTION       CONFIDENCE  ANCHOR ID\n"));
     assert!(rendered.contains("Daily Mix  my_playlists  high        a1"));
@@ -648,7 +645,7 @@ mod tests {
   fn no_query_human_output_reports_an_empty_playlist_table() {
     let scan = PlaylistSidebarScan::from_projection_for_tests(PlaylistSidebarProjection::default());
 
-    let rendered = render_playlist_human_output(&scan, None, None, false);
+    let rendered = PlaylistOutput::new(&scan, None, None, false).to_human(TableOptions::default());
 
     assert!(rendered.starts_with("NAME  SECTION  CONFIDENCE  ANCHOR ID\n(no playlists observed)"));
   }
@@ -681,7 +678,7 @@ mod tests {
       }],
     });
 
-    let rendered = render_playlist_human_output(&scan, Some("daily"), Some(Confidence::Medium), false);
+    let rendered = PlaylistOutput::new(&scan, Some("daily"), Some(Confidence::Medium), false).to_human(TableOptions::default());
 
     assert!(rendered.contains("2 playlists observed. 1 matches for \"daily\"."));
     assert!(rendered.contains("filtered 1 below min-confidence medium"));
@@ -709,7 +706,7 @@ mod tests {
       }],
     });
 
-    let rendered = render_playlist_human_output(&scan, Some("daily"), None, false);
+    let rendered = PlaylistOutput::new(&scan, Some("daily"), None, false).to_human(TableOptions::default());
 
     assert!(rendered.contains("Daily High"));
     assert!(!rendered.contains("playlist play --candidate-id"));
@@ -721,7 +718,7 @@ mod tests {
   fn detail_human_output_adds_evidence_without_full_scan_dump() {
     let scan = PlaylistSidebarScan::from_projection_for_tests(projection());
 
-    let rendered = render_playlist_human_output(&scan, Some("daily"), None, true);
+    let rendered = PlaylistOutput::new(&scan, Some("daily"), None, true).to_human(TableOptions::default());
 
     assert!(rendered.contains("section=MyPlaylists"));
     assert!(rendered.contains("candidate_id=obs1.candidate.daily"));

@@ -230,15 +230,7 @@ impl fmt::Display for PlaylistPlayHumanSummary<'_> {
   }
 }
 
-fn playlist_select_click_options() -> auv_driver::ClickOptions {
-  auv_driver::ClickOptions {
-    policy: auv_driver::InputPolicy::BackgroundPreferred,
-    click: auv_driver::Click::Single,
-    window_strategy: auv_driver::WindowClickStrategy::ChromiumCompatible,
-  }
-}
-
-fn playlist_play_click_options() -> auv_driver::ClickOptions {
+fn playlist_click_options() -> auv_driver::ClickOptions {
   auv_driver::ClickOptions {
     policy: auv_driver::InputPolicy::BackgroundPreferred,
     click: auv_driver::Click::Single,
@@ -328,31 +320,24 @@ fn playlist_select_verification_horizontal_ratio(sidebar_bounds: ViewBounds, win
   (x_start, width)
 }
 
-fn playlist_select_verification_title_band_ratio(sidebar_bounds: ViewBounds, window_size: auv_driver::Size) -> auv_driver::RatioRect {
+fn playlist_select_verification_ratio(
+  tier: PlaylistSelectTitleOcrTier,
+  sidebar_bounds: ViewBounds,
+  window_size: auv_driver::Size,
+) -> auv_driver::RatioRect {
+  if tier == PlaylistSelectTitleOcrTier::FullWindow {
+    return auv_driver::RatioRect::new(0.0, 0.0, 1.0, 1.0);
+  }
+
   let (x_start, width) = playlist_select_verification_horizontal_ratio(sidebar_bounds, window_size);
-  // NOTICE(a6c-11): narrow band aligned with main_pane_guard nav floor (12% height).
-  auv_driver::RatioRect::new(x_start, 0.12, width, 0.22)
-}
-
-fn playlist_select_verification_hero_header_ratio(sidebar_bounds: ViewBounds, window_size: auv_driver::Size) -> auv_driver::RatioRect {
-  let (x_start, width) = playlist_select_verification_horizontal_ratio(sidebar_bounds, window_size);
-  // NOTICE(a6c-12): hero header above metadata line (1812 live y≈139 on 890px window).
-  auv_driver::RatioRect::new(x_start, 0.08, width, 0.10)
-}
-
-fn playlist_select_verification_main_band_ratio(sidebar_bounds: ViewBounds, window_size: auv_driver::Size) -> auv_driver::RatioRect {
-  let (x_start, width) = playlist_select_verification_horizontal_ratio(sidebar_bounds, window_size);
-  auv_driver::RatioRect::new(x_start, 0.10, width, 0.45)
-}
-
-fn playlist_select_verification_full_window_ratio(_sidebar_bounds: ViewBounds, _window_size: auv_driver::Size) -> auv_driver::RatioRect {
-  auv_driver::RatioRect::new(0.0, 0.0, 1.0, 1.0)
-}
-
-fn playlist_select_verification_view_bounds_to_ratio(bounds: ViewBounds, window_size: auv_driver::Size) -> auv_driver::RatioRect {
-  let window_width = window_size.width.max(1.0);
-  let window_height = window_size.height.max(1.0);
-  auv_driver::RatioRect::new(bounds.x / window_width, bounds.y / window_height, bounds.width / window_width, bounds.height / window_height)
+  match tier {
+    // NOTICE(a6c-11): narrow band aligned with main_pane_guard nav floor (12% height).
+    PlaylistSelectTitleOcrTier::TitleBand => auv_driver::RatioRect::new(x_start, 0.12, width, 0.22),
+    // NOTICE(a6c-12): hero header above metadata line (1812 live y≈139 on 890px window).
+    PlaylistSelectTitleOcrTier::HeroHeader => auv_driver::RatioRect::new(x_start, 0.08, width, 0.10),
+    PlaylistSelectTitleOcrTier::MainBand => auv_driver::RatioRect::new(x_start, 0.10, width, 0.45),
+    PlaylistSelectTitleOcrTier::FullWindow => unreachable!("full-window OCR ratio returns before main-pane geometry"),
+  }
 }
 
 fn playlist_select_verification_region_overlaps_row_bounds(region_bounds: ViewBounds, row_bounds: ViewBounds, margin: f64) -> bool {
@@ -396,24 +381,6 @@ fn playlist_select_verification_detail_chrome_present(
   has_play_all || (has_song && has_comment)
 }
 
-fn playlist_select_verification_count_main_pane_guard_regions(
-  recognition: &auv_driver::vision::TextRecognition,
-  window_size: auv_driver::Size,
-  sidebar_bounds: ViewBounds,
-) -> usize {
-  recognition
-    .regions
-    .iter()
-    .filter(|region| {
-      playlist_select_verification_main_pane_guard(
-        ViewBounds::new(region.bounds.origin.x, region.bounds.origin.y, region.bounds.size.width, region.bounds.size.height),
-        sidebar_bounds,
-        window_size,
-      )
-    })
-    .count()
-}
-
 fn playlist_select_verification_sidebar_row_echo_from_recognition(
   sidebar_recognition: &auv_driver::vision::TextRecognition,
   main_recognition: &auv_driver::vision::TextRecognition,
@@ -448,18 +415,11 @@ mod tests {
   use super::*;
 
   #[test]
-  fn playlist_select_uses_background_preferred_window_click_by_default() {
-    let options = playlist_select_click_options();
+  fn playlist_actions_use_background_preferred_window_click_policy() {
+    let options = playlist_click_options();
 
     assert_eq!(options.policy, auv_driver::InputPolicy::BackgroundPreferred);
-    assert_eq!(options.window_strategy, auv_driver::WindowClickStrategy::ChromiumCompatible);
-  }
-
-  #[test]
-  fn playlist_play_uses_background_preferred_window_click_by_default() {
-    let options = playlist_play_click_options();
-
-    assert_eq!(options.policy, auv_driver::InputPolicy::BackgroundPreferred);
+    assert_eq!(options.click, auv_driver::Click::Single);
     assert_eq!(options.window_strategy, auv_driver::WindowClickStrategy::ChromiumCompatible);
   }
 
@@ -613,10 +573,16 @@ mod tests {
   fn playlist_select_verification_hero_header_ratio_covers_metadata_line() {
     let window = sample_playlist_select_window_1812();
     let sidebar = sample_playlist_select_sidebar_1812();
-    let ratio = playlist_select_verification_hero_header_ratio(sidebar, window);
+    let title = playlist_select_verification_ratio(PlaylistSelectTitleOcrTier::TitleBand, sidebar, window);
+    let hero = playlist_select_verification_ratio(PlaylistSelectTitleOcrTier::HeroHeader, sidebar, window);
+    let main = playlist_select_verification_ratio(PlaylistSelectTitleOcrTier::MainBand, sidebar, window);
+    let full = playlist_select_verification_ratio(PlaylistSelectTitleOcrTier::FullWindow, sidebar, window);
 
-    let y_start = ratio.y * window.height;
-    let y_end = y_start + ratio.height * window.height;
+    assert_eq!((title.y, title.height), (0.12, 0.22));
+    assert_eq!((main.y, main.height), (0.10, 0.45));
+    assert_eq!(full, auv_driver::RatioRect::new(0.0, 0.0, 1.0, 1.0));
+    let y_start = hero.y * window.height;
+    let y_end = y_start + hero.height * window.height;
     assert!(y_start < 139.0);
     assert!(y_end > 139.0);
     assert!(y_end <= 165.0);
@@ -793,12 +759,11 @@ fn run_playlist_select_resolved(
   target: PlaylistSelectTarget,
 ) -> Result<PlaylistSelectResult, String> {
   use crate::LIVE_TOP_SEEK_SCROLL_DELTA_MULTIPLIER;
-  use crate::delivery_path_label;
   use crate::telemetry::{PlaylistSelectInputDelivered, PlaylistTargetResolved};
   use crate::view_parsers::sidebar::region::{broad_sidebar_probe_bounds, sidebar_scroll_anchor};
   use crate::view_parsers::sidebar::{
-    SidebarTargetProbeScrollContext, SidebarTargetSeekStep, capture_sidebar_target_probe, next_sidebar_target_seek_step,
-    preceding_scroll_context, sidebar_rescan_target_seek_budget, sidebar_target_probe_diagnostic_message, top_seek_scroll_budget,
+    PrecedingScrollContext, SidebarTargetProbeScrollContext, SidebarTargetSeekStep, capture_sidebar_target_probe,
+    next_sidebar_target_seek_step, sidebar_rescan_target_seek_budget, sidebar_target_probe_diagnostic_message, top_seek_scroll_budget,
   };
   use auv_driver::selector::{App, Window};
   use auv_driver::{
@@ -842,14 +807,14 @@ fn run_playlist_select_resolved(
         },
       ) {
         Ok(result) => {
-          last_scroll_context = Some(preceding_scroll_context(
-            format!("scroll-sidebar-top-{index}"),
-            top_scroll_delta,
-            "background_preferred",
-            inputs.scroll_settle_ms,
-            Some(delivery_path_label(result.selected_path).to_string()),
-            result.fallback_reason().map(str::to_string),
-          ));
+          last_scroll_context = Some(PrecedingScrollContext {
+            step_name: format!("scroll-sidebar-top-{index}"),
+            delta_y: top_scroll_delta,
+            policy: "background_preferred".to_string(),
+            settle_ms: inputs.scroll_settle_ms,
+            delivery_path: Some(result.selected_path.as_str().to_string()),
+            fallback_reason: result.fallback_reason().map(str::to_string),
+          });
           auv_tracing::emit_event!(PlaylistSelectInputDelivered::SeekSidebarTop {
             attempt: index,
             bounds: sidebar_bounds,
@@ -932,14 +897,14 @@ fn run_playlist_select_resolved(
               },
             )
             .map_err(|error| format!("playlist select page scroll failed: {error}"))?;
-          last_scroll_context = Some(preceding_scroll_context(
-            format!("scroll-sidebar-target-page-{index}"),
-            -inputs.scroll_amount,
-            "foreground_preferred",
-            inputs.scroll_settle_ms,
-            Some(delivery_path_label(result.selected_path).to_string()),
-            result.fallback_reason().map(str::to_string),
-          ));
+          last_scroll_context = Some(PrecedingScrollContext {
+            step_name: format!("scroll-sidebar-target-page-{index}"),
+            delta_y: -inputs.scroll_amount,
+            policy: "foreground_preferred".to_string(),
+            settle_ms: inputs.scroll_settle_ms,
+            delivery_path: Some(result.selected_path.as_str().to_string()),
+            fallback_reason: result.fallback_reason().map(str::to_string),
+          });
           auv_tracing::emit_event!(PlaylistSelectInputDelivered::SeekTargetPage {
             attempt: index,
             bounds: sidebar_bounds,
@@ -982,14 +947,14 @@ fn run_playlist_select_resolved(
         },
       )
       .map_err(|error| format!("playlist select bottom padding scroll failed: {error}"))?;
-    let bottom_padding_scroll = preceding_scroll_context(
-      format!("scroll-sidebar-bottom-padding-{attempt}"),
-      -inputs.scroll_amount,
-      "background_preferred",
-      inputs.scroll_settle_ms,
-      Some(delivery_path_label(result.selected_path).to_string()),
-      result.fallback_reason().map(str::to_string),
-    );
+    let bottom_padding_scroll = PrecedingScrollContext {
+      step_name: format!("scroll-sidebar-bottom-padding-{attempt}"),
+      delta_y: -inputs.scroll_amount,
+      policy: "background_preferred".to_string(),
+      settle_ms: inputs.scroll_settle_ms,
+      delivery_path: Some(result.selected_path.as_str().to_string()),
+      fallback_reason: result.fallback_reason().map(str::to_string),
+    };
     auv_tracing::emit_event!(PlaylistSelectInputDelivered::SeekBottomPadding {
       attempt,
       bounds: sidebar_bounds,
@@ -1054,7 +1019,7 @@ fn run_playlist_select_resolved(
   let click_point = WindowPoint::new(click_bounds.x + click_bounds.width * 0.5, click_bounds.y + click_bounds.height * 0.5);
   let click = session
     .window()
-    .click(&window, click_point, playlist_select_click_options())
+    .click(&window, click_point, playlist_click_options())
     .map_err(|error| format!("playlist select click failed: {error}"))?;
   if inputs.scroll_settle_ms > 0 {
     std::thread::sleep(std::time::Duration::from_millis(inputs.scroll_settle_ms));
@@ -1132,20 +1097,20 @@ fn verify_playlist_select_title(
     crate::telemetry::png_artifact("auv.netease.playlist_select.verification_capture", &capture.image);
 
     let ocr_options = build_playlist_select_verification_ocr_options(inputs, target_label);
-    let ocr_tiers: [(PlaylistSelectTitleOcrTier, fn(ViewBounds, auv_driver::Size) -> auv_driver::RatioRect); 4] = [
-      (PlaylistSelectTitleOcrTier::TitleBand, playlist_select_verification_title_band_ratio),
-      (PlaylistSelectTitleOcrTier::HeroHeader, playlist_select_verification_hero_header_ratio),
-      (PlaylistSelectTitleOcrTier::MainBand, playlist_select_verification_main_band_ratio),
-      (PlaylistSelectTitleOcrTier::FullWindow, playlist_select_verification_full_window_ratio),
+    let ocr_tiers = [
+      PlaylistSelectTitleOcrTier::TitleBand,
+      PlaylistSelectTitleOcrTier::HeroHeader,
+      PlaylistSelectTitleOcrTier::MainBand,
+      PlaylistSelectTitleOcrTier::FullWindow,
     ];
 
     let mut final_tier = PlaylistSelectTitleOcrTier::FullWindow;
     let mut observed_title = None;
     let mut last_recognition = None;
 
-    for (tier, ratio_for_tier) in ocr_tiers {
+    for tier in ocr_tiers {
       final_tier = tier;
-      let ocr_ratio = ratio_for_tier(sidebar_bounds, window_size);
+      let ocr_ratio = playlist_select_verification_ratio(tier, sidebar_bounds, window_size);
       let recognition = session
         .vision()
         .recognize_text_in_capture_with_options(&capture, ocr_ratio, ocr_options.clone())
@@ -1165,7 +1130,14 @@ fn verify_playlist_select_title(
 
     if observed_title.is_none() && crate::view_parsers::sidebar::parse::is_single_ascii_digit_query(target_label) {
       sidebar_echo_attempted = true;
-      let sidebar_ratio = playlist_select_verification_view_bounds_to_ratio(sidebar_bounds, window_size);
+      let window_width = window_size.width.max(1.0);
+      let window_height = window_size.height.max(1.0);
+      let sidebar_ratio = auv_driver::RatioRect::new(
+        sidebar_bounds.x / window_width,
+        sidebar_bounds.y / window_height,
+        sidebar_bounds.width / window_width,
+        sidebar_bounds.height / window_height,
+      );
       let sidebar_recognition = session
         .vision()
         .recognize_text_in_capture_with_options(&capture, sidebar_ratio, ocr_options.clone())
@@ -1188,7 +1160,17 @@ fn verify_playlist_select_title(
     crate::telemetry::json_artifact("auv.netease.playlist_select.recognition", &recognition);
 
     let recognized_region_count = recognition.regions.len();
-    let main_pane_match_count = playlist_select_verification_count_main_pane_guard_regions(&recognition, window_size, sidebar_bounds);
+    let main_pane_match_count = recognition
+      .regions
+      .iter()
+      .filter(|region| {
+        playlist_select_verification_main_pane_guard(
+          ViewBounds::new(region.bounds.origin.x, region.bounds.origin.y, region.bounds.size.width, region.bounds.size.height),
+          sidebar_bounds,
+          window_size,
+        )
+      })
+      .count();
     let evidence = if used_sidebar_row_echo {
       PlaylistSelectVerificationEvidence::SidebarRowEcho {
         recognized_region_count,
@@ -1262,7 +1244,7 @@ fn run_playlist_play_resolved(
   let point = target.action_point();
   let click = session
     .window()
-    .click(&window, WindowPoint::new(point.x, point.y), playlist_play_click_options())
+    .click(&window, WindowPoint::new(point.x, point.y), playlist_click_options())
     .map_err(|error| format!("playlist play-all click failed: {error}"))?;
   if inputs.scroll_settle_ms > 0 {
     std::thread::sleep(std::time::Duration::from_millis(inputs.scroll_settle_ms));

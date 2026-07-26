@@ -458,7 +458,7 @@ impl<'a> SongListScanner<'a> {
         },
       )
       .map_err(|error| format!("song list scroll failed: {error}"))?;
-    self.pending_scroll_delivery_path = Some(delivery_path_label(result.selected_path).to_string());
+    self.pending_scroll_delivery_path = Some(result.selected_path.as_str().to_string());
     Ok(())
   }
 }

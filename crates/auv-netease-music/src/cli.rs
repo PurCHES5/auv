@@ -6,10 +6,12 @@ use std::num::{NonZeroU64, NonZeroUsize};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use auv_cli_common::outputs::cli::CliOutput;
+use auv_cli_common::outputs::formats::table::TableOptions;
 use auv_media_macos::OutputFormat;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
-use crate::output::{build_playlist_json_output, render_playlist_human_output, render_song_list_human};
+use crate::output::{PlaylistOutput, render_song_list_human};
 use crate::{
   Confidence, DailyRecommendedPlayInputs, Inputs, OpenWindowInputs, PlaybackStatusInputs, PlaylistCategory, SongListInputs,
   run_daily_recommended_play, run_daily_recommended_songs_scan, run_live_scan, run_live_scan_until_query, run_open_window,
@@ -1321,9 +1323,10 @@ fn run_playlist(cmd: PlaylistCommand) -> ExitCode {
 
   crate::telemetry::json_artifact("auv.netease.playlist_sidebar_scan", &scan);
 
-  let output = build_playlist_json_output(&scan, cmd.query.as_deref(), cmd.output.min_confidence);
+  let output = PlaylistOutput::new(&scan, cmd.query.as_deref(), cmd.output.min_confidence, cmd.output.detail);
+  let json = output.to_json();
 
-  emit(&cmd.output.mode, &output, || render_playlist_human_output(&scan, cmd.query.as_deref(), cmd.output.min_confidence, cmd.output.detail))
+  emit(&cmd.output.mode, &json, || output.to_human(TableOptions::default()))
 }
 
 fn run_open_window_command(cmd: OpenWindowCommand) -> ExitCode {
@@ -1396,12 +1399,7 @@ fn run_now_playing(cmd: NowPlayingCommand) -> ExitCode {
       return ExitCode::from(1);
     }
   };
-  let state = if state.source_bundle_id.as_deref() == Some(cmd.app_id.as_str()) {
-    state
-  } else {
-    auv_media_macos::NowPlayingState::default()
-  };
-  let output = crate::output::build_now_playing_output(&state);
+  let (state, output) = crate::output::now_playing_for_app(state, &cmd.app_id);
 
   emit(&cmd.output, &output, || auv_media_macos::output::render_human_summary(&state))
 }

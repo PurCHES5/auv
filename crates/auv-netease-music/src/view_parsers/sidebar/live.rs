@@ -568,10 +568,6 @@ impl LiveSidebarObserver {
     sidebar_ax_scrollbar_boundary(&snapshot.snapshot.nodes, &self.window, self.sidebar_bounds)
   }
 
-  fn scroll_anchor(&self) -> auv_driver::Point {
-    crate::view_parsers::sidebar::sidebar_scroll_anchor(self.sidebar_bounds).0
-  }
-
   fn scroll_by(&mut self, vertical_delta: f64) -> Result<(), ParserDiagnostic> {
     self.scroll_by_with_settle(vertical_delta, std::time::Duration::from_millis(self.scroll_settle_ms))
   }
@@ -586,7 +582,7 @@ impl LiveSidebarObserver {
     settle: std::time::Duration,
     policy: InputPolicy,
   ) -> Result<(), ParserDiagnostic> {
-    let anchor = self.scroll_anchor();
+    let anchor = crate::view_parsers::sidebar::sidebar_scroll_anchor(self.sidebar_bounds).0;
     let result = self
       .session
       .window()
@@ -605,7 +601,7 @@ impl LiveSidebarObserver {
         message: error.to_string(),
         node_id: None,
       })?;
-    self.pending_scroll_delivery_path = Some(delivery_path_label(result.selected_path).to_string());
+    self.pending_scroll_delivery_path = Some(result.selected_path.as_str().to_string());
     Ok(())
   }
 }

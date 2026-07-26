@@ -116,7 +116,7 @@ pub fn song_detail_source(recognition: &TextRecognition, window_size: auv_driver
 }
 
 fn is_blocking_modal(recognition: &TextRecognition) -> bool {
-  contains_text(recognition, "取消") && (contains_text(recognition, "打开") || contains_text(recognition, "存储"))
+  recognition.best_contains("取消").is_some() && (recognition.best_contains("打开").is_some() || recognition.best_contains("存储").is_some())
 }
 
 fn has_left_sidebar_marker(recognition: &TextRecognition, window_size: auv_driver::Size) -> bool {
@@ -125,7 +125,7 @@ fn has_left_sidebar_marker(recognition: &TextRecognition, window_size: auv_drive
 }
 
 fn is_playing_song_detail(recognition: &TextRecognition, window_size: auv_driver::Size) -> bool {
-  if contains_text(recognition, "评论") && contains_text(recognition, "收藏") {
+  if recognition.best_contains("评论").is_some() && recognition.best_contains("收藏").is_some() {
     return true;
   }
 
@@ -134,7 +134,9 @@ fn is_playing_song_detail(recognition: &TextRecognition, window_size: auv_driver
   }
 
   song_detail_source(recognition, window_size).is_some()
-    && (contains_text(recognition, "歌词") || contains_text(recognition, "百科") || contains_text(recognition, "相似推荐"))
+    && (recognition.best_contains("歌词").is_some()
+      || recognition.best_contains("百科").is_some()
+      || recognition.best_contains("相似推荐").is_some())
 }
 
 fn has_aligned_detail_tabs(recognition: &TextRecognition, window_size: auv_driver::Size) -> bool {
@@ -163,10 +165,6 @@ fn has_aligned_detail_tabs(recognition: &TextRecognition, window_size: auv_drive
       (left_center_y - right_center_y).abs() <= 18.0
     })
   })
-}
-
-fn contains_text(recognition: &TextRecognition, query: &str) -> bool {
-  recognition.regions.iter().any(|region| region.text.contains(query))
 }
 
 fn inline_source_value(text: &str) -> Option<String> {
