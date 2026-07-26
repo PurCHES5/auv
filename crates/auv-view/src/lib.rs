@@ -24,6 +24,8 @@
 //!   newtypes once `playlist get <anchor>` lands and requires stable
 //!   cross-run identity.
 
+use std::fmt;
+
 use image::{Rgba, RgbaImage};
 use serde::{Deserialize, Serialize};
 
@@ -205,13 +207,45 @@ pub enum BoundaryConfidence {
   Contradicted,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Confidence {
-  High,
-  Medium,
   #[default]
   Low,
+  Medium,
+  High,
+}
+
+impl Confidence {
+  /// Compact presentation code used when horizontal space is constrained.
+  pub const fn short_code(self) -> &'static str {
+    // TODO(confidence-scale-v1): XH/XL and numeric scores are deferred until
+    // raw OCR/source scores are approved as part of the shared view contract.
+    match self {
+      Self::Low => "L",
+      Self::Medium => "M",
+      Self::High => "H",
+    }
+  }
+
+  pub fn from_short_code(value: &str) -> Option<Self> {
+    match value {
+      "L" => Some(Self::Low),
+      "M" => Some(Self::Medium),
+      "H" => Some(Self::High),
+      _ => None,
+    }
+  }
+}
+
+impl fmt::Display for Confidence {
+  fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+    formatter.write_str(match self {
+      Self::Low => "low",
+      Self::Medium => "medium",
+      Self::High => "high",
+    })
+  }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -873,6 +907,16 @@ mod tests {
     assert_eq!(confidence_from_ocr(Some(0.65)), Confidence::Medium); // boundary inclusive
     assert_eq!(confidence_from_ocr(Some(0.50)), Confidence::Low);
     assert_eq!(confidence_from_ocr(None), Confidence::Low);
+  }
+
+  #[test]
+  fn confidence_owns_names_short_codes_and_ordering() {
+    assert_eq!(Confidence::Low.to_string(), "low");
+    assert_eq!(Confidence::Medium.short_code(), "M");
+    assert_eq!(Confidence::from_short_code("H"), Some(Confidence::High));
+    assert_eq!(Confidence::from_short_code("unknown"), None);
+    assert!(Confidence::High > Confidence::Medium);
+    assert!(Confidence::Medium > Confidence::Low);
   }
 
   #[test]
