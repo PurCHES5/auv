@@ -13,6 +13,8 @@ members = [
   "crates/auv-inspect-server",
   "crates/auv-inspect-model",
   "crates/auv-cli",
+  "crates/auv-cli-common",
+  "crates/auv-cli-common-macros",
   "crates/auv-query-readiness",
   "crates/auv-tracing",
   "crates/auv-tracing-inspect",
