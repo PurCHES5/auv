@@ -1,11 +1,12 @@
 use std::{fs, path::PathBuf, process::ExitCode};
 
+use auv_cli_common::outputs::cli::{self as common_output, OutputFormat as CommonOutputFormat};
+use auv_cli_common::outputs::formats::table::TableOptions;
 use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::{
   app::query_local_library_apps,
   library::{LibraryDiagnostic, LibraryQuery, LibrarySource, LibraryStatus, SteamError, resolve_scope},
-  output::{build_library_ls_json_output, render_library_summary},
 };
 
 #[derive(Debug, Parser)]
@@ -72,15 +73,16 @@ fn run_library_ls(args: LibraryLsArgs) -> Result<(), CliError> {
   resolve_scope(&query)?;
   let result = query_local_library_apps(query)?;
 
-  if let Some(path) = args.json_out {
-    let output = build_library_ls_json_output(&result);
-    let json = serde_json::to_string_pretty(&output)?;
-    fs::write(path, format!("{json}\n"))?;
-  } else if args.format == OutputFormat::Json {
-    let output = build_library_ls_json_output(&result);
-    println!("{}", serde_json::to_string_pretty(&output)?);
+  let format = if args.json_out.is_some() || args.format == OutputFormat::Json {
+    CommonOutputFormat::Json
   } else {
-    println!("{}", render_library_summary(&result));
+    CommonOutputFormat::Human
+  };
+  let rendered = common_output::render(&result, format, TableOptions::default())?;
+  if let Some(path) = args.json_out {
+    fs::write(path, format!("{rendered}\n"))?;
+  } else {
+    println!("{rendered}");
   }
 
   Ok(())
@@ -100,7 +102,7 @@ enum CliError {
   Clap(clap::Error),
   Steam(SteamError),
   Library(LibraryDiagnostic),
-  Json(serde_json::Error),
+  Output(common_output::OutputError),
   Io(std::io::Error),
 }
 
@@ -117,7 +119,7 @@ impl CliError {
           eprintln!("path: {path}");
         }
       }
-      Self::Json(error) => eprintln!("error: failed to render JSON output: {error}"),
+      Self::Output(error) => eprintln!("error: {error}"),
       Self::Io(error) => eprintln!("error: failed to write output: {error}"),
     }
   }
@@ -148,9 +150,9 @@ impl From<LibraryDiagnostic> for CliError {
   }
 }
 
-impl From<serde_json::Error> for CliError {
-  fn from(error: serde_json::Error) -> Self {
-    Self::Json(error)
+impl From<common_output::OutputError> for CliError {
+  fn from(error: common_output::OutputError) -> Self {
+    Self::Output(error)
   }
 }
 

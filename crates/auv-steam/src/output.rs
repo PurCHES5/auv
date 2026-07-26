@@ -1,4 +1,6 @@
-use comfy_table::{Cell, Table, presets::NOTHING};
+use auv_cli_common::TableRow;
+use auv_cli_common::outputs::cli::CliOutput;
+use auv_cli_common::outputs::formats::table::{self, TableOptions};
 use serde::Serialize;
 
 use crate::library::{Grounding, LibraryQuery, LibraryQueryResult, ResolvedLibraryScope, SteamInstalledApp};
@@ -23,37 +25,44 @@ pub fn build_library_ls_json_output(result: &LibraryQueryResult) -> LibraryLsJso
 }
 
 pub fn render_library_summary(result: &LibraryQueryResult) -> String {
-  let mut table = Table::new();
-  table.load_preset(NOTHING);
-  table.set_header(["APPID", "NAME", "INSTALL DIR", "SOURCE", "GROUNDING"]);
-
-  if result.apps.is_empty() {
-    let mut summary = render_table(table);
-    summary.push_str("\n(no matching installed Steam apps)");
-    return summary;
-  }
-
-  for app in &result.apps {
-    table.add_row([
-      Cell::new(app.appid),
-      Cell::new(&app.name),
-      Cell::new(&app.install_dir),
-      Cell::new(&app.source),
-      Cell::new(grounding_label(app.grounding)),
-    ]);
-  }
-
-  render_table(table)
+  result.to_table_print(TableOptions::default())
 }
 
-fn grounding_label(grounding: Grounding) -> &'static str {
+fn grounding_label(grounding: &Grounding) -> &'static str {
   match grounding {
     Grounding::Strong => "strong",
   }
 }
 
-fn render_table(table: Table) -> String {
-  table.to_string().lines().map(str::trim).collect::<Vec<_>>().join("\n")
+#[derive(TableRow)]
+struct LibraryAppRow<'a> {
+  appid: u32,
+  name: &'a str,
+  install_dir: &'a str,
+  source: &'a str,
+  #[table(display_with = "grounding_label")]
+  grounding: Grounding,
+}
+
+impl CliOutput for LibraryQueryResult {
+  fn to_json(&self) -> impl Serialize {
+    build_library_ls_json_output(self)
+  }
+
+  fn to_table_print(&self, options: TableOptions<'_>) -> String {
+    let rows = self
+      .apps
+      .iter()
+      .map(|app| LibraryAppRow {
+        appid: app.appid,
+        name: &app.name,
+        install_dir: &app.install_dir,
+        source: &app.source,
+        grounding: app.grounding,
+      })
+      .collect::<Vec<_>>();
+    table::render(&rows, options.empty_message("(no matching installed Steam apps)"))
+  }
 }
 
 #[cfg(test)]
