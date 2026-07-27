@@ -43,16 +43,18 @@ typed result directly; tracing cannot reconstruct or replace it.
 `RunStore`, `RunCommit`, `RunRevision`, `RunSnapshot`, `AuthorityId`,
 `IdempotencyKey`, the reducer, cursors, subscriptions, artifact readers, file
 recovery, and the old tracing conformance crate are removed without
-compatibility aliases. Consumers that depended on those APIs represented the
-rejected architecture and must be deleted or redesigned at the later read-side
-boundary.
+compatibility aliases. The legacy inspect model, inspect server, tracing
+inspection adapter, CLI inspect surface, and game-specific read adapters were
+removed when the producer migration completed. Remaining operation code emits
+records and artifacts through `TracingStore`; a later read side must define its
+own ingestion contract over those durable records.
 
 ## Deferred read side
 
-`auv-inspector` is explicitly out of scope. The existing inspect server and
-inspect model are not substitutes for it. A later owner-approved slice may
-define ingestion, indexing, artifact resolution, and viewer APIs over data
-written by a tracing store.
+`auv-inspector` is explicitly out of scope. No generic inspection API is
+provided as a compatibility substitute. A later owner-approved slice may define
+ingestion, indexing, artifact resolution, and viewer APIs over data written by a
+tracing store.
 
 ## Verification seam
 

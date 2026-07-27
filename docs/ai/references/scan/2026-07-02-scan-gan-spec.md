@@ -48,7 +48,7 @@ Slice 1 提供了 `write_frame_artifact` / `read_frame_artifact` 与 test-only `
 | Run recording | S1-2/3 **不强制** 接入 `src/runtime.rs` 隐式录制；若接入，单独子 slice |
 | UI | **零** viewer 变更；inspect 输出为 Rust 结构 + 可选纯文本 summary，供测试断言 |
 | Errors | 延续 `ScanArtifactError` 变体断言风格；读侧新增错误用新 enum 或扩展 variant，不断言 `Display` 字符串 |
-| Fixtures | 延续 `tests/fixtures/scan/temporal/<scenario>/`；S1-2 可增 `producer_single_frame_v0/`，S1-4 再增 `two_frame_v0/` |
+| Test data | 此处原提议的通用 `tests/fixtures/` 布局已于 2026-07-26 退役；仍被跨 crate 消费的输入位于 `tests/testdata/scan/` |
 
 **Anti-patterns（显式禁止）：**
 

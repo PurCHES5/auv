@@ -258,12 +258,12 @@ cargo test scene_state_read
 git diff --check
 ```
 
-**Fixture matrix for manual sign-off:**
+**Historical fixture matrix (retired 2026-07-26):**
 
-- `crates/auv-scan/tests/fixtures/scan/scene/scene_*_v0/`
-- `crates/auv-scan/tests/fixtures/scan/lifecycle/lifecycle_*_v0/`
-- `crates/auv-scan/tests/fixtures/scan/association/association_*_v0/`
-- `crates/auv-scan/tests/fixtures/scan/temporal/two_frame_v0/`
+- The scene, lifecycle, and association fixture workflows described by this
+  review no longer have production-facing test consumers and were removed.
+- The still-consumed temporal input now lives at
+  `crates/auv-scan/tests/testdata/scan/temporal/two_frame_v0/`.
 
 **Optional product demo (non-gate):** synthetic run with `scan-scene-state-input-v0` artifact →
 `cargo run --quiet -- inspect run <run_id>` includes `Scene state:` block with `[scene.*]` sections.

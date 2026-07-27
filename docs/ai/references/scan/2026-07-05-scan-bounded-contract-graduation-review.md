@@ -267,10 +267,13 @@ cargo test scene_state_read
 git diff --check
 ```
 
-**Golden / fixture pointers:**
+**Historical test-data pointer (updated 2026-07-26):**
 
-- `crates/auv-scan/tests/fixtures/scan/` — frame, temporal/two_frame, association, lifecycle, scene
-- Parent review fixture matrix for manual sign-off
+- The generic `tests/fixtures/scan/` matrix was retired with its artifact,
+  lifecycle, scene, and tracks test workflows.
+- The remaining cross-crate inputs are under
+  `crates/auv-scan/tests/testdata/scan/`: `coverage_stable_v0`,
+  `single_frame_v0`, and `two_frame_v0`.
 
 ---
 
