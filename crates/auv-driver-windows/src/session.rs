@@ -1,8 +1,8 @@
 use auv_driver_common::capture::{Activation, Capture, CaptureOptions, DisplayCapture, RegionCapture};
 use auv_driver_common::display::ObservedDisplays;
-use auv_driver_common::error::DriverResult;
+use auv_driver_common::error::{DriverError, DriverResult};
 use auv_driver_common::geometry::{Point, RatioRect, Rect, ScreenPoint, Size, WindowPoint};
-use auv_driver_common::input::{Click, InputActionResult, KeyPressOptions, Scroll, TypeTextOptions};
+use auv_driver_common::input::{Click, InputActionResult, KeyPressOptions, Scroll, TypeTextOptions, WindowInput};
 use auv_driver_common::selector::WindowSelector;
 use auv_driver_common::vision::{TextRecognition, TextRecognitionOptions};
 use auv_driver_common::window::{Window, WindowMutationKind, WindowMutationOptions, WindowMutationResult};
@@ -174,6 +174,22 @@ impl WindowApi<'_> {
   pub fn zoom(&self, window: &Window, options: WindowMutationOptions) -> DriverResult<WindowMutationResult> {
     let _ = self.session;
     mutate_window(window, WindowMutationKind::Zoom, options)
+  }
+}
+
+impl WindowInput for WindowApi<'_> {
+  fn click(&self, _window: &Window, _point: WindowPoint, _options: auv_driver_common::ClickOptions) -> DriverResult<InputActionResult> {
+    Err(DriverError::unsupported("window.click"))
+  }
+
+  fn scroll(
+    &self,
+    _window: &Window,
+    _point: WindowPoint,
+    _scroll: Scroll,
+    _options: auv_driver_common::ScrollOptions,
+  ) -> DriverResult<InputActionResult> {
+    Err(DriverError::unsupported("window.scroll"))
   }
 }
 

@@ -2,9 +2,12 @@ use crate::{
   CommandGroup, InvokeCommandInput, InvokeCommandOutput, InvokeCommandResult, InvokeReport, InvokeReportField, InvokeReportTable,
   InvokeReportTableRow, InvokeReportValue, OptionalReportText,
   arg::{NO_ARGS, WINDOW_ARGS, WINDOW_TEXT_ARGS, WINDOW_VERIFY_TEXT_ARGS},
-  artifact::emit_png,
   invoke_command,
 };
+use auv_driver::WindowInput as _;
+
+#[cfg(target_os = "macos")]
+use crate::artifact::emit_png;
 
 pub fn group() -> CommandGroup {
   CommandGroup::new("window", "WINDOW")
@@ -100,6 +103,7 @@ pub fn window_capture_result(result: &WindowCapture) -> WindowCaptureResult<'_> 
   }
 }
 
+#[cfg(target_os = "macos")]
 fn window_capture_output(result: &WindowCapture) -> InvokeCommandResult {
   let mut output = InvokeCommandOutput::from_result(&window_capture_result(result))?;
   let mut fields = window_report_fields(&result.window);
