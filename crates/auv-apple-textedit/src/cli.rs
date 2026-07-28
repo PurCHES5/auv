@@ -4,7 +4,6 @@ use clap::{Args, Parser, Subcommand};
 
 use crate::commands::document::{
   DEFAULT_APP_ID, DEFAULT_BODY_ROLE, DEFAULT_FOCUS_QUERY, DEFAULT_SETTLE_MS, DocumentCommand, DocumentCompare, DocumentFocus, DocumentWrite,
-  run_document_command,
 };
 use crate::driver::MacosTextEditDriver;
 
@@ -131,7 +130,12 @@ pub fn run() -> ExitCode {
       return ExitCode::from(1);
     }
   };
-  match run_document_command(&command, &mut driver) {
+  let result = match &command {
+    DocumentCommand::Write(command) => command.run_with_checkpoint(&mut driver, || Ok::<_, auv_driver::DriverError>(())),
+    DocumentCommand::Compare(command) => command.run(&mut driver),
+    DocumentCommand::Focus(command) => command.run(&mut driver),
+  };
+  match result {
     Ok(report) => {
       println!("{}", report.command);
       ExitCode::SUCCESS

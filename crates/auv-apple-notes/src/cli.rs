@@ -4,7 +4,6 @@ use clap::{Args, Parser, Subcommand};
 
 use crate::commands::note::{
   DEFAULT_APP_ID, DEFAULT_BODY_ROLE, DEFAULT_FOCUS_QUERY, DEFAULT_SETTLE_MS, NoteCommand, NoteCompare, NoteFocus, NoteNew, NoteWrite,
-  run_note_command,
 };
 use crate::driver::MacosNotesDriver;
 
@@ -151,7 +150,13 @@ pub fn run() -> ExitCode {
       return ExitCode::from(1);
     }
   };
-  match run_note_command(&command, &mut driver) {
+  let result = match &command {
+    NoteCommand::New(command) => command.run(&mut driver),
+    NoteCommand::Write(command) => command.run(&mut driver),
+    NoteCommand::Compare(command) => command.run(&mut driver),
+    NoteCommand::Focus(command) => command.run(&mut driver),
+  };
+  match result {
     Ok(report) => {
       println!("{}", report.command);
       ExitCode::SUCCESS

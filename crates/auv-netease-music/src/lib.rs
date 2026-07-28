@@ -4,6 +4,7 @@ pub mod app;
 #[cfg(feature = "tracing")]
 pub mod cli;
 pub mod commands;
+pub mod models;
 pub mod output;
 pub mod scroll;
 mod telemetry;
@@ -14,6 +15,7 @@ pub mod windows;
 #[cfg(test)]
 mod recognition_test_data;
 
+pub use app::{AppViews, NeteaseCloudMusic, ViewRead, ViewReuse, ViewScope};
 pub use commands::daily_recommended::{run_daily_recommended_play, run_daily_recommended_songs_scan};
 pub use commands::launch::{LaunchResult, OpenWindowInputs, run_open_window};
 pub use commands::playback::{
@@ -24,8 +26,12 @@ pub use commands::playlist::{
   PlaylistSelectVerificationEvidence, run_playlist_play, run_playlist_select,
 };
 pub use commands::transport::{TransportAction, TransportInputs, TransportResult, run_transport_action};
+pub use models::{DailyRecommendedRef, FeaturedEntry, FeaturedEntryKind, SongSource};
 pub use view_parsers::sidebar::live::{run_live_scan, run_live_scan_until_query};
+pub use views::daily_recommended::DailyRecommendedView;
+pub use views::main::MainView;
 pub use views::player::PlaybackControlState;
+pub use views::recommended::{FeaturedEntriesView, FeaturedEntryView, RecommendedView};
 pub use views::sidebar::{PlaylistSidebarItem, PlaylistSidebarProjection, SidebarSection, SidebarSectionKind};
 
 use std::collections::HashSet;
@@ -191,27 +197,6 @@ impl fmt::Display for DailyRecommendedHumanSummary<'_> {
         writeln!(f, "  - {}: {}", diagnostic.code, diagnostic.message)?;
       }
       Ok(())
-    }
-  }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct SongListInputs {
-  pub app_id: String,
-  pub max_scrolls: usize,
-  pub scroll_amount: f64,
-  pub scroll_settle_ms: u64,
-  pub ocr_options: TextRecognitionOptions,
-}
-
-impl SongListInputs {
-  pub fn with_defaults() -> Self {
-    Self {
-      app_id: DEFAULT_APP_ID.to_string(),
-      max_scrolls: DEFAULT_MAX_SCROLLS,
-      scroll_amount: 520.0,
-      scroll_settle_ms: DEFAULT_SCROLL_SETTLE_MS,
-      ocr_options: TextRecognitionOptions::default(),
     }
   }
 }

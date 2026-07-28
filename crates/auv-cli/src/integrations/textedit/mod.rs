@@ -1,9 +1,6 @@
 //! TextEdit product invoke backed by the app-owned typed command report.
 
-use auv_apple_textedit::{
-  DocumentCommand, DocumentCommandReport, DocumentWrite, TextEditAction, TextEditDriver, VerificationOutcome,
-  run_document_command_with_checkpoint,
-};
+use auv_apple_textedit::{DocumentCommandReport, DocumentWrite, TextEditAction, TextEditDriver, VerificationOutcome};
 use auv_cli_invoke::arg::TEXTEDIT_DOCUMENT_WRITE_ARGS;
 use auv_cli_invoke::{
   CommandGroup, InvokeCommandInput, InvokeCommandOutput, InvokeCommandResult, InvokeReport, InvokeReportField, InvokeReportSection,
@@ -87,9 +84,8 @@ where
   // synchronous native driver call; reopen this only when the driver owns a
   // cancellable operation contract.
   cancellation.check().map_err(|error| DocumentWriteFailure::new(error.to_string()))?;
-  let report = run_document_command_with_checkpoint(&DocumentCommand::Write(command), &mut driver, || {
-    cancellation.check().map_err(|error| DocumentWriteFailure::new(error.to_string()))
-  })?;
+  let report =
+    command.run_with_checkpoint(&mut driver, || cancellation.check().map_err(|error| DocumentWriteFailure::new(error.to_string())))?;
   if let Err(error) = cancellation.check() {
     return Err(DocumentWriteFailure::new(error.to_string()));
   }

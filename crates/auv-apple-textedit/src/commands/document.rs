@@ -1,15 +1,103 @@
 use std::time::Duration;
 
-use auv_driver::{DriverError, DriverResult};
+use auv_driver::DriverResult;
 use serde::{Deserialize, Serialize};
 
 use crate::driver::{TextEditActionResult, TextEditDriver, VerificationOutcome};
+
+mod compare;
+mod focus;
+mod write;
+
+pub use compare::DocumentCompare;
+pub use focus::DocumentFocus;
+pub use write::DocumentWrite;
 
 pub const DEFAULT_APP_ID: &str = "com.apple.TextEdit";
 pub const DEFAULT_MARKER_TEXT: &str = "AUV_TEXTEDIT_MARKER_2026_05_17";
 pub const DEFAULT_FOCUS_QUERY: &str = "First Text View";
 pub const DEFAULT_BODY_ROLE: &str = "AXTextArea";
 pub const DEFAULT_SETTLE_MS: u64 = 250;
+
+/// App-owned entry point for operating on TextEdit's current document.
+///
+/// The client owns the driver so library, CLI, and MCP callers can share the
+/// same document workflow without exposing AX queries or input timing at the
+/// primary interface.
+pub struct TextEdit<D> {
+  driver: D,
+  app_id: String,
+}
+
+impl<D> TextEdit<D> {
+  pub fn new(driver: D) -> Self {
+    Self {
+      driver,
+      app_id: DEFAULT_APP_ID.to_string(),
+    }
+  }
+
+  /// Returns a short-lived handle to the document currently resolved by
+  /// TextEdit. The handle does not cache AX identity; every operation resolves
+  /// the live document body through the existing driver workflow.
+  pub fn current_document(&mut self) -> Document<'_, D> {
+    Document {
+      driver: &mut self.driver,
+      app_id: &self.app_id,
+    }
+  }
+}
+
+impl TextEdit<crate::driver::MacosTextEditDriver> {
+  pub fn open_local() -> DriverResult<Self> {
+    crate::driver::MacosTextEditDriver::open_local().map(Self::new)
+  }
+}
+
+/// A live, app-owned view of TextEdit's current document.
+///
+/// Its lifetime prevents concurrent use of the underlying UI driver. Because
+/// this first seam deliberately carries no persisted AX identity, UI changes
+/// are handled by resolving the current document again on the next operation.
+pub struct Document<'app, D> {
+  driver: &'app mut D,
+  app_id: &'app str,
+}
+
+impl<D> Document<'_, D>
+where
+  D: TextEditDriver,
+{
+  /// Focuses the current document body using TextEdit-owned defaults.
+  pub fn focus(&mut self) -> DriverResult<DocumentCommandReport> {
+    let activate = self.driver.activate_app(self.app_id, Duration::from_millis(DEFAULT_SETTLE_MS))?;
+    let mut report = DocumentFocus {
+      app_id: self.app_id.to_string(),
+      query: DEFAULT_FOCUS_QUERY.to_string(),
+      candidate: String::new(),
+    }
+    .run(self.driver)?;
+    report.actions.insert(0, activate);
+    Ok(report)
+  }
+
+  /// Replaces the current document body and verifies the written text.
+  pub fn write(&mut self, content: impl Into<String>) -> DriverResult<DocumentCommandReport> {
+    let mut command = DocumentWrite::defaults_with_content(content);
+    command.app_id = self.app_id.to_string();
+    command.run_with_checkpoint(self.driver, || Ok::<_, auv_driver::DriverError>(()))
+  }
+
+  /// Compares the current document body using the existing contains semantics.
+  pub fn compare(&mut self, expected: impl Into<String>) -> DriverResult<DocumentCommandReport> {
+    DocumentCompare {
+      app_id: self.app_id.to_string(),
+      content: expected.into(),
+      role: DEFAULT_BODY_ROLE.to_string(),
+    }
+    .run(self.driver)
+  }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DocumentCommand {
@@ -19,142 +107,8 @@ pub enum DocumentCommand {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DocumentWrite {
-  pub app_id: String,
-  pub content: String,
-  pub replace: bool,
-  pub verify: bool,
-  pub focus_query: String,
-  pub focus_candidate: String,
-  pub compare_role: String,
-  pub activate_settle_ms: u64,
-  pub input_settle_ms: u64,
-}
-
-impl DocumentWrite {
-  pub fn defaults_with_content(content: impl Into<String>) -> Self {
-    Self {
-      app_id: DEFAULT_APP_ID.to_string(),
-      content: content.into(),
-      replace: true,
-      verify: true,
-      focus_query: DEFAULT_FOCUS_QUERY.to_string(),
-      focus_candidate: String::new(),
-      compare_role: DEFAULT_BODY_ROLE.to_string(),
-      activate_settle_ms: DEFAULT_SETTLE_MS,
-      input_settle_ms: DEFAULT_SETTLE_MS,
-    }
-  }
-
-  pub fn marker_defaults() -> Self {
-    Self::defaults_with_content(DEFAULT_MARKER_TEXT)
-  }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DocumentCompare {
-  pub app_id: String,
-  pub content: String,
-  pub role: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DocumentFocus {
-  pub app_id: String,
-  pub query: String,
-  pub candidate: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DocumentCommandReport {
   pub command: &'static str,
   pub actions: Vec<TextEditActionResult>,
   pub verification: Option<VerificationOutcome>,
-}
-
-pub fn run_document_command(command: &DocumentCommand, driver: &mut impl TextEditDriver) -> DriverResult<DocumentCommandReport> {
-  run_document_command_with_checkpoint(command, driver, || Ok::<_, DriverError>(()))
-}
-
-/// Runs a document command while checking a caller-owned lifecycle boundary
-/// immediately before each UI-facing driver phase.
-pub fn run_document_command_with_checkpoint<E>(
-  command: &DocumentCommand,
-  driver: &mut impl TextEditDriver,
-  mut checkpoint: impl FnMut() -> Result<(), E>,
-) -> Result<DocumentCommandReport, E>
-where
-  E: From<DriverError>,
-{
-  match command {
-    DocumentCommand::Write(command) => crate::tracing::document_write(|| run_write(command, driver, &mut checkpoint)),
-    DocumentCommand::Compare(command) => crate::tracing::document_compare(|| run_compare(command, driver, &mut checkpoint)),
-    DocumentCommand::Focus(command) => crate::tracing::document_focus(|| run_focus(command, driver, &mut checkpoint)),
-  }
-}
-
-fn run_write<E>(
-  command: &DocumentWrite,
-  driver: &mut impl TextEditDriver,
-  checkpoint: &mut impl FnMut() -> Result<(), E>,
-) -> Result<DocumentCommandReport, E>
-where
-  E: From<DriverError>,
-{
-  checkpoint()?;
-  let mut actions = vec![driver.activate_app(&command.app_id, Duration::from_millis(command.activate_settle_ms))?];
-  checkpoint()?;
-  actions.push(driver.focus_text_input(&command.app_id, &command.focus_query, &command.focus_candidate)?);
-  checkpoint()?;
-  actions.push(driver.paste_text_preserve_clipboard(
-    &command.app_id,
-    &command.content,
-    command.replace,
-    Duration::from_millis(command.input_settle_ms),
-  )?);
-  let verification = if command.verify {
-    checkpoint()?;
-    Some(driver.verify_ax_text(&command.app_id, &command.content, &command.compare_role)?)
-  } else {
-    None
-  };
-  Ok(DocumentCommandReport {
-    command: "document.write",
-    actions,
-    verification,
-  })
-}
-
-fn run_compare<E>(
-  command: &DocumentCompare,
-  driver: &mut impl TextEditDriver,
-  checkpoint: &mut impl FnMut() -> Result<(), E>,
-) -> Result<DocumentCommandReport, E>
-where
-  E: From<DriverError>,
-{
-  checkpoint()?;
-  let verification = driver.verify_ax_text(&command.app_id, &command.content, &command.role)?;
-  Ok(DocumentCommandReport {
-    command: "document.compare",
-    actions: Vec::new(),
-    verification: Some(verification),
-  })
-}
-
-fn run_focus<E>(
-  command: &DocumentFocus,
-  driver: &mut impl TextEditDriver,
-  checkpoint: &mut impl FnMut() -> Result<(), E>,
-) -> Result<DocumentCommandReport, E>
-where
-  E: From<DriverError>,
-{
-  checkpoint()?;
-  let action = driver.focus_text_input(&command.app_id, &command.query, &command.candidate)?;
-  Ok(DocumentCommandReport {
-    command: "document.focus",
-    actions: vec![action],
-    verification: None,
-  })
 }

@@ -91,12 +91,18 @@ pub fn run_daily_recommended_play(_inputs: &DailyRecommendedPlayInputs) -> Resul
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn run_daily_recommended_songs_scan(_inputs: &SongListInputs) -> Result<SongListScanResult, String> {
+pub fn run_daily_recommended_songs_scan(_inputs: &Inputs) -> Result<SongListScanResult, String> {
   Err("live NetEase daily recommended song scan is only supported on macOS".to_string())
 }
 
 #[cfg(target_os = "macos")]
-pub fn run_daily_recommended_songs_scan(inputs: &SongListInputs) -> Result<SongListScanResult, String> {
+pub fn run_daily_recommended_songs_scan(inputs: &Inputs) -> Result<SongListScanResult, String> {
+  let mut app = crate::app::NeteaseCloudMusic::with_inputs(inputs.clone());
+  app.daily_recommended().songs()
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn scan_daily_recommended_songs(inputs: &Inputs) -> Result<SongListScanResult, String> {
   let daily_inputs = DailyRecommendedPlayInputs {
     app_id: inputs.app_id.clone(),
     max_top_scrolls: LIVE_TOP_SEEK_MAX_SCROLL_INPUTS,
@@ -203,7 +209,12 @@ struct DailyRecommendedRun<'a> {
 }
 
 fn daily_song_list_bounds(window_size: Size) -> ViewBounds {
-  let x = window_size.width * 0.30;
+  // NOTICE(netease-daily-song-leading-columns): the current desktop layout
+  // places row indexes near 22% and titles near 27% of the window width. A
+  // 20% left edge preserves both anchors while remaining right of the sidebar.
+  // Revisit this ratio when a typed DailyRecommendedView can derive the list
+  // bounds from stable column/header structure instead of fixed layout.
+  let x = window_size.width * 0.20;
   let y = window_size.height * 0.23;
   let bottom = playlist_sidebar_bottom(window_size);
   ViewBounds::new(x, y, window_size.width - x - 24.0, (bottom - y).max(1.0))
@@ -219,7 +230,7 @@ fn parse_song_list_rows(observation_index: usize, bounds: ViewBounds, recognitio
       text.len() <= 3
         && text.chars().all(|ch| ch.is_ascii_digit())
         && viewport_contains_center(bounds, recognized_bounds(&region.bounds))
-        && center_y > bounds.y + 36.0
+        && center_y >= bounds.y + 36.0
     })
     .collect::<Vec<_>>();
   index_regions.sort_by(|left, right| left.bounds.origin.y.partial_cmp(&right.bounds.origin.y).unwrap_or(std::cmp::Ordering::Equal));
@@ -278,7 +289,7 @@ fn recognized_bounds(bounds: &auv_driver::Rect) -> ViewBounds {
 #[cfg(target_os = "macos")]
 struct SongListScanner<'a> {
   run: DailyRecommendedRun<'a>,
-  inputs: &'a SongListInputs,
+  inputs: &'a Inputs,
   region_bounds: ViewBounds,
   observations: Vec<SongListObservation>,
   items: Vec<SongListItem>,
@@ -291,7 +302,7 @@ struct SongListScanner<'a> {
 
 #[cfg(target_os = "macos")]
 impl<'a> SongListScanner<'a> {
-  fn new(run: DailyRecommendedRun<'a>, inputs: &'a SongListInputs, region_bounds: ViewBounds) -> Self {
+  fn new(run: DailyRecommendedRun<'a>, inputs: &'a Inputs, region_bounds: ViewBounds) -> Self {
     Self {
       run,
       inputs,

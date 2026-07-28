@@ -13,9 +13,8 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::output::{PlaylistOutput, render_song_list_human};
 use crate::{
-  Confidence, DailyRecommendedPlayInputs, Inputs, OpenWindowInputs, PlaybackStatusInputs, PlaylistCategory, SongListInputs,
-  run_daily_recommended_play, run_daily_recommended_songs_scan, run_live_scan, run_live_scan_until_query, run_open_window,
-  run_playback_status_probe,
+  Confidence, DailyRecommendedPlayInputs, Inputs, OpenWindowInputs, PlaybackStatusInputs, PlaylistCategory, run_daily_recommended_play,
+  run_daily_recommended_songs_scan, run_live_scan, run_live_scan_until_query, run_open_window, run_playback_status_probe,
 };
 use input::{AppTargetArgs, OcrHintArgs, ScrollArgs, parse_ratio_region, positive_scroll_amount, zero_to_one};
 pub(crate) use presentation::OutputMode;
@@ -86,7 +85,7 @@ struct PlaybackStatusCommand {
 
 #[derive(Clone, Debug, PartialEq)]
 struct SongsLsCommand {
-  inputs: SongListInputs,
+  inputs: Inputs,
   output: OutputMode,
 }
 
@@ -597,7 +596,8 @@ fn parse_playlist_play_query(args: PlaylistPlayArgs) -> Result<PlaylistPlayComma
 }
 
 fn parse_songs_ls(args: SongsLsArgs) -> Result<SongsLsCommand, String> {
-  let mut inputs = SongListInputs::with_defaults();
+  let mut inputs = Inputs::with_defaults();
+  inputs.scroll_amount = 520.0;
   if let Some(app_id) = args.app.app_id {
     inputs.app_id = app_id;
   }
