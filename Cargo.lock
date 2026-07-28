@@ -454,10 +454,6 @@ name = "auv-cli-invoke-macros"
 version = "0.0.1"
 
 [[package]]
-name = "auv-compare"
-version = "0.0.1"
-
-[[package]]
 name = "auv-driver"
 version = "0.0.1"
 dependencies = [
@@ -551,7 +547,6 @@ dependencies = [
 name = "auv-game-minecraft"
 version = "0.0.1"
 dependencies = [
- "auv-compare",
  "auv-driver",
  "auv-file",
  "auv-query-readiness",

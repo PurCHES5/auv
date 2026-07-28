@@ -20,7 +20,6 @@ tracing = [
 ]
 
 [dependencies]
-auv-compare = { path = "../auv-compare" }
 auv-file = { path = "../auv-file" }
 auv-query-readiness = { path = "../auv-query-readiness" }
 auv-driver = { path = "../auv-driver" }

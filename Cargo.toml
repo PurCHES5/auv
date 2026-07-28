@@ -7,7 +7,6 @@ members = [
   "crates/auv-api-proto",
   "crates/auv-cli-invoke-macros",
   "crates/auv-cli-invoke",
-  "crates/auv-compare",
   "crates/auv-file",
   "crates/auv-godot",
   "crates/auv-cli",
