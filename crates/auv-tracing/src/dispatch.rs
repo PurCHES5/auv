@@ -141,21 +141,12 @@ impl Dispatch {
     let Some(sender) = &self.sender else {
       return ArtifactEmission::disabled();
     };
-    let request = ArtifactRequest::new(
-      run_id,
-      span_id,
-      artifact.artifact_id,
-      artifact.purpose,
-      artifact.content_type,
-      artifact.byte_length,
-      artifact.sha256,
-      artifact.attributes,
-    );
+    let (request, body) = ArtifactRequest::from_detached(run_id, span_id, artifact);
     let (receipt, emission) = ArtifactEmission::pending();
     if sender
       .send(Work::Artifact {
         request,
-        body: artifact.body,
+        body,
         receipt,
       })
       .is_err()
@@ -287,7 +278,7 @@ impl Worker {
 fn failure(stage: DispatchStage, code: &'static str) -> DispatchFailure {
   DispatchFailure {
     stage,
-    code: ErrorCode::parse(code).expect("static dispatch code"),
+    code: ErrorCode::new(code),
   }
 }
 
@@ -297,9 +288,8 @@ impl DispatchErrorReporter for DiscardReporter {
 }
 
 pub(crate) fn timestamp_now() -> Result<crate::Timestamp, ErrorCode> {
-  let duration = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|_| ErrorCode::parse("auv.tracing.clock_before_epoch").unwrap())?;
-  crate::Timestamp::new(duration.as_secs() as i64, duration.subsec_nanos())
-    .map_err(|_| ErrorCode::parse("auv.tracing.clock_out_of_range").unwrap())
+  let duration = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|_| ErrorCode::new("auv.tracing.clock_before_epoch"))?;
+  crate::Timestamp::new(duration.as_secs() as i64, duration.subsec_nanos()).map_err(|_| ErrorCode::new("auv.tracing.clock_out_of_range"))
 }
 
 pub mod dispatcher {

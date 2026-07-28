@@ -93,7 +93,7 @@ impl Inner {
         if let Some(remote) = remote_span_id {
           values.push(KeyValue::new("auv.span.remote_id", remote.to_string()));
         }
-        values.extend(attributes.iter().map(|(key, value)| KeyValue::new(Key::new(key.as_str().to_owned()), otel_value(value))));
+        values.extend(attributes.iter().map(|(key, value)| KeyValue::new(Key::new(key.to_owned()), otel_value(value))));
 
         let parent = {
           let spans = self.spans.lock().map_err(|_| error("auv.telemetry.otel_state_poisoned"))?;
@@ -193,7 +193,7 @@ impl Inner {
         record.add_attribute("auv.artifact.byte_length", metadata.byte_length().get() as i64);
         record.add_attribute("auv.artifact.sha256", metadata.sha256().to_string());
         for (key, value) in metadata.attributes().iter() {
-          record.add_attribute(Key::new(key.as_str().to_owned()), log_value(value));
+          record.add_attribute(Key::new(key.to_owned()), log_value(value));
         }
         self.emit_log(record);
         Ok(())
@@ -237,5 +237,5 @@ fn system_time(timestamp: Timestamp) -> Result<SystemTime, ExportError> {
   }
 }
 fn error(code: &'static str) -> ExportError {
-  ExportError::new(ErrorCode::parse(code).expect("static OTEL error code"))
+  ExportError::new(ErrorCode::new(code))
 }

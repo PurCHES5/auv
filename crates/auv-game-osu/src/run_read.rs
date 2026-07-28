@@ -1,18 +1,12 @@
 //! osu! tracing artifact producers.
 
-use auv_tracing::{ArtifactMetadata, ArtifactPurpose, Attributes, ByteLength, Context, JsonArtifactError, StoreError, ValidationError};
+use auv_tracing::{ArtifactMetadata, ArtifactPurpose, Attributes, ByteLength, Context, JsonArtifactError, StoreError};
 use serde::Serialize;
 
 pub const OSU_STRUCTURED_ARTIFACT_JSON_BYTE_LIMIT: u64 = 4 * 1024 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 pub enum OsuArtifactPublishError {
-  #[error("invalid osu! artifact purpose {value:?}: {source}")]
-  InvalidPurpose {
-    value: &'static str,
-    #[source]
-    source: ValidationError,
-  },
   #[error("osu! artifact {purpose} failed domain validation: {message}")]
   InvalidPayload {
     purpose: ArtifactPurpose,
@@ -45,10 +39,7 @@ where
   let Some(context) = context.filter(|context| context.can_publish_artifacts()) else {
     return Ok(None);
   };
-  let purpose = ArtifactPurpose::parse(purpose).map_err(|source| OsuArtifactPublishError::InvalidPurpose {
-    value: purpose,
-    source,
-  })?;
+  let purpose = ArtifactPurpose::new(purpose);
   validate(value).map_err(|message| OsuArtifactPublishError::InvalidPayload {
     purpose: purpose.clone(),
     message,

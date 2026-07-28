@@ -6,9 +6,7 @@
 
 use auv_driver::InputActionResult;
 use auv_scan::{CoverageView, ScanCoverageArtifact};
-use auv_tracing::{
-  ArtifactMetadata, ArtifactPurpose, Attributes, ByteLength, Context, EventPayload, JsonArtifactError, StoreError, ValidationError,
-};
+use auv_tracing::{ArtifactMetadata, ArtifactPurpose, Attributes, ByteLength, Context, EventPayload, JsonArtifactError, StoreError};
 use serde::Serialize;
 
 use crate::contract::RecognitionResult;
@@ -22,12 +20,6 @@ pub const ROOT_STRUCTURED_ARTIFACT_JSON_BYTE_LIMIT: u64 = 4 * 1024 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 pub enum RootArtifactPublishError {
-  #[error("invalid root artifact purpose {value:?}: {source}")]
-  InvalidPurpose {
-    value: &'static str,
-    #[source]
-    source: ValidationError,
-  },
   #[error("root artifact {purpose} failed domain validation: {message}")]
   InvalidPayload {
     purpose: ArtifactPurpose,
@@ -175,10 +167,7 @@ where
   T: Serialize,
   V: FnOnce(&T) -> Result<(), String>,
 {
-  let purpose = ArtifactPurpose::parse(purpose).map_err(|source| RootArtifactPublishError::InvalidPurpose {
-    value: purpose,
-    source,
-  })?;
+  let purpose = ArtifactPurpose::new(purpose);
   validate(value).map_err(|message| RootArtifactPublishError::InvalidPayload {
     purpose: purpose.clone(),
     message,

@@ -49,7 +49,7 @@ impl TracingStore for RejectArtifactStore {
 
   fn write_artifact(&self, _request: ArtifactRequest, _body: ArtifactBody) -> BoxFuture<'_, Result<ArtifactMetadata, StoreError>> {
     self.writes.fetch_add(1, Ordering::SeqCst);
-    Box::pin(async { Err(StoreError::new(ErrorCode::parse("auv.test.scan_artifact_rejected").expect("test error code"))) })
+    Box::pin(async { Err(StoreError::new(ErrorCode::new("auv.test.scan_artifact_rejected"))) })
   }
 
   fn flush(&self) -> BoxFuture<'_, Result<(), StoreError>> {

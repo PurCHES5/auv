@@ -41,6 +41,12 @@ typed event with canonical payload, or stored artifact metadata. Records are
 append-only observations. They do not imply commits, revisions, snapshots,
 idempotency, recovery, or reconstructed operation results.
 
+Trace names, error codes, artifact purposes, content types, and attribute keys
+are caller-declared strings. The tracing layer preserves these values without
+enforcing namespaced-name, MIME, count, or encoded-size policies. It continues
+to enforce structural and storage invariants such as identifier shape, finite
+JSON numbers, byte limits, and artifact integrity.
+
 ## TracingStore
 
 `TracingStore` is the write-only port for full-fidelity trace records and
@@ -146,6 +152,9 @@ simple write pipeline, not a run transaction or commit protocol.
 Artifacts may optionally be associated with a span. V1 does not assign artifact
 ownership to a persisted operation entity or verification. Artifacts may
 contain structured JSON documents, images, reports, logs, media, or other files.
+Byte emitters may declare a physical file extension in `EmitBytesOptions`;
+file-backed stores may use it without changing the transport-independent
+`ArtifactUri`.
 
 Examples include screenshots, click-overlay images, accessibility snapshots,
 driver input/output JSON, distillation reports, validation reports, and video

@@ -24,7 +24,6 @@ futures-util = { workspace = true, features = ["io", "sink"] }
 futures-channel = "0.3"
 futures-executor = { version = "0.3", features = ["thread-pool"] }
 hex.workspace = true
-mime.workspace = true
 pin-project = "1"
 serde.workspace = true
 serde_json = { workspace = true, features = ["arbitrary_precision", "raw_value"] }

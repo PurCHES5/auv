@@ -1,7 +1,7 @@
 //! NetEase-specific tracing events and best-effort evidence artifacts.
 
 use auv_driver::InputActionResult;
-use auv_tracing::{ArtifactPurpose, Attributes, ByteLength, ContentType};
+use auv_tracing::{Attributes, ByteLength};
 use auv_view::ViewBounds;
 use image::{ExtendedColorType, ImageEncoder, codecs::png::PngEncoder};
 use serde::Serialize;
@@ -201,16 +201,14 @@ pub(crate) fn emit_sidebar_scan_events(
 }
 
 pub(crate) fn json_artifact<T: Serialize>(purpose: &'static str, value: &T) {
-  let result = ArtifactPurpose::parse(purpose).map_err(|error| error.to_string()).and_then(|purpose| {
-    auv_tracing::emit_json_artifact(
-      purpose,
-      Attributes::empty(),
-      ByteLength::new(JSON_ARTIFACT_BYTE_LIMIT).expect("static NetEase JSON limit is valid"),
-      value,
-    )
-    .map(drop)
-    .map_err(|error| error.to_string())
-  });
+  let result = auv_tracing::emit_json_artifact(
+    purpose,
+    Attributes::empty(),
+    ByteLength::new(JSON_ARTIFACT_BYTE_LIMIT).expect("static NetEase JSON limit is valid"),
+    value,
+  )
+  .map(drop)
+  .map_err(|error| error.to_string());
   if let Err(error) = result {
     preparation_failed(purpose, error);
   }
@@ -225,14 +223,8 @@ pub(crate) fn png_artifact(purpose: &'static str, image: &image::RgbaImage) {
     .write_image(image.as_raw(), image.width(), image.height(), ExtendedColorType::Rgba8)
     .map_err(|error| format!("encode PNG artifact failed: {error}"))
     .and_then(|()| {
-      auv_tracing::emit_bytes_artifact(
-        ArtifactPurpose::parse(purpose).map_err(|error| error.to_string())?,
-        ContentType::parse("image/png").map_err(|error| error.to_string())?,
-        Attributes::empty(),
-        body,
-      )
-      .map(drop)
-      .map_err(|error| error.to_string())
+      let options = auv_tracing::EmitBytesOptions::new().with_purpose(purpose).with_content_type("image/png").with_file_extension("png");
+      auv_tracing::emit_bytes_artifact(options, body).map(drop).map_err(|error| error.to_string())
     });
   if let Err(error) = result {
     preparation_failed(purpose, error);

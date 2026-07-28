@@ -5,6 +5,11 @@ Responsibility: runtime (workspace architecture / maintenance tiers)
 Type: inventory / matrix
 Milestone: Workstream 1 / PR 6
 
+Update (2026-07-28): this document remains the 2026-07-19 inventory snapshot.
+`auv-stage-status` has since been retired; Balatro and osu now own their status
+types locally while preserving the existing JSON labels. The historical counts
+and original verdict below are retained as snapshot evidence.
+
 ## Purpose
 
 Produce an accurate core dependency map and a maintenance-tier for every
@@ -147,7 +152,7 @@ workspace description is empty).
 | auv-file | **Core-adjacent** (experimental-friendly shared infra) | Narrow JSON artifact file-IO helpers (core-b1 graduation); broader file abstraction deferred |
 | auv-media-macos | **Core-adjacent** (decoupled from root/CLI in #121) | macOS system now-playing read via vendored mediaremote-adapter through `/usr/bin/perl`; app-agnostic, reports owning bundle id |
 | auv-query-readiness | **Core-adjacent** | Shared derived-action eligibility triad + optional refusal-reason for spatial-query probes (core-a graduation); NOT driver window-probe readiness |
-| auv-stage-status | **Core-adjacent** | Shared status for persisted semantic/witness/quality stages (core-a3 triad); vertical policy stays in producing crate |
+| auv-stage-status | **Retired 2026-07-28** | The three-value helper was localized as `CardDetectionStageStatus` and `OsuEvaluationStageStatus`; wire labels are unchanged. |
 | auv-compare | **Experimental compile-maintained** (single-consumer game helper) | Narrow dual-backend compare policy helpers (core-b2 graduation); broader spatial compare deferred |
 
 **Coverage:** All 36 members (root + 35 crates) classified. Milestone lists
@@ -262,7 +267,7 @@ real forward dependency.
 **Verdict:** `保留为 core-adjacent` — not a root dep but a multi-consumer shared
 helper with graduation record (`core-a`). Clean contract, zero deps.
 
-### 5.6. auv-stage-status → **Core-adjacent**
+### 5.6. auv-stage-status → **Retired 2026-07-28**
 1. **In chain?** Adjacent — a shared status vocabulary for persisted
    semantic/witness/quality stages; not the execution seam.
 2. **Why root depends:** Root does not. Used by `auv-cli` minecraft integration
@@ -278,8 +283,12 @@ helper with graduation record (`core-a`). Clean contract, zero deps.
 6. **What breaks:** Stage-status wire labels across game readers + the minecraft
    CLI integration diverge into per-crate copies.
 
-**Verdict:** `保留为 core-adjacent` — not a root dep but a shared stable enum
-with graduation record (`core-a3`). Multi-consumer shared vocabulary.
+**Original verdict:** `保留为 core-adjacent` — not a root dep but a shared
+stable enum with graduation record (`core-a3`).
+
+**2026-07-28 revision:** retired. The interface was only a three-value serde
+enum and did not earn a standalone cross-vertical crate. Balatro and osu now
+own domain-named status types locally; the persisted labels remain compatible.
 
 ### 5.7. auv-compare → **Experimental compile-maintained** (single-consumer game helper)
 1. **In chain?** No — dual-backend spatial-compare policy helpers,
@@ -311,7 +320,7 @@ core-adjacent.
 | auv-file | no | games only | clean generic JSON IO | `core-b1` | **Core-adjacent** |
 | auv-media-macos | no (removed in #121) | netease (product) only | clean capability API | none | **Core-adjacent** |
 | auv-query-readiness | no | cli run-read + 2 games | clean typed triad, no deps | `core-a` | **Core-adjacent** |
-| auv-stage-status | no | cli-integration + 3 games | tiny stable shared enum | `core-a3` | **Core-adjacent** |
+| auv-stage-status | no | retired; localized to Balatro + osu | three-value serde enum | `core-a3` (reversed 2026-07-28) | **Retired** |
 | auv-compare | no | 1 game file only | clean but single-consumer, deferred | `core-b2` (deferred) | **Experimental compile-maintained** |
 
 ## Actionable follow-up (owner decisions required)

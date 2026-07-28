@@ -8,7 +8,7 @@ use crate::{
   invoke_command,
 };
 use crate::{InvokeReport, InvokeReportField};
-use auv_tracing::{ArtifactPurpose, Attributes, ByteLength, NewArtifact};
+use auv_tracing::{Attributes, ByteLength, NewArtifact};
 use futures_util::io::Cursor as AsyncCursor;
 
 use auv_driver::{INPUT_ACTION_RESULT_PURPOSE, WindowInput as _};
@@ -629,8 +629,7 @@ fn input_action_result_artifact(result: &auv_driver::InputActionResult) -> Resul
     return Err(format!("{INPUT_ACTION_RESULT_PURPOSE} failed domain validation: successful input attempt must match selected_path"));
   }
   NewArtifact::from_json(
-    ArtifactPurpose::parse(INPUT_ACTION_RESULT_PURPOSE)
-      .map_err(|error| format!("invalid {INPUT_ACTION_RESULT_PURPOSE} purpose: {error}"))?,
+    INPUT_ACTION_RESULT_PURPOSE,
     Attributes::empty(),
     ByteLength::new(ROOT_STRUCTURED_ARTIFACT_JSON_BYTE_LIMIT).expect("static input-action JSON limit is valid"),
     result,

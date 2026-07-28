@@ -31,7 +31,11 @@ impl FileTracingStore {
   }
 
   fn artifact_path(&self, request: &ArtifactRequest) -> PathBuf {
-    self.root.join("artifacts").join(request.run_id().to_string()).join(request.artifact_id().to_string())
+    let mut path = self.root.join("artifacts").join(request.run_id().to_string()).join(request.artifact_id().to_string());
+    if let Some(extension) = request.file_extension() {
+      path.set_extension(extension);
+    }
+    path
   }
 }
 

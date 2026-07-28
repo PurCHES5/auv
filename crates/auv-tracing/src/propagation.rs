@@ -41,7 +41,7 @@ impl PropagationError {
 
   fn new(code: &'static str) -> Self {
     Self {
-      code: ErrorCode::parse(code).expect("static propagation error code is valid"),
+      code: ErrorCode::new(code),
     }
   }
 }

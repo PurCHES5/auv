@@ -2,9 +2,15 @@
 
 Date: 2026-06-29
 
-Status: implemented helper-only extraction. This note records a narrow code move.
-It does **not** graduate stage status triad to Core-B manifest enum, query
-status triad, quality verdict, backend label discipline, or Core-C2 admission
+Status: retired on 2026-07-28. This note preserves the historical rationale for
+the helper extraction. The standalone `auv-stage-status` crate was later
+removed because its three-value enum did not justify a cross-vertical module
+interface. Balatro now owns `CardDetectionStageStatus`, and osu owns
+`OsuEvaluationStageStatus`; both preserve the existing
+`ready | blocked | failed` JSON labels.
+
+The retirement does **not** introduce a shared manifest enum, query status
+triad, quality verdict, backend label discipline, or Core-C2 admission
 alignment.
 
 ## Why this slice exists

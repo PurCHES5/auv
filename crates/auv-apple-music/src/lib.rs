@@ -5,7 +5,7 @@ mod platforms;
 
 #[cfg(feature = "tracing")]
 mod tracing {
-  use auv_tracing::{ArtifactPurpose, Attributes, ByteLength, ContentType, NewArtifact};
+  use auv_tracing::{Attributes, ByteLength, EmitBytesOptions, NewArtifact};
   use image::{ExtendedColorType, ImageEncoder, codecs::png::PngEncoder};
   use serde::Serialize;
 
@@ -50,15 +50,14 @@ mod tracing {
     if !auv_tracing::Context::current().can_publish_artifacts() {
       return;
     }
-    match ArtifactPurpose::parse(purpose).map_err(|error| error.to_string()).and_then(|purpose| {
-      auv_tracing::emit_json_artifact(
-        purpose,
-        Attributes::empty(),
-        ByteLength::new(JSON_ARTIFACT_BYTE_LIMIT).expect("static Apple Music JSON limit is valid"),
-        value,
-      )
-      .map_err(|error| format!("encode JSON artifact failed: {error}"))
-    }) {
+    match auv_tracing::emit_json_artifact(
+      purpose,
+      Attributes::empty(),
+      ByteLength::new(JSON_ARTIFACT_BYTE_LIMIT).expect("static Apple Music JSON limit is valid"),
+      value,
+    )
+    .map_err(|error| format!("encode JSON artifact failed: {error}"))
+    {
       Ok(emission) => drop(emission),
       Err(error) => preparation_failed(purpose, error),
     }
@@ -90,13 +89,12 @@ mod tracing {
   }
 
   fn emit_bytes(purpose: &'static str, content_type: &'static str, body: Vec<u8>) -> Result<(), String> {
-    let artifact = NewArtifact::from_bytes(
-      ArtifactPurpose::parse(purpose).map_err(|error| error.to_string())?,
-      ContentType::parse(content_type).map_err(|error| error.to_string())?,
-      Attributes::empty(),
-      body,
-    )
-    .map_err(|error| error.to_string())?;
+    let options = EmitBytesOptions::new()
+      .with_purpose(purpose)
+      .with_content_type(content_type)
+      .with_attributes(Attributes::empty())
+      .with_file_extension("png");
+    let artifact = NewArtifact::from_bytes(options, body).map_err(|error| error.to_string())?;
     drop(auv_tracing::emit_artifact!(artifact));
     Ok(())
   }

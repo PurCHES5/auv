@@ -10,12 +10,8 @@ use auv_game_minecraft::{
   MinecraftTargetSemantics, MismatchRefusalReason, TailFrameWaitConfig, bind_capture_to_frame, mc6_projection_target_for_frame,
 };
 use auv_runtime::model::AuvResult;
-use auv_tracing::{
-  ArtifactMetadata, ArtifactPurpose, Attributes, ByteLength, ContentType, Context, EventPayload, NewArtifact, Sha256Digest,
-};
-use futures_util::io::Cursor as AsyncCursor;
+use auv_tracing::{ArtifactMetadata, Attributes, ByteLength, Context, EmitBytesOptions, EventPayload};
 use image::{DynamicImage, ExtendedColorType, ImageEncoder, ImageFormat, ImageReader, Limits, RgbImage, codecs::png::PngEncoder};
-use sha2::{Digest, Sha256};
 
 use super::query_live_action::DirectWindowPointClickExecutor;
 pub const MINECRAFT_SCREENSHOT_PURPOSE: &str = "auv.minecraft.screenshot";
@@ -359,14 +355,8 @@ pub(crate) async fn publish_json_artifact<T: serde::Serialize>(purpose: &'static
   if !context.can_publish_artifacts() {
     return Ok(None);
   }
-  let purpose_value = match ArtifactPurpose::parse(purpose) {
-    Ok(purpose) => purpose,
-    Err(error) => {
-      return Ok(super::keep_artifact_receipt::<String>(purpose, Err(format!("invalid artifact purpose: {error}"))));
-    }
-  };
   let emission = match auv_tracing::emit_json_artifact(
-    purpose_value,
+    purpose,
     Attributes::empty(),
     ByteLength::new(MINECRAFT_STRUCTURED_ARTIFACT_JSON_BYTE_LIMIT).expect("static Minecraft JSON limit is valid"),
     value,
@@ -395,33 +385,16 @@ async fn publish_png(purpose: &'static str, image: &RgbImage) -> AuvResult<Optio
 }
 
 async fn publish_bytes(context: &Context, purpose: &'static str, content_type: &'static str, bytes: Vec<u8>) -> Option<ArtifactMetadata> {
-  let byte_length = match u64::try_from(bytes.len()) {
-    Ok(byte_length) => byte_length,
-    Err(_) => return super::keep_artifact_receipt::<String>(purpose, Err("artifact length does not fit u64".to_string())),
+  let options = EmitBytesOptions::new()
+    .with_purpose(purpose)
+    .with_content_type(content_type)
+    .with_attributes(Attributes::empty())
+    .with_file_extension("png");
+  let emission = match context.in_scope(|| auv_tracing::emit_bytes_artifact(options, bytes)) {
+    Ok(emission) => emission,
+    Err(error) => return super::keep_artifact_receipt::<String>(purpose, Err(error.to_string())),
   };
-  let purpose_value = match ArtifactPurpose::parse(purpose) {
-    Ok(purpose) => purpose,
-    Err(error) => return super::keep_artifact_receipt::<String>(purpose, Err(format!("invalid artifact purpose: {error}"))),
-  };
-  let content_type_value = match ContentType::parse(content_type) {
-    Ok(content_type) => content_type,
-    Err(error) => {
-      return super::keep_artifact_receipt::<String>(purpose, Err(format!("invalid artifact content type {content_type}: {error}")));
-    }
-  };
-  let byte_length = match ByteLength::new(byte_length) {
-    Ok(byte_length) => byte_length,
-    Err(error) => return super::keep_artifact_receipt::<String>(purpose, Err(format!("invalid artifact byte length: {error}"))),
-  };
-  let artifact = NewArtifact::new(
-    purpose_value,
-    content_type_value,
-    byte_length,
-    Sha256Digest::new(Sha256::digest(&bytes).into()),
-    Attributes::empty(),
-    AsyncCursor::new(bytes),
-  );
-  super::keep_artifact_receipt(purpose, context.in_scope(|| auv_tracing::emit_artifact!(artifact)).await)
+  super::keep_artifact_receipt(purpose, emission.await)
 }
 
 fn minecraft_image_decode_limits() -> Limits {

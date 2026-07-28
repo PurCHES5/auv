@@ -33,7 +33,7 @@ impl EventSchema {
 
   /// Creates the schema declared by a typed event payload.
   pub fn for_payload<T: EventPayload>() -> Result<Self, ValidationError> {
-    Self::new(EventName::parse(T::NAME)?, T::VERSION)
+    Self::new(EventName::new(T::NAME), T::VERSION)
   }
 
   /// Returns the event name.
@@ -141,7 +141,7 @@ impl FromStr for JsonPayload {
 
 /// A typed point-event payload declaration.
 pub trait EventPayload: Serialize {
-  /// Stable namespaced event name.
+  /// Caller-declared event name.
   const NAME: &'static str;
   /// Positive payload schema version.
   const VERSION: u32;

@@ -172,7 +172,7 @@ impl<F> PinnedDrop for WithContext<F> {
   }
 }
 
-/// Declares a stable span name and bounded attributes.
+/// Declares a span name and attributes.
 pub trait SpanSpec {
   const NAME: &'static str;
   fn attributes(&self) -> Attributes;
@@ -267,7 +267,7 @@ pub fn start_span<S: SpanSpec>(spec: S) -> Span {
   };
   let span_id = SpanId::new();
   let prepared = (|| {
-    let name = SpanName::parse(S::NAME).ok()?;
+    let name = SpanName::new(S::NAME);
     let started_at = crate::dispatch::timestamp_now().ok()?;
     let attributes = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| spec.attributes())).ok()?;
     dispatch.submit(TraceRecord::SpanStarted {

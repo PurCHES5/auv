@@ -7,7 +7,7 @@ use crate::{
   invoke_command,
 };
 use auv_scan::{build_coverage_fixture, load_frame_fixture};
-use auv_tracing::{ArtifactPurpose, ArtifactUri, Attributes, ByteLength, ContentType, EmitBytesOptions, NewArtifact};
+use auv_tracing::{ArtifactUri, Attributes, ByteLength, EmitBytesOptions, NewArtifact};
 use futures_util::io::Cursor as AsyncCursor;
 use serde::Serialize;
 
@@ -41,12 +41,7 @@ pub async fn produce_scan_frame(fixture_dir: PathBuf) -> Result<auv_scan::ScanFr
   }
   let loaded = load_frame_fixture(&fixture_dir).map_err(|error| format!("scan.frame fixture decode failed: {error}"))?;
   let (frame, image_bytes) = loaded.into_parts();
-  let image_options = EmitBytesOptions::new(
-    ArtifactPurpose::parse("auv.scan.frame_image").expect("static scan image purpose is valid"),
-    ContentType::parse("image/png").expect("static PNG content type is valid"),
-  )
-  .with_file_extension("png")
-  .expect("static PNG extension is valid");
+  let image_options = EmitBytesOptions::new().with_purpose("auv.scan.frame_image").with_content_type("image/png").with_file_extension("png");
   if let Some(image) = emit_bytes_with_receipt(image_options, image_bytes).await {
     emit_prepared("auv.scan.frame", scan_frame_artifact(&frame, image.uri()));
   }
@@ -73,7 +68,7 @@ struct ScanFrameImageArtifact<'a> {
 
 fn scan_frame_artifact(frame: &auv_scan::ScanFrame, image_uri: &ArtifactUri) -> Result<NewArtifact<AsyncCursor<Vec<u8>>>, String> {
   NewArtifact::from_json(
-    ArtifactPurpose::parse("auv.scan.frame").map_err(|error| format!("invalid auv.scan.frame purpose: {error}"))?,
+    "auv.scan.frame",
     Attributes::empty(),
     ByteLength::new(ROOT_STRUCTURED_ARTIFACT_JSON_BYTE_LIMIT).expect("static scan JSON limit is valid"),
     &ScanFrameArtifact {
@@ -144,7 +139,7 @@ fn emit_scan_coverage(value: &auv_scan::CoverageView) {
 fn scan_coverage_artifact(value: &auv_scan::CoverageView) -> Result<NewArtifact<AsyncCursor<Vec<u8>>>, String> {
   let artifact = auv_scan::ScanCoverageArtifact::new(value.clone());
   NewArtifact::from_json(
-    ArtifactPurpose::parse(SCAN_COVERAGE_PURPOSE).map_err(|error| format!("invalid {SCAN_COVERAGE_PURPOSE} purpose: {error}"))?,
+    SCAN_COVERAGE_PURPOSE,
     Attributes::empty(),
     ByteLength::new(ROOT_STRUCTURED_ARTIFACT_JSON_BYTE_LIMIT).expect("static scan JSON limit is valid"),
     &artifact,

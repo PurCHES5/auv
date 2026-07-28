@@ -5,6 +5,7 @@ use futures_io::AsyncRead;
 use futures_util::AsyncReadExt;
 use sha2::{Digest, Sha256};
 
+use crate::artifact::DetachedArtifact;
 use crate::{
   ArtifactId, ArtifactMetadata, ArtifactPurpose, ArtifactUri, Attributes, ByteLength, ContentType, RunId, Sha256Digest, SpanId, TraceRecord,
 };
@@ -33,33 +34,26 @@ pub struct ArtifactRequest {
   artifact_id: ArtifactId,
   purpose: ArtifactPurpose,
   content_type: ContentType,
+  file_extension: Option<String>,
   expected_byte_length: ByteLength,
   expected_sha256: Sha256Digest,
   attributes: Attributes,
 }
 
 impl ArtifactRequest {
-  #[allow(clippy::too_many_arguments)]
-  pub fn new(
-    run_id: RunId,
-    span_id: Option<SpanId>,
-    artifact_id: ArtifactId,
-    purpose: ArtifactPurpose,
-    content_type: ContentType,
-    expected_byte_length: ByteLength,
-    expected_sha256: Sha256Digest,
-    attributes: Attributes,
-  ) -> Self {
-    Self {
+  pub(crate) fn from_detached(run_id: RunId, span_id: Option<SpanId>, artifact: DetachedArtifact) -> (Self, ArtifactBody) {
+    let request = Self {
       run_id,
       span_id,
-      artifact_id,
-      purpose,
-      content_type,
-      expected_byte_length,
-      expected_sha256,
-      attributes,
-    }
+      artifact_id: artifact.artifact_id,
+      purpose: artifact.purpose,
+      content_type: artifact.content_type,
+      file_extension: artifact.file_extension,
+      expected_byte_length: artifact.byte_length,
+      expected_sha256: artifact.sha256,
+      attributes: artifact.attributes,
+    };
+    (request, artifact.body)
   }
 
   pub fn run_id(&self) -> RunId {
@@ -77,6 +71,9 @@ impl ArtifactRequest {
   pub fn content_type(&self) -> &ContentType {
     &self.content_type
   }
+  pub fn file_extension(&self) -> Option<&str> {
+    self.file_extension.as_deref()
+  }
   pub fn expected_byte_length(&self) -> ByteLength {
     self.expected_byte_length
   }
@@ -92,6 +89,7 @@ impl ArtifactRequest {
       ArtifactUri::from_ids(self.run_id, self.artifact_id),
       self.purpose.clone(),
       self.content_type.clone(),
+      self.file_extension.clone(),
       self.expected_byte_length,
       self.expected_sha256,
       self.attributes.clone(),
@@ -133,7 +131,7 @@ impl StoreError {
 }
 
 pub(crate) fn store_error(code: &'static str) -> StoreError {
-  StoreError::new(crate::ErrorCode::parse(code).expect("static store error code is valid"))
+  StoreError::new(crate::ErrorCode::new(code))
 }
 
 pub(crate) async fn read_artifact_body(request: &ArtifactRequest, body: ArtifactBody) -> Result<Vec<u8>, StoreError> {

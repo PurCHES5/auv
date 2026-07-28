@@ -21,7 +21,7 @@ fn span_records_export_without_authority_or_revision_vocabulary() {
     span_id,
     parent_span_id: None,
     remote_span_id: None,
-    name: SpanName::parse("auv.test.operation").unwrap(),
+    name: SpanName::new("auv.test.operation"),
     started_at: Timestamp::new(100, 0).unwrap(),
     attributes: Attributes::empty(),
   }))
@@ -51,7 +51,7 @@ fn event_and_artifact_records_export_as_logs_without_history_vocabulary() {
     run_id,
     span_id: None,
     event_id: EventId::new(),
-    schema: EventSchema::new(EventName::parse("auv.test.event").unwrap(), 1).unwrap(),
+    schema: EventSchema::new(EventName::new("auv.test.event"), 1).unwrap(),
     occurred_at: Timestamp::new(100, 0).unwrap(),
     payload: JsonPayload::from_str(r#"{"secret":"not exported"}"#).unwrap(),
   }))
@@ -61,8 +61,9 @@ fn event_and_artifact_records_export_as_logs_without_history_vocabulary() {
     span_id: None,
     metadata: ArtifactMetadata::new(
       ArtifactUri::from_ids(run_id, ArtifactId::new()),
-      ArtifactPurpose::parse("auv.test.output").unwrap(),
-      ContentType::parse("text/plain").unwrap(),
+      ArtifactPurpose::new("auv.test.output"),
+      ContentType::new("text/plain"),
+      None,
       ByteLength::new(0).unwrap(),
       Sha256Digest::new([0; 32]),
       Attributes::empty(),
@@ -90,7 +91,7 @@ fn rejected_span_records_do_not_corrupt_pairing_state() {
     span_id,
     parent_span_id: None,
     remote_span_id: None,
-    name: SpanName::parse("auv.test.operation").unwrap(),
+    name: SpanName::new("auv.test.operation"),
     started_at: Timestamp::new(100, 0).unwrap(),
     attributes: Attributes::empty(),
   };

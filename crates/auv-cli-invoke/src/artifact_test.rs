@@ -27,6 +27,7 @@ fn emitted_png_decodes_to_the_exact_source_pixels() {
   let decoded = image::load_from_memory_with_format(&encoded, image::ImageFormat::Png).expect("decode PNG").into_rgba8();
 
   assert_eq!(metadata.byte_length().get(), encoded.len() as u64);
+  assert_eq!(metadata.file_extension(), Some("png"));
   assert_eq!(decoded, image);
 }
 
@@ -77,7 +78,7 @@ impl TracingStore for RejectArtifactStore {
   }
 
   fn write_artifact(&self, _request: ArtifactRequest, _body: ArtifactBody) -> BoxFuture<'_, Result<ArtifactMetadata, StoreError>> {
-    Box::pin(async { Err(StoreError::new(ErrorCode::parse("auv.test.artifact_rejected").unwrap())) })
+    Box::pin(async { Err(StoreError::new(ErrorCode::new("auv.test.artifact_rejected"))) })
   }
 
   fn flush(&self) -> BoxFuture<'_, Result<(), StoreError>> {

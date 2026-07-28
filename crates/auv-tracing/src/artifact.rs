@@ -16,11 +16,63 @@ use crate::{
   ArtifactBody, ArtifactId, ArtifactPurpose, Attributes, ByteLength, ContentType, RunId, Sha256Digest, StoreError, ValidationError,
 };
 
-/// One caller-owned artifact body and its validated metadata.
+/// Options shared by byte-backed artifact preparation and emission.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct EmitBytesOptions {
+  purpose: ArtifactPurpose,
+  content_type: ContentType,
+  attributes: Attributes,
+  file_extension: Option<String>,
+}
+
+impl EmitBytesOptions {
+  pub fn new() -> Self {
+    Self::default()
+  }
+
+  pub fn with_purpose(mut self, purpose: impl Into<ArtifactPurpose>) -> Self {
+    self.purpose = purpose.into();
+    self
+  }
+
+  pub fn with_content_type(mut self, content_type: impl Into<ContentType>) -> Self {
+    self.content_type = content_type.into();
+    self
+  }
+
+  pub fn with_attributes(mut self, attributes: Attributes) -> Self {
+    self.attributes = attributes;
+    self
+  }
+
+  pub fn with_file_extension(mut self, extension: impl Into<String>) -> Self {
+    self.file_extension = Some(extension.into());
+    self
+  }
+
+  pub fn purpose(&self) -> &ArtifactPurpose {
+    &self.purpose
+  }
+
+  pub fn content_type(&self) -> &ContentType {
+    &self.content_type
+  }
+
+  pub fn attributes(&self) -> &Attributes {
+    &self.attributes
+  }
+
+  pub fn file_extension(&self) -> Option<&str> {
+    self.file_extension.as_deref()
+  }
+}
+
+/// One caller-owned artifact body and its metadata.
 pub struct NewArtifact<R> {
   artifact_id: ArtifactId,
   purpose: ArtifactPurpose,
   content_type: ContentType,
+  file_extension: Option<String>,
   byte_length: ByteLength,
   sha256: Sha256Digest,
   attributes: Attributes,
@@ -28,21 +80,15 @@ pub struct NewArtifact<R> {
 }
 
 impl<R> NewArtifact<R> {
-  pub fn new(
-    purpose: ArtifactPurpose,
-    content_type: ContentType,
-    byte_length: ByteLength,
-    sha256: Sha256Digest,
-    attributes: Attributes,
-    body: R,
-  ) -> Self {
+  pub fn new(options: EmitBytesOptions, byte_length: ByteLength, sha256: Sha256Digest, body: R) -> Self {
     Self {
       artifact_id: ArtifactId::new(),
-      purpose,
-      content_type,
+      purpose: options.purpose,
+      content_type: options.content_type,
+      file_extension: options.file_extension,
       byte_length,
       sha256,
-      attributes,
+      attributes: options.attributes,
       body,
     }
   }
@@ -55,6 +101,7 @@ impl<R> NewArtifact<R> {
       artifact_id: self.artifact_id,
       purpose: self.purpose,
       content_type: self.content_type,
+      file_extension: self.file_extension,
       byte_length: self.byte_length,
       sha256: self.sha256,
       attributes: self.attributes,
@@ -64,33 +111,34 @@ impl<R> NewArtifact<R> {
 }
 
 impl NewArtifact<Cursor<Vec<u8>>> {
-  pub fn from_bytes(
-    purpose: ArtifactPurpose,
-    content_type: ContentType,
-    attributes: Attributes,
-    body: Vec<u8>,
-  ) -> Result<Self, ValidationError> {
+  pub fn from_bytes(options: EmitBytesOptions, body: Vec<u8>) -> Result<Self, ValidationError> {
     let length = u64::try_from(body.len()).map_err(|_| ValidationError::new("artifact byte length is out of range"))?;
-    Ok(Self::new(
-      purpose,
-      content_type,
-      ByteLength::new(length)?,
-      Sha256Digest::new(Sha256::digest(&body).into()),
-      attributes,
-      Cursor::new(body),
-    ))
+    Ok(Self {
+      artifact_id: ArtifactId::new(),
+      purpose: options.purpose,
+      content_type: options.content_type,
+      file_extension: options.file_extension,
+      byte_length: ByteLength::new(length)?,
+      sha256: Sha256Digest::new(Sha256::digest(&body).into()),
+      attributes: options.attributes,
+      body: Cursor::new(body),
+    })
   }
 
   pub fn from_json<T: Serialize>(
-    purpose: ArtifactPurpose,
+    purpose: impl Into<ArtifactPurpose>,
     attributes: Attributes,
     byte_limit: ByteLength,
     value: &T,
   ) -> Result<Self, JsonArtifactError> {
     let mut buffer = BoundedBuffer::new(byte_limit);
     serde_json::to_writer(&mut buffer, value).map_err(|error| buffer.failure.take().unwrap_or(JsonArtifactError::Serialize(error)))?;
-    Self::from_bytes(purpose, ContentType::parse("application/json").expect("static content type"), attributes, buffer.bytes)
-      .map_err(JsonArtifactError::Validation)
+    let options = EmitBytesOptions::new()
+      .with_purpose(purpose)
+      .with_content_type("application/json")
+      .with_attributes(attributes)
+      .with_file_extension("json");
+    Self::from_bytes(options, buffer.bytes).map_err(JsonArtifactError::Validation)
   }
 }
 
@@ -98,6 +146,7 @@ pub(crate) struct DetachedArtifact {
   pub artifact_id: ArtifactId,
   pub purpose: ArtifactPurpose,
   pub content_type: ContentType,
+  pub file_extension: Option<String>,
   pub byte_length: ByteLength,
   pub sha256: Sha256Digest,
   pub attributes: Attributes,
@@ -149,6 +198,8 @@ pub struct ArtifactMetadata {
   uri: ArtifactUri,
   purpose: ArtifactPurpose,
   content_type: ContentType,
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  file_extension: Option<String>,
   byte_length: ByteLength,
   sha256: Sha256Digest,
   attributes: Attributes,
@@ -159,6 +210,7 @@ impl ArtifactMetadata {
     uri: ArtifactUri,
     purpose: ArtifactPurpose,
     content_type: ContentType,
+    file_extension: Option<String>,
     byte_length: ByteLength,
     sha256: Sha256Digest,
     attributes: Attributes,
@@ -167,6 +219,7 @@ impl ArtifactMetadata {
       uri,
       purpose,
       content_type,
+      file_extension,
       byte_length,
       sha256,
       attributes,
@@ -180,6 +233,9 @@ impl ArtifactMetadata {
   }
   pub fn content_type(&self) -> &ContentType {
     &self.content_type
+  }
+  pub fn file_extension(&self) -> Option<&str> {
+    self.file_extension.as_deref()
   }
   pub fn byte_length(&self) -> ByteLength {
     self.byte_length
@@ -231,7 +287,7 @@ impl Future for ArtifactEmission {
 }
 
 pub fn emit_json_artifact<T: Serialize>(
-  purpose: ArtifactPurpose,
+  purpose: impl Into<ArtifactPurpose>,
   attributes: Attributes,
   byte_limit: ByteLength,
   value: &T,
@@ -242,16 +298,11 @@ pub fn emit_json_artifact<T: Serialize>(
   Ok(emit_artifact(NewArtifact::from_json(purpose, attributes, byte_limit, value)?))
 }
 
-pub fn emit_bytes_artifact(
-  purpose: ArtifactPurpose,
-  content_type: ContentType,
-  attributes: Attributes,
-  body: Vec<u8>,
-) -> Result<ArtifactEmission, ValidationError> {
+pub fn emit_bytes_artifact(options: EmitBytesOptions, body: Vec<u8>) -> Result<ArtifactEmission, ValidationError> {
   if !crate::Context::current().can_publish_artifacts() {
     return Ok(ArtifactEmission::disabled());
   }
-  Ok(emit_artifact(NewArtifact::from_bytes(purpose, content_type, attributes, body)?))
+  Ok(emit_artifact(NewArtifact::from_bytes(options, body)?))
 }
 
 pub fn emit_artifact<R: AsyncRead + Unpin + Send + 'static>(artifact: NewArtifact<R>) -> ArtifactEmission {

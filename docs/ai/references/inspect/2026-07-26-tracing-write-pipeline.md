@@ -31,7 +31,16 @@ typed result directly; tracing cannot reconstruct or replace it.
 - `MemoryTracingStore` exposes copied records and artifact bytes only as
   concrete test helpers, not through the generic port.
 - `FileTracingStore` appends versioned JSON Lines record envelopes and stores
-  artifact bodies by run/artifact identity. It intentionally exposes no reader.
+  artifact bodies by run/artifact identity. Byte emitters may declare a file
+  extension through `EmitBytesOptions`; the file-store adapter appends that
+  extension without deriving it from content type. Artifact URIs remain
+  independent from that local layout. The store intentionally exposes no
+  reader.
+- Trace names, error codes, artifact purposes, content types, and attribute
+  keys are caller-declared strings. `auv-tracing` preserves them without
+  namespaced-name, MIME, count, or encoded-size validation. Structural and
+  storage invariants such as UUID identity, finite JSON numbers, byte limits,
+  and artifact integrity remain enforced.
 - `TraceExporter` is independent from storage. Export failures do not prevent
   full-fidelity storage.
 - `auv-tracing-otel::OtelExporter` uses application-supplied SDK providers and

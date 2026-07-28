@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex};
 
 use auv_tracing::{
-  ArtifactBody, ArtifactMetadata, ArtifactPurpose, ArtifactRequest, Attributes, BoxFuture, ContentType, Context, EventPayload, ExportError,
-  MemoryTracingStore, RunId, SpanSpec, StoreError, TraceExporter, TraceRecord, TracingStore, configure, dispatcher,
+  ArtifactBody, ArtifactMetadata, ArtifactRequest, AttributeValue, Attributes, BoxFuture, Context, EmitBytesOptions, EventPayload,
+  ExportError, MemoryTracingStore, RunId, SpanSpec, StoreError, TraceExporter, TraceRecord, TracingStore, configure, dispatcher,
 };
 
 struct Operation;
@@ -130,9 +130,7 @@ fn artifact_bytes_are_written_once_and_observed_as_metadata() {
   let emission = dispatcher::with_default(&dispatch, || {
     Context::root(RunId::new()).in_scope(|| {
       auv_tracing::emit_bytes_artifact(
-        ArtifactPurpose::parse("auv.test.output").unwrap(),
-        ContentType::parse("text/plain").unwrap(),
-        Attributes::empty(),
+        EmitBytesOptions::new().with_purpose("auv.test.output").with_content_type("text/plain").with_attributes(Attributes::empty()),
         body.clone(),
       )
       .unwrap()
@@ -145,10 +143,31 @@ fn artifact_bytes_are_written_once_and_observed_as_metadata() {
   assert!(matches!(store.records().as_slice(), [TraceRecord::Artifact { metadata: stored, .. }] if stored == &metadata));
 }
 
+#[test]
+fn artifact_metadata_preserves_unconstrained_caller_strings() {
+  let store = Arc::new(MemoryTracingStore::new());
+  let dispatch = configure().tracing_store(store).build().unwrap();
+  let attributes = Attributes::from_iter([("plain key", AttributeValue::string("x".repeat(20_000)))]);
+  let options = EmitBytesOptions::new()
+    .with_purpose("plain purpose")
+    .with_content_type("not a MIME value")
+    .with_attributes(attributes)
+    .with_file_extension("tar.gz");
+  let emission = dispatcher::with_default(&dispatch, || {
+    Context::root(RunId::new()).in_scope(|| auv_tracing::emit_bytes_artifact(options, b"artifact".to_vec()).unwrap())
+  });
+  let metadata = futures_executor::block_on(emission).unwrap().unwrap();
+
+  assert_eq!(metadata.purpose().as_str(), "plain purpose");
+  assert_eq!(metadata.content_type().as_str(), "not a MIME value");
+  assert_eq!(metadata.file_extension(), Some("tar.gz"));
+  assert_eq!(metadata.attributes().get("plain key"), Some(&AttributeValue::string("x".repeat(20_000))));
+}
+
 struct FailingExporter;
 impl TraceExporter for FailingExporter {
   fn export(&self, _: TraceRecord) -> BoxFuture<'_, Result<(), ExportError>> {
-    Box::pin(async { Err(ExportError::new(auv_tracing::ErrorCode::parse("auv.test.export_failed").unwrap())) })
+    Box::pin(async { Err(ExportError::new(auv_tracing::ErrorCode::new("auv.test.export_failed"))) })
   }
   fn flush(&self) -> BoxFuture<'_, Result<(), ExportError>> {
     Box::pin(async { Ok(()) })
@@ -169,10 +188,10 @@ fn exporter_failure_does_not_prevent_full_fidelity_storage() {
 struct FailingStore;
 impl TracingStore for FailingStore {
   fn write(&self, _: TraceRecord) -> BoxFuture<'_, Result<(), StoreError>> {
-    Box::pin(async { Err(StoreError::new(auv_tracing::ErrorCode::parse("auv.test.store_failed").unwrap())) })
+    Box::pin(async { Err(StoreError::new(auv_tracing::ErrorCode::new("auv.test.store_failed"))) })
   }
   fn write_artifact(&self, _: ArtifactRequest, _: ArtifactBody) -> BoxFuture<'_, Result<ArtifactMetadata, StoreError>> {
-    Box::pin(async { Err(StoreError::new(auv_tracing::ErrorCode::parse("auv.test.store_failed").unwrap())) })
+    Box::pin(async { Err(StoreError::new(auv_tracing::ErrorCode::new("auv.test.store_failed"))) })
   }
   fn flush(&self) -> BoxFuture<'_, Result<(), StoreError>> {
     Box::pin(async { Ok(()) })

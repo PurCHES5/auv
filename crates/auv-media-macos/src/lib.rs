@@ -21,7 +21,7 @@ pub use error::MediaError;
 mod tracing {
   use std::time::Duration;
 
-  use auv_tracing::{AttributeKey, AttributeValue, Attributes, SpanSpec};
+  use auv_tracing::{AttributeValue, Attributes, SpanSpec};
 
   use super::MediaCommand;
 
@@ -43,11 +43,7 @@ mod tracing {
     const NAME: &'static str = "auv.media.send_command";
 
     fn attributes(&self) -> Attributes {
-      Attributes::try_from_iter([(
-        AttributeKey::parse("auv.media.command").expect("static media command attribute key is valid"),
-        AttributeValue::string(self.command.label()).expect("media command labels are bounded"),
-      )])
-      .expect("static media command attributes are bounded")
+      Attributes::from_iter([("auv.media.command", AttributeValue::string(self.command.label()))])
     }
   }
 
@@ -62,14 +58,7 @@ mod tracing {
       let Ok(position_millis) = i64::try_from(self.position.as_millis()) else {
         return Attributes::empty();
       };
-      let Ok(position_millis) = AttributeValue::integer(position_millis) else {
-        return Attributes::empty();
-      };
-      Attributes::try_from_iter([(
-        AttributeKey::parse("auv.media.position_millis").expect("static media position attribute key is valid"),
-        position_millis,
-      )])
-      .expect("static media position attributes are bounded")
+      Attributes::from_iter([("auv.media.position_millis", AttributeValue::integer(position_millis))])
     }
   }
 

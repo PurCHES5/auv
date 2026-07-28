@@ -1,4 +1,4 @@
-use auv_tracing::{ArtifactMetadata, ArtifactPurpose, Attributes, ContentType, EventPayload, NewArtifact};
+use auv_tracing::{ArtifactMetadata, EmitBytesOptions, EventPayload, NewArtifact};
 use image::{ExtendedColorType, ImageEncoder, RgbaImage, codecs::png::PngEncoder};
 
 #[derive(serde::Serialize)]
@@ -21,13 +21,8 @@ pub(crate) fn emit_png(purpose: &str, image: &RgbaImage) {
     .write_image(image.as_raw(), image.width(), image.height(), ExtendedColorType::Rgba8)
     .map_err(|error| format!("failed to encode {purpose} PNG artifact: {error}"))
     .and_then(|()| {
-      auv_tracing::emit_bytes_artifact(
-        ArtifactPurpose::parse(purpose).map_err(|error| format!("invalid {purpose} artifact purpose: {error}"))?,
-        ContentType::parse("image/png").expect("static PNG content type is valid"),
-        Attributes::empty(),
-        body,
-      )
-      .map_err(|error| format!("invalid {purpose} artifact bytes: {error}"))
+      let options = EmitBytesOptions::new().with_purpose(purpose).with_content_type("image/png").with_file_extension("png");
+      auv_tracing::emit_bytes_artifact(options, body).map_err(|error| format!("invalid {purpose} artifact bytes: {error}"))
     });
   match emission {
     Ok(emission) => drop(emission),
@@ -38,23 +33,16 @@ pub(crate) fn emit_png(purpose: &str, image: &RgbaImage) {
   }
 }
 
-pub(crate) async fn emit_bytes_with_receipt(purpose: &str, content_type: &str, body: Vec<u8>) -> Option<ArtifactMetadata> {
+pub(crate) async fn emit_bytes_with_receipt(options: EmitBytesOptions, body: Vec<u8>) -> Option<ArtifactMetadata> {
   if !auv_tracing::Context::current().can_publish_artifacts() {
     return None;
   }
-  let emission = match ArtifactPurpose::parse(purpose).map_err(|error| format!("invalid {purpose} artifact purpose: {error}")).and_then(
-    |parsed_purpose| {
-      let content_type = ContentType::parse(content_type).map_err(|error| format!("invalid artifact content type: {error}"))?;
-      auv_tracing::emit_bytes_artifact(parsed_purpose, content_type, Attributes::empty(), body)
-        .map_err(|error| format!("invalid {purpose} artifact bytes: {error}"))
-    },
-  ) {
+  let purpose = options.purpose().to_string();
+  let emission = match auv_tracing::emit_bytes_artifact(options, body).map_err(|error| format!("invalid {purpose} artifact bytes: {error}"))
+  {
     Ok(emission) => emission,
     Err(error) => {
-      auv_tracing::emit_event!(ArtifactPreparationFailed {
-        purpose: purpose.to_string(),
-        error,
-      });
+      auv_tracing::emit_event!(ArtifactPreparationFailed { purpose, error });
       return None;
     }
   };
