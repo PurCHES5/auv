@@ -386,7 +386,6 @@ dependencies = [
  "auv-godot",
  "auv-query-readiness",
  "auv-runtime",
- "auv-stage-status",
  "auv-task-object-detection",
  "auv-tracing",
  "axum",
@@ -535,7 +534,6 @@ dependencies = [
  "auv-inference-common",
  "auv-inference-ort",
  "auv-inference-ultralytics",
- "auv-stage-status",
  "auv-task-object-detection",
  "auv-tracing",
  "clap",
@@ -557,7 +555,6 @@ dependencies = [
  "auv-driver",
  "auv-file",
  "auv-query-readiness",
- "auv-stage-status",
  "auv-tracing",
  "futures-executor",
  "image",
@@ -575,7 +572,6 @@ dependencies = [
  "auv-driver-macos",
  "auv-file",
  "auv-query-readiness",
- "auv-stage-status",
  "auv-task-object-detection",
  "auv-tracing",
  "futures-executor",
@@ -737,13 +733,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "auv-stage-status"
-version = "0.0.1"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "auv-steam"
 version = "0.0.1"
 dependencies = [
@@ -774,7 +763,6 @@ dependencies = [
  "futures-io",
  "futures-util",
  "hex",
- "mime",
  "pin-project",
  "serde",
  "serde_json",

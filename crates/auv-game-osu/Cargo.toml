@@ -19,7 +19,6 @@ tracing = ["dep:auv-tracing"]
 [dependencies]
 auv-file = { path = "../auv-file" }
 auv-query-readiness = { path = "../auv-query-readiness" }
-auv-stage-status = { path = "../auv-stage-status" }
 auv-driver = { path = "../auv-driver" }
 auv-task-object-detection = { path = "../auv-task-object-detection" }
 auv-tracing = { path = "../auv-tracing", optional = true }

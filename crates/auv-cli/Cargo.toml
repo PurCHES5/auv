@@ -62,7 +62,6 @@ swift-bridge-build.workspace = true
 
 [dev-dependencies]
 auv-api-proto = { path = "../auv-api-proto" }
-auv-stage-status = { path = "../auv-stage-status" }
 auv-tracing = { path = "../auv-tracing", features = ["file-store", "memory-store"] }
 axum = { version = "0.8", default-features = false }
 rmcp = { version = "0.6", features = ["server", "client", "transport-io"] }

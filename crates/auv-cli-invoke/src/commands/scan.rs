@@ -7,7 +7,7 @@ use crate::{
   invoke_command,
 };
 use auv_scan::{build_coverage_fixture, load_frame_fixture};
-use auv_tracing::{ArtifactPurpose, ArtifactUri, Attributes, ByteLength, NewArtifact};
+use auv_tracing::{ArtifactPurpose, ArtifactUri, Attributes, ByteLength, ContentType, EmitBytesOptions, NewArtifact};
 use futures_util::io::Cursor as AsyncCursor;
 use serde::Serialize;
 
@@ -41,7 +41,13 @@ pub async fn produce_scan_frame(fixture_dir: PathBuf) -> Result<auv_scan::ScanFr
   }
   let loaded = load_frame_fixture(&fixture_dir).map_err(|error| format!("scan.frame fixture decode failed: {error}"))?;
   let (frame, image_bytes) = loaded.into_parts();
-  if let Some(image) = emit_bytes_with_receipt("auv.scan.frame_image", "image/png", image_bytes).await {
+  let image_options = EmitBytesOptions::new(
+    ArtifactPurpose::parse("auv.scan.frame_image").expect("static scan image purpose is valid"),
+    ContentType::parse("image/png").expect("static PNG content type is valid"),
+  )
+  .with_file_extension("png")
+  .expect("static PNG extension is valid");
+  if let Some(image) = emit_bytes_with_receipt(image_options, image_bytes).await {
     emit_prepared("auv.scan.frame", scan_frame_artifact(&frame, image.uri()));
   }
   Ok(frame)

@@ -6,13 +6,13 @@ use auv_file::{
   JsonFileReadError, JsonFileWriteError, JsonWriteOptions, read_json_file as read_json_file_helper,
   write_json_file as write_json_file_helper,
 };
-use auv_stage_status::StageStatus;
 #[cfg(feature = "tracing")]
 use auv_tracing::{ArtifactMetadata, Context};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::projection::ProjectionArtifact;
+use crate::visual_eval::OsuEvaluationStageStatus as StageStatus;
 use crate::visual_truth::VisualTruthManifest;
 
 pub type VisualTruthSemanticValidationResult<T> = Result<T, String>;

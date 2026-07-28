@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
+use auv_game_balatro::CardDetectionStageStatus as StageStatus;
 use auv_game_balatro::card_detection_quality::{
   CARD_DETECTION_QUALITY_MANIFEST_SCHEMA_VERSION, CARD_DETECTION_QUALITY_PURPOSE, CardDetectionQualityManifest, CardDetectionQualityVerdict,
   publish_card_detection_quality,
 };
-use auv_stage_status::StageStatus;
 use auv_tracing::{Context, MemoryTracingStore, RunId, TraceRecord, configure, dispatcher};
 
 #[test]

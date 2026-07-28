@@ -1,9 +1,9 @@
 use std::collections::BTreeSet;
+use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use auv_file::{JsonFileWriteError, JsonWriteOptions, write_json_file as write_json_file_helper};
-use auv_stage_status::StageStatus;
 #[cfg(feature = "tracing")]
 use auv_tracing::{ArtifactMetadata, Context};
 use serde::{Deserialize, Serialize};
@@ -18,6 +18,32 @@ pub const CARD_DETECTION_SEMANTIC_PURPOSE: &str = "auv.balatro.card_detection.se
 
 const SEMANTIC_MANIFEST_FILE: &str = "balatro-card-detection-semantic.json";
 const SEMANTIC_INSPECT_FILE: &str = "balatro-card-detection-semantic-inspect.json";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CardDetectionStageStatus {
+  Ready,
+  Blocked,
+  Failed,
+}
+
+impl CardDetectionStageStatus {
+  pub fn as_str(self) -> &'static str {
+    match self {
+      Self::Ready => "ready",
+      Self::Blocked => "blocked",
+      Self::Failed => "failed",
+    }
+  }
+}
+
+impl fmt::Display for CardDetectionStageStatus {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.write_str(self.as_str())
+  }
+}
+
+use CardDetectionStageStatus as StageStatus;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CardDetectionSemanticValidationInputs {

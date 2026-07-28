@@ -6,7 +6,6 @@ use auv_file::{
   JsonFileReadError, JsonFileWriteError, JsonWriteOptions, read_json_file as read_json_file_helper,
   write_json_file as write_json_file_helper,
 };
-use auv_stage_status::StageStatus;
 #[cfg(feature = "tracing")]
 use auv_tracing::{ArtifactMetadata, Context};
 use serde::de::DeserializeOwned;
@@ -14,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::benchmark::{CapturePhase, ObjectKind};
 use crate::projection::ProjectionArtifact;
-use crate::visual_eval::{EvalProjection, project_playfield_point};
+use crate::visual_eval::{EvalProjection, OsuEvaluationStageStatus as StageStatus, project_playfield_point};
 use crate::visual_truth::{VisualTruthFrame, VisualTruthManifest};
 use crate::visual_truth_semantic::VisualTruthSemanticManifest;
 

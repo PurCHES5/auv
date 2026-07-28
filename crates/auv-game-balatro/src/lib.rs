@@ -94,7 +94,7 @@ pub use card_detection_quality::{
 };
 pub use card_detection_semantic::{
   CardDetectionSemanticInspectReport, CardDetectionSemanticManifest, CardDetectionSemanticReason, CardDetectionSemanticValidationInputs,
-  CardDetectionSemanticValidationOutput, validate_card_detection_semantic,
+  CardDetectionSemanticValidationOutput, CardDetectionStageStatus, validate_card_detection_semantic,
 };
 pub use card_detection_spatial_query::{
   CardDetectionSpatialQueryBackend, CardDetectionSpatialQueryInputs, CardDetectionSpatialQueryInspectReport,

@@ -23,7 +23,6 @@ tracing = [
 auv-compare = { path = "../auv-compare" }
 auv-file = { path = "../auv-file" }
 auv-query-readiness = { path = "../auv-query-readiness" }
-auv-stage-status = { path = "../auv-stage-status" }
 auv-driver = { path = "../auv-driver" }
 auv-tracing = { path = "../auv-tracing", optional = true }
 image.workspace = true

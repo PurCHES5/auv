@@ -1,7 +1,33 @@
+use std::fmt;
+
 use auv_task_object_detection::{BoundingBox, DetectionResult};
 use serde::{Deserialize, Serialize};
 
 use crate::{CapturePhase, ObjectKind, VisualTruthManifest};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OsuEvaluationStageStatus {
+  Ready,
+  Blocked,
+  Failed,
+}
+
+impl OsuEvaluationStageStatus {
+  pub fn as_str(self) -> &'static str {
+    match self {
+      Self::Ready => "ready",
+      Self::Blocked => "blocked",
+      Self::Failed => "failed",
+    }
+  }
+}
+
+impl fmt::Display for OsuEvaluationStageStatus {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.write_str(self.as_str())
+  }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct FrameKey {

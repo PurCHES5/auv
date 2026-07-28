@@ -25,8 +25,8 @@ pub use dataset::{
 };
 pub use projection::{PlayfieldProjection, ProjectionArtifact, ProjectionBounds, ProjectionDerivationMethod};
 pub use visual_eval::{
-  EvalProjection, FrameDetections, FrameEvaluation, FrameKey, FrameLabelOutcome, FrameSpatialOutcome, LabelMap, VisualEvalReport,
-  evaluate_visual_truth, iou,
+  EvalProjection, FrameDetections, FrameEvaluation, FrameKey, FrameLabelOutcome, FrameSpatialOutcome, LabelMap, OsuEvaluationStageStatus,
+  VisualEvalReport, evaluate_visual_truth, iou,
 };
 pub use visual_truth::{CaptureFrame, ExpectedObjectTruth, VisualTruthFrame, VisualTruthManifest, build_visual_truth_manifest};
 

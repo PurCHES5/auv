@@ -6,14 +6,13 @@ use auv_file::{
   JsonFileReadError, JsonFileWriteError, JsonWriteOptions, read_json_file as read_json_file_helper,
   write_json_file as write_json_file_helper,
 };
-use auv_stage_status::StageStatus;
 #[cfg(feature = "tracing")]
 use auv_tracing::{ArtifactMetadata, Context};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::card_detection_producer::{ExpectedSlotEntry, LoadedDetectionBundle, load_detection_bundle, load_expected_slots};
-use crate::card_detection_semantic::CardDetectionSemanticManifest;
+use crate::card_detection_semantic::{CardDetectionSemanticManifest, CardDetectionStageStatus as StageStatus};
 use crate::card_detection_spatial_query::CardDetectionSpatialQueryManifest;
 use crate::card_detection_spatial_query::slot_detections;
 use crate::model::ObjectZone;

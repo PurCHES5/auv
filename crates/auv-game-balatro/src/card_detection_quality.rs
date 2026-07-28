@@ -6,13 +6,13 @@ use auv_file::{
   JsonFileReadError, JsonFileWriteError, JsonWriteOptions, read_json_file as read_json_file_helper,
   write_json_file as write_json_file_helper,
 };
-use auv_stage_status::StageStatus;
 #[cfg(feature = "tracing")]
 use auv_tracing::{ArtifactMetadata, Context};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::card_detection_eval_witness::{CardDetectionEvalWitnessManifest, CardDetectionEvalWitnessReason, CardDetectionQualityBackend};
+use crate::card_detection_semantic::CardDetectionStageStatus as StageStatus;
 
 pub type CardDetectionQualityResult<T> = Result<T, String>;
 
