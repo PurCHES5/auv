@@ -12,6 +12,10 @@ documentation.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
+[features]
+default = ["overlay"]
+overlay = ["auv-driver/overlay"]
+
 [dependencies]
 auv-cli-invoke-macros = { path = "../auv-cli-invoke-macros" }
 auv-driver = { path = "../auv-driver" }

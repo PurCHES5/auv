@@ -380,7 +380,6 @@ dependencies = [
  "auv-cli-invoke-macros",
  "auv-driver",
  "auv-driver-macos",
- "auv-game-balatro",
  "auv-game-minecraft",
  "auv-game-osu",
  "auv-godot",
@@ -460,6 +459,7 @@ dependencies = [
  "auv-driver-common",
  "auv-driver-linux",
  "auv-driver-macos",
+ "auv-driver-overlay",
  "auv-driver-windows",
 ]
 
@@ -491,6 +491,7 @@ name = "auv-driver-macos"
 version = "0.0.1"
 dependencies = [
  "auv-driver-common",
+ "auv-driver-overlay",
  "image",
  "objc2-core-foundation",
  "objc2-core-graphics",
@@ -499,6 +500,31 @@ dependencies = [
  "swift-bridge",
  "swift-bridge-build",
  "xcap",
+]
+
+[[package]]
+name = "auv-driver-overlay"
+version = "0.0.1"
+dependencies = [
+ "auv-driver-overlay-common",
+ "auv-driver-overlay-macos",
+]
+
+[[package]]
+name = "auv-driver-overlay-common"
+version = "0.0.1"
+dependencies = [
+ "auv-driver-common",
+ "serde",
+]
+
+[[package]]
+name = "auv-driver-overlay-macos"
+version = "0.0.1"
+dependencies = [
+ "auv-driver-overlay-common",
+ "swift-bridge",
+ "swift-bridge-build",
 ]
 
 [[package]]
@@ -661,14 +687,6 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "auv-overlay-macos"
-version = "0.0.1"
-dependencies = [
- "swift-bridge",
- "swift-bridge-build",
 ]
 
 [[package]]

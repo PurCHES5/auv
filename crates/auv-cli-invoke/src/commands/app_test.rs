@@ -1,6 +1,5 @@
-use auv_driver::{PermissionProbe, PermissionStatus};
-
 use super::*;
+use auv_driver::{PermissionProbe, PermissionStatus};
 
 #[test]
 fn permission_report_groups_readable_statuses() {

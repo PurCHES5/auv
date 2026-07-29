@@ -1,29 +1,31 @@
 use crate::{
   CommandGroup, InvokeCommandInput, InvokeCommandOutput, InvokeCommandResult, InvokeReport, InvokeReportField, InvokeReportTable,
   InvokeReportTableRow, InvokeReportValue, OptionalReportText,
-  arg::{NO_ARGS, WINDOW_ARGS, WINDOW_TEXT_ARGS, WINDOW_VERIFY_TEXT_ARGS},
+  arg::{NO_ARGS, WINDOW_ARGS, WINDOW_CLICK_TEXT_ARGS, WINDOW_TEXT_ARGS, WINDOW_VERIFY_TEXT_ARGS},
   invoke_command,
 };
-use auv_driver::WindowInput as _;
+use auv_driver::overlay::{
+  Overlay,
+  components::{CaptureFrame, ClickTarget},
+  layers::Outline,
+  style::{Insets, OutlineStyle},
+};
+use auv_driver::{ScreenPoint, WindowInput as _};
+use auv_tracing::ArtifactMetadata;
+use std::time::Duration;
 
 #[cfg(target_os = "macos")]
-use crate::artifact::emit_png;
+use crate::artifact::{emit_png, emit_png_with_receipt};
 
 pub fn group() -> CommandGroup {
+  // TODO(invoke-window-stubs): incomplete window commands stay intentionally
+  // unregistered until owner-approved implementations have behavioral evidence.
   CommandGroup::new("window", "WINDOW")
     .command(list_windows_invoke_command())
     .command(capture_window_invoke_command())
-    .command(capture_ax_tree_invoke_command())
     .command(find_window_text_invoke_command())
     .command(wait_for_window_text_invoke_command())
-    .command(find_window_rows_invoke_command())
-    .command(wait_for_window_rows_invoke_command())
-    .command(observe_window_region_invoke_command())
-    .command(find_icon_match_invoke_command())
-    .command(scroll_window_region_invoke_command())
-    .command(verify_ax_text_invoke_command())
     .command(click_window_text_invoke_command())
-    .command(click_window_row_invoke_command())
 }
 
 #[invoke_command(
@@ -74,8 +76,13 @@ async fn capture_window(input: InvokeCommandInput) -> InvokeCommandResult {
       return Ok(InvokeCommandOutput::completed());
     }
 
-    let result = capture_selected_window(window_selector(&input)).await?;
-    window_capture_output(&result)
+    let session = auv_driver::open_local().map_err(|error| error.to_string())?;
+    let (result, artifact) = capture_selected_window_recorded_with_session(&session, window_selector(&input)).await?;
+    let capture_overlay = Overlay::new().with_layer(
+      CaptureFrame::new(result.window.frame).with_label(result.window.title.clone().unwrap_or_else(|| "selected window".to_string())),
+    );
+    let overlay = super::overlay::show_overlay(&input, &session, capture_overlay, show_options(120, 180))?;
+    window_capture_output(&result, artifact, overlay)
   }
   #[cfg(not(target_os = "macos"))]
   {
@@ -104,32 +111,51 @@ pub fn window_capture_result(result: &WindowCapture) -> WindowCaptureResult<'_> 
 }
 
 #[cfg(target_os = "macos")]
-fn window_capture_output(result: &WindowCapture) -> InvokeCommandResult {
+fn window_capture_output(
+  result: &WindowCapture,
+  artifact: Option<ArtifactMetadata>,
+  overlay: super::overlay::OverlayStatus,
+) -> InvokeCommandResult {
   let mut output = InvokeCommandOutput::from_result(&window_capture_result(result))?;
   let mut fields = window_report_fields(&result.window);
   fields.push(InvokeReportField::new("Pixel size", format!("{}x{}", result.capture.image.width(), result.capture.image.height())));
+  fields.push(overlay.report_field());
   output.report = Some(InvokeReport::new(fields, Vec::new()));
   // TODO(invoke-window-capture-backend): live testing on 2026-06-18 showed
   // ScreenCaptureKit single-window capture can time out and xcap fallback can
   // fail for Chrome/NetEase windows. Stabilize the typed window capture backend
   // before treating window.* evidence as reliably available.
-  Ok(output)
+  Ok(output.with_artifacts(artifact))
 }
 
 pub async fn capture_selected_window(selector: auv_driver::WindowSelector) -> Result<WindowCapture, String> {
+  capture_selected_window_recorded(selector).await.map(|(capture, _)| capture)
+}
+
+async fn capture_selected_window_recorded(
+  selector: auv_driver::WindowSelector,
+) -> Result<(WindowCapture, Option<ArtifactMetadata>), String> {
   #[cfg(target_os = "macos")]
   {
     let session = auv_driver::open_local().map_err(|error| error.to_string())?;
-    let window = session.window().resolve(selector).map_err(|error| error.to_string())?;
-    let capture = session.window().capture(&window).map_err(|error| error.to_string())?;
-    emit_png("auv.driver.window_capture", &capture.image);
-    Ok(WindowCapture { window, capture })
+    capture_selected_window_recorded_with_session(&session, selector).await
   }
   #[cfg(not(target_os = "macos"))]
   {
     let _ = selector;
     Err("window.capture is only available on macOS".to_string())
   }
+}
+
+#[cfg(target_os = "macos")]
+async fn capture_selected_window_recorded_with_session(
+  session: &auv_driver::LocalDriverSession,
+  selector: auv_driver::WindowSelector,
+) -> Result<(WindowCapture, Option<ArtifactMetadata>), String> {
+  let window = session.window().resolve(selector).map_err(|error| error.to_string())?;
+  let capture = session.window().capture(&window).map_err(|error| error.to_string())?;
+  let artifact = emit_png_with_receipt("auv.driver.window_capture", &capture.image).await;
+  Ok((WindowCapture { window, capture }, artifact))
 }
 
 #[invoke_command(
@@ -158,8 +184,10 @@ async fn find_window_text(input: InvokeCommandInput) -> InvokeCommandResult {
     }
 
     let query = input.required_input("query")?.to_string();
-    let result = recognize_window_text(window_selector(&input), query, false).await?;
-    window_text_matches_output(&input.command_id, &result)
+    let session = auv_driver::open_local().map_err(|error| error.to_string())?;
+    let result = recognize_window_text_with_session(&session, window_selector(&input), query, false).await?;
+    let overlay = super::overlay::show_overlay(&input, &session, window_text_overlay(&result.matches, None), show_options(120, 420))?;
+    window_text_matches_output(&input.command_id, &result, overlay)
   }
   #[cfg(not(target_os = "macos"))]
   {
@@ -182,8 +210,10 @@ async fn wait_for_window_text(input: InvokeCommandInput) -> InvokeCommandResult 
     }
 
     let query = input.required_input("query")?.to_string();
-    let result = recognize_window_text(window_selector(&input), query, true).await?;
-    window_text_matches_output(&input.command_id, &result)
+    let session = auv_driver::open_local().map_err(|error| error.to_string())?;
+    let result = recognize_window_text_with_session(&session, window_selector(&input), query, true).await?;
+    let overlay = super::overlay::show_overlay(&input, &session, window_text_overlay(&result.matches, None), show_options(120, 420))?;
+    window_text_matches_output(&input.command_id, &result, overlay)
   }
   #[cfg(not(target_os = "macos"))]
   {
@@ -268,21 +298,22 @@ async fn verify_ax_text(_input: InvokeCommandInput) -> InvokeCommandResult {
   id = "window.clickText",
   group = "window",
   description = "Capture a resolved window, resolve an OCR text anchor, and click its projected logical point.",
-  args = WINDOW_TEXT_ARGS,
+  args = WINDOW_CLICK_TEXT_ARGS,
 )]
 async fn click_window_text(input: InvokeCommandInput) -> InvokeCommandResult {
   #[cfg(target_os = "macos")]
   {
-    use auv_driver::{ClickOptions, RatioRect, ScreenPoint};
-
+    let query = input.required_input("query")?.to_string();
+    let options = super::input::window_click_options(&input)?;
     if input.dry_run {
-      return Ok(InvokeCommandOutput::completed());
+      return Ok(super::input::validation_only_output());
     }
 
-    let query = input.required_input("query")?.to_string();
-    let result = click_recognized_window_text(window_selector(&input), query).await?;
+    let session = auv_driver::open_local().map_err(|error| error.to_string())?;
+    let result = click_recognized_window_text_with_session(&session, window_selector(&input), query, options).await?;
+    let overlay = super::overlay::show_overlay(&input, &session, window_text_overlay(&result.matches, Some(0)), show_options(120, 240))?;
 
-    window_text_click_output(&result)
+    window_text_click_output(&result, overlay)
   }
   #[cfg(not(target_os = "macos"))]
   {
@@ -296,45 +327,71 @@ pub struct WindowTextClick {
   pub window: auv_driver::Window,
   pub matches: auv_driver::OcrMatches,
   pub point: auv_driver::geometry::WindowPoint,
+  pub options: auv_driver::ClickOptions,
   pub action: auv_driver::InputActionResult,
 }
 
 #[cfg(target_os = "macos")]
-fn window_text_click_output(result: &WindowTextClick) -> InvokeCommandResult {
+fn window_text_click_output(result: &WindowTextClick, overlay: super::overlay::OverlayStatus) -> InvokeCommandResult {
   let mut report = crate::commands::ocr::match_report(&result.matches.matches, Some(0));
   report.fields.extend(window_report_fields(&result.window));
-  report.fields.push(InvokeReportField::new("Input path", result.action.selected_path.as_str()));
+  report.fields.extend(super::input::input_action_report_fields(&result.action));
+  report.fields.push(InvokeReportField::new("Input policy", result.options.policy.as_str()));
+  report.fields.push(InvokeReportField::new("Click count", result.options.click.count().to_string()));
+  if let Some(interval) = result.options.click.interval() {
+    report.fields.push(InvokeReportField::new("Click interval", format!("{} ms", interval.as_millis())));
+  }
   report.fields.push(InvokeReportField::new("Window point", format!("{:.0},{:.0}", result.point.point().x, result.point.point().y)));
+  report.fields.push(overlay.report_field());
   Ok(InvokeCommandOutput::from_result(result)?.with_report(report))
 }
 
 pub async fn click_recognized_window_text(selector: auv_driver::WindowSelector, query: String) -> Result<WindowTextClick, String> {
+  click_recognized_window_text_with_options(selector, query, auv_driver::ClickOptions::default()).await
+}
+
+pub async fn click_recognized_window_text_with_options(
+  selector: auv_driver::WindowSelector,
+  query: String,
+  options: auv_driver::ClickOptions,
+) -> Result<WindowTextClick, String> {
   #[cfg(target_os = "macos")]
   {
     let session = auv_driver::open_local().map_err(|error| error.to_string())?;
-    let window = session.window().resolve(selector).map_err(|error| error.to_string())?;
-    let capture = session.window().capture(&window).map_err(|error| error.to_string())?;
-    let matches = session
-      .vision()
-      .find_text_in_capture(&capture, &query, auv_driver::RatioRect::new(0.0, 0.0, 1.0, 1.0))
-      .map_err(|error| error.to_string())?;
-    let matched = matches.best_match().ok_or_else(|| format!("window.clickText did not find text {query:?}"))?;
-    let point =
-      session.window().to_window_point(&window, auv_driver::ScreenPoint::from(matched.action_point())).map_err(|error| error.to_string())?;
-    let action = session.window().click(&window, point, auv_driver::ClickOptions::default()).map_err(|error| error.to_string())?;
-    emit_png("auv.driver.window_ocr_source", &capture.image);
-    Ok(WindowTextClick {
-      window,
-      matches,
-      point,
-      action,
-    })
+    click_recognized_window_text_with_session(&session, selector, query, options).await
   }
   #[cfg(not(target_os = "macos"))]
   {
-    let _ = (selector, query);
+    let _ = (selector, query, options);
     Err("window.clickText is only available on macOS".to_string())
   }
+}
+
+#[cfg(target_os = "macos")]
+async fn click_recognized_window_text_with_session(
+  session: &auv_driver::LocalDriverSession,
+  selector: auv_driver::WindowSelector,
+  query: String,
+  options: auv_driver::ClickOptions,
+) -> Result<WindowTextClick, String> {
+  let window = session.window().resolve(selector).map_err(|error| error.to_string())?;
+  let capture = session.window().capture(&window).map_err(|error| error.to_string())?;
+  let matches = session
+    .vision()
+    .find_text_in_capture(&capture, &query, auv_driver::RatioRect::new(0.0, 0.0, 1.0, 1.0))
+    .map_err(|error| error.to_string())?;
+  let matched = matches.best_match().ok_or_else(|| format!("window.clickText did not find text {query:?}"))?;
+  let point =
+    session.window().to_window_point(&window, auv_driver::ScreenPoint::from(matched.action_point())).map_err(|error| error.to_string())?;
+  let action = session.window().click(&window, point, options.clone()).map_err(|error| error.to_string())?;
+  emit_png("auv.driver.window_ocr_source", &capture.image);
+  Ok(WindowTextClick {
+    window,
+    matches,
+    point,
+    options,
+    action,
+  })
 }
 
 #[invoke_command(
@@ -361,10 +418,20 @@ pub async fn recognize_window_text(
   query: String,
   wait: bool,
 ) -> Result<WindowTextRecognition, String> {
+  let session = auv_driver::open_local().map_err(|error| error.to_string())?;
+  recognize_window_text_with_session(&session, selector, query, wait).await
+}
+
+#[cfg(target_os = "macos")]
+async fn recognize_window_text_with_session(
+  session: &auv_driver::LocalDriverSession,
+  selector: auv_driver::WindowSelector,
+  query: String,
+  wait: bool,
+) -> Result<WindowTextRecognition, String> {
   use auv_driver::{RatioRect, WaitOptions};
   use std::{thread, time::Instant};
 
-  let session = auv_driver::open_local().map_err(|error| error.to_string())?;
   let window = session.window().resolve(selector).map_err(|error| error.to_string())?;
   let wait_options = WaitOptions::default();
   let started = Instant::now();
@@ -398,10 +465,42 @@ pub async fn recognize_window_text(
 }
 
 #[cfg(target_os = "macos")]
-fn window_text_matches_output(_command_id: &str, result: &WindowTextRecognition) -> InvokeCommandResult {
+fn window_text_matches_output(
+  _command_id: &str,
+  result: &WindowTextRecognition,
+  overlay: super::overlay::OverlayStatus,
+) -> InvokeCommandResult {
   let mut report = crate::commands::ocr::match_report(&result.matches.matches, None);
   report.fields.extend(window_report_fields(&result.window));
+  report.fields.push(overlay.report_field());
   Ok(InvokeCommandOutput::from_result(result)?.with_report(report))
+}
+
+fn window_text_overlay(matches: &auv_driver::OcrMatches, selected_index: Option<usize>) -> Overlay {
+  let mut overlay = Overlay::new();
+  for (index, matched) in matches.matches.iter().enumerate() {
+    let style = if selected_index == Some(index) {
+      OutlineStyle::selected()
+    } else {
+      OutlineStyle::default()
+    };
+
+    overlay =
+      overlay.with_layer(Outline::new(matched.bounds).with_label(matched.text.clone()).with_style(style.with_padding(Insets::all(8.0))));
+  }
+
+  if let Some(matched) = selected_index.and_then(|index| matches.matches.get(index)) {
+    overlay = overlay.with_layer(
+      ClickTarget::new(ScreenPoint::from(matched.action_point())).with_cursor_label("auv · click").with_status("text click delivered"),
+    );
+  }
+  overlay
+}
+
+fn show_options(motion_ms: u64, auto_removal_ms: u64) -> auv_driver::overlay::ShowOptions {
+  auv_driver::overlay::ShowOptions::new()
+    .with_motion_ease(Duration::from_millis(motion_ms), auv_driver::overlay::Easing::EaseInOutExpo)
+    .with_auto_removal_after(Duration::from_millis(auto_removal_ms))
 }
 
 #[cfg(target_os = "macos")]

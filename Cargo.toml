@@ -21,6 +21,8 @@ members = [
   "crates/auv-driver-common",
   "crates/auv-driver-linux",
   "crates/auv-driver-macos",
+  "crates/auv-driver-overlay",
+  "crates/auv-driver-overlay-common",
   "crates/auv-driver-windows",
   "crates/auv-game-balatro",
   "crates/auv-game-minecraft",
@@ -32,7 +34,7 @@ members = [
   "crates/auv-task-object-detection",
   "crates/auv-media-macos",
   "crates/auv-netease-music",
-  "crates/auv-overlay-macos",
+  "crates/auv-driver-overlay-macos",
   "crates/auv-steam",
   "crates/auv-view",
 ]

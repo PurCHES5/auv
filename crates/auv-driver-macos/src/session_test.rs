@@ -207,6 +207,14 @@ mod no_steal_tests {
       .expect("double click"),
       (2, 75)
     );
+    assert_eq!(
+      click_parts(&Click::Repeated {
+        count: 3,
+        interval: Duration::from_millis(60),
+      })
+      .expect("triple click"),
+      (3, 60)
+    );
   }
 
   #[test]

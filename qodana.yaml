@@ -31,7 +31,7 @@ exclude:
   # NOTICE(qodana-false_positive): swift-bridge generated bindings use `self` in FFI shims.
   - name: RsFunctionCannotHaveSelf
     paths:
-      - crates/auv-overlay-macos/src/native/binding.rs
+      - crates/auv-driver-overlay-macos/src/native/binding.rs
       - crates/auv-driver-macos/src/native/binding.rs
   # NOTICE(qodana-false_positive): optional inference features are not resolved in default metadata graphs.
   - name: TomlUnresolvedReference

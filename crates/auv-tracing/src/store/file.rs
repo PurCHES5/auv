@@ -30,9 +30,18 @@ impl FileTracingStore {
     })
   }
 
-  fn artifact_path(&self, request: &ArtifactRequest) -> PathBuf {
-    let mut path = self.root.join("artifacts").join(request.run_id().to_string()).join(request.artifact_id().to_string());
-    if let Some(extension) = request.file_extension() {
+  /// Resolves durable artifact metadata to this file store's physical body path.
+  pub fn artifact_path(&self, metadata: &ArtifactMetadata) -> PathBuf {
+    self.artifact_path_for(metadata.uri().run_id().to_string(), metadata.uri().artifact_id().to_string(), metadata.file_extension())
+  }
+
+  fn request_artifact_path(&self, request: &ArtifactRequest) -> PathBuf {
+    self.artifact_path_for(request.run_id().to_string(), request.artifact_id().to_string(), request.file_extension())
+  }
+
+  fn artifact_path_for(&self, run_id: String, artifact_id: String, file_extension: Option<&str>) -> PathBuf {
+    let mut path = self.root.join("artifacts").join(run_id).join(artifact_id);
+    if let Some(extension) = file_extension {
       path.set_extension(extension);
     }
     path
@@ -61,7 +70,7 @@ impl TracingStore for FileTracingStore {
     Box::pin(async move {
       let bytes = read_artifact_body(&request, body).await?;
       let metadata = request.metadata();
-      let path = self.artifact_path(&request);
+      let path = self.request_artifact_path(&request);
       let parent = path.parent().expect("artifact path has a run directory");
       fs::create_dir_all(parent).map_err(|_| store_error("auv.tracing.store.artifact_write_failed"))?;
       fs::write(path, bytes).map_err(|_| store_error("auv.tracing.store.artifact_write_failed"))?;

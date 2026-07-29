@@ -32,6 +32,21 @@ fn emitted_png_decodes_to_the_exact_source_pixels() {
 }
 
 #[test]
+fn emitted_png_receipt_can_be_attached_to_the_direct_command_result() {
+  let image = RgbaImage::new(2, 3);
+  let store = Arc::new(MemoryTracingStore::new());
+  let dispatch = configure().tracing_store(store).build().expect("dispatch");
+  let root = dispatcher::with_default(&dispatch, || Context::root(RunId::new()));
+  let future = root.in_scope(|| emit_png_with_receipt("auv.test.primary_png", &image));
+
+  let metadata = futures_executor::block_on(root.instrument(future)).expect("PNG receipt");
+
+  assert_eq!(metadata.purpose().as_str(), "auv.test.primary_png");
+  assert_eq!(metadata.content_type().as_str(), "image/png");
+  assert_eq!(metadata.file_extension(), Some("png"));
+}
+
+#[test]
 fn detached_artifact_failure_does_not_change_primary_value() {
   let store = Arc::new(RejectArtifactStore::new());
   let dispatch = configure().tracing_store(store).build().expect("dispatch");

@@ -210,7 +210,7 @@ NOTES
   - Donor game CLIs live in `auv-minecraft` / `auv-osu` / `auv-godot` (root `auv minecraft|osu|godot` is a tombstone).
   - `invoke --help` is the discovery surface for canonical invoke commands in the current C1 scaffold.
   - `list-commands` has been retired; use `auv invoke --help` instead.
-  - `overlay.showCursor`, `overlay.hideCursor`, and `overlay.shutdown` are visual-only macOS overlay probes; standalone `invoke` calls run in separate Rust processes, so use `--hold_ms` on show when manually observing the overlay.
+  - Live invoke presentation is enabled by default where the local driver has an overlay adapter; pass `--no-overlay` to disable it. The `overlay.*` debug command descriptors remain unregistered until their session handlers land.
   - `window.captureAxTree`, `input.focusText`, and `input.pressButton` accept `--reveal_shortcut cmd+f`-style hints when an app hides the target UI until a keyboard shortcut reveals it.
   - `--reveal_settle_ms <millis>` can be used to make the reveal step explicit instead of depending on hard-coded timing assumptions.
   - `input.typeText` supports `--replace_existing true`, `--submit_key return`, and `--submit_settle_ms 800` for repeatable text-entry flows.

@@ -1,6 +1,8 @@
+use std::collections::BTreeMap;
 use std::io::Write;
+use std::path::PathBuf;
 
-use auv_tracing::RunId;
+use auv_tracing::{ArtifactMetadata, ArtifactUri, RunId};
 use serde::Serialize;
 
 use super::{InvokeOutputOptions, InvokeReport, InvokeReportField};
@@ -36,6 +38,7 @@ enum InvokeTerminal {
   Completed {
     result: Option<serde_json::Value>,
     report: Option<InvokeReport>,
+    artifacts: Vec<InvokeArtifactResult>,
   },
   Failed {
     failure: String,
@@ -52,7 +55,8 @@ impl InvokeResult {
         command_description: command.description.to_string(),
         terminal: InvokeTerminal::Completed {
           result: output.result().cloned(),
-          report: output.report,
+          report: output.report.clone(),
+          artifacts: output.artifacts().iter().cloned().map(InvokeArtifactResult::new).collect(),
         },
       },
       Err(error) => Self {
@@ -85,6 +89,17 @@ impl InvokeResult {
     }
   }
 
+  /// Adds file-backed locations supplied by the frontend's concrete store.
+  pub fn with_artifact_paths(mut self, paths: impl IntoIterator<Item = (ArtifactUri, PathBuf)>) -> Self {
+    let paths = paths.into_iter().collect::<BTreeMap<_, _>>();
+    if let InvokeTerminal::Completed { artifacts, .. } = &mut self.terminal {
+      for artifact in artifacts {
+        artifact.file_path = paths.get(artifact.metadata.uri()).cloned();
+      }
+    }
+    self
+  }
+
   pub fn failure(&self) -> Option<&str> {
     match &self.terminal {
       InvokeTerminal::Completed { .. } => None,
@@ -98,6 +113,7 @@ impl InvokeResult {
       status: self.status().as_str(),
       command_id: &self.command_id,
       result: self.result(),
+      artifacts: self.artifacts(),
       failure: self.failure(),
     };
     serde_json::to_writer_pretty(&mut *writer, &output).map_err(|error| format!("failed to serialize invoke output: {error}"))?;
@@ -121,6 +137,23 @@ impl InvokeResult {
       report.write_human(writer, options, color)?;
     }
 
+    if !self.artifacts().is_empty() {
+      writeln!(writer).map_err(write_error)?;
+      writeln!(writer, "  Artifacts").map_err(write_error)?;
+      for artifact in self.artifacts() {
+        let location =
+          artifact.file_path.as_ref().map(|path| path.display().to_string()).unwrap_or_else(|| artifact.metadata.uri().to_string());
+        write_field_rows(
+          writer,
+          &[
+            InvokeReportField::new(artifact.metadata.purpose().as_str(), location),
+            InvokeReportField::new("Artifact URI", artifact.metadata.uri().to_string()),
+          ],
+          color,
+        )?;
+      }
+    }
+
     Ok(())
   }
 
@@ -133,6 +166,30 @@ impl InvokeResult {
     }
     String::from_utf8(bytes).map_err(|error| format!("renderer emitted invalid UTF-8: {error}"))
   }
+
+  fn artifacts(&self) -> &[InvokeArtifactResult] {
+    match &self.terminal {
+      InvokeTerminal::Completed { artifacts, .. } => artifacts,
+      InvokeTerminal::Failed { .. } => &[],
+    }
+  }
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct InvokeArtifactResult {
+  #[serde(flatten)]
+  metadata: ArtifactMetadata,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  file_path: Option<PathBuf>,
+}
+
+impl InvokeArtifactResult {
+  fn new(metadata: ArtifactMetadata) -> Self {
+    Self {
+      metadata,
+      file_path: None,
+    }
+  }
 }
 
 #[derive(Serialize)]
@@ -141,6 +198,57 @@ struct InvokeResultJsonOutput<'a> {
   status: &'a str,
   command_id: &'a str,
   result: Option<&'a serde_json::Value>,
+  #[serde(skip_serializing_if = "<[InvokeArtifactResult]>::is_empty")]
+  artifacts: &'a [InvokeArtifactResult],
   #[serde(skip_serializing_if = "Option::is_none")]
   failure: Option<&'a str>,
+}
+
+#[cfg(test)]
+mod tests {
+  use std::path::PathBuf;
+  use std::str::FromStr;
+
+  use auv_tracing::{ArtifactId, ArtifactMetadata, ArtifactPurpose, ArtifactUri, Attributes, ByteLength, ContentType, RunId, Sha256Digest};
+
+  use super::*;
+  use crate::{InvokeCommandOutput, default_registry};
+
+  #[test]
+  fn primary_artifact_is_directly_openable_in_human_and_json_output() {
+    let registry = default_registry();
+    let command = registry.resolve("display.capture").expect("capture command");
+    let run_id = RunId::from_str("019f8b1e-4b2d-7a00-8f00-0000000000ab").expect("run id");
+    let uri = ArtifactUri::from_ids(run_id, ArtifactId::new());
+    let metadata = ArtifactMetadata::new(
+      uri.clone(),
+      ArtifactPurpose::new("auv.driver.display_capture"),
+      ContentType::new("image/png"),
+      Some("png".to_string()),
+      ByteLength::new(3).expect("length"),
+      Sha256Digest::new([7; 32]),
+      Attributes::empty(),
+    );
+    let file_path = PathBuf::from("/tmp/auv-artifacts/capture.png");
+    let output = InvokeCommandOutput::from_result(&serde_json::json!({ "captured": true })).expect("result").with_artifacts([metadata]);
+    let result = InvokeResult::from_command_result(run_id, command, Ok(output)).with_artifact_paths([(uri, file_path.clone())]);
+
+    let human = result.render_to_string(InvokeOutputOptions::default()).expect("human output");
+    assert!(human.contains("Artifacts"));
+    assert!(human.contains("auv.driver.display_capture"));
+    assert!(human.contains(file_path.to_str().expect("UTF-8 fixture path")));
+    assert!(human.contains("auv://runs/"));
+
+    let json = result
+      .render_to_string(InvokeOutputOptions {
+        json: true,
+        ..InvokeOutputOptions::default()
+      })
+      .expect("JSON output");
+    let value: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+    assert_eq!(value["artifacts"][0]["purpose"], "auv.driver.display_capture");
+    assert_eq!(value["artifacts"][0]["content_type"], "image/png");
+    assert_eq!(value["artifacts"][0]["file_extension"], "png");
+    assert_eq!(value["artifacts"][0]["file_path"], file_path.to_str().expect("UTF-8 fixture path"));
+  }
 }

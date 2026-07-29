@@ -5,6 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[features]
+default = []
+# TODO(driver-overlay-windows): add the Windows adapter after its native window
+# implementation is approved; this feature currently exposes no renderer.
+overlay = []
+
 [dependencies]
 auv-driver-common = { path = "../auv-driver-common" }
 image.workspace = true

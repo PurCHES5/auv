@@ -1,9 +1,12 @@
 [package]
-name = "auv-overlay-macos"
+name = "auv-driver-overlay-macos"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+
+[dependencies]
+auv-driver-overlay-common = { path = "../auv-driver-overlay-common" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 swift-bridge.workspace = true

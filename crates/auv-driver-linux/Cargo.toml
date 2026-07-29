@@ -6,6 +6,13 @@ rust-version.workspace = true
 publish.workspace = true
 autoexamples = false
 
+[features]
+default = []
+# TODO(driver-overlay-linux): add the Linux adapter after its compositor/session
+# ownership is approved; the shared feature exists now so `auv-driver/overlay`
+# remains portable without claiming rendered support.
+overlay = []
+
 [[example]]
 name = "validate"
 path = "examples/validate.rs"

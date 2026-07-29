@@ -1,9 +1,48 @@
 use super::*;
+use crate::{InvokeCancellation, InvokeOutputOptions, InvokeResult};
 use auv_driver::{InputActionResult, InputDeliveryPath};
 use auv_tracing::{Context, MemoryTracingStore, RunId, TraceRecord, configure, dispatcher};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+#[test]
+fn window_click_options_parse_policy_and_repeated_clicks() {
+  let input = InvokeCommandInput {
+    command_id: "window.clickText".to_string(),
+    target_application_id: None,
+    inputs: BTreeMap::from([
+      ("input-policy".to_string(), "foreground-preferred".to_string()),
+      ("click-count".to_string(), "3".to_string()),
+      ("click-interval-ms".to_string(), "60".to_string()),
+    ]),
+    dry_run: false,
+    cancellation: InvokeCancellation::default(),
+  };
+
+  let options = window_click_options(&input).expect("valid click options");
+  assert_eq!(options.policy, auv_driver::InputPolicy::ForegroundPreferred);
+  assert_eq!(
+    options.click,
+    auv_driver::Click::Repeated {
+      count: 3,
+      interval: std::time::Duration::from_millis(60),
+    }
+  );
+}
+
+#[test]
+fn window_click_options_reject_zero_clicks() {
+  let input = InvokeCommandInput {
+    command_id: "window.clickText".to_string(),
+    target_application_id: None,
+    inputs: BTreeMap::from([("click-count".to_string(), "0".to_string())]),
+    dry_run: false,
+    cancellation: InvokeCancellation::default(),
+  };
+
+  assert!(window_click_options(&input).expect_err("zero clicks must fail").contains("--click-count"));
+}
 
 #[derive(Clone)]
 struct ControlledWindowCapability {
@@ -47,6 +86,7 @@ impl WindowPointCapability for ControlledWindowCapability {
     &self,
     _window: &auv_driver::Window,
     _point: auv_driver::geometry::WindowPoint,
+    _options: auv_driver::ClickOptions,
   ) -> auv_driver::DriverResult<auv_driver::InputActionResult> {
     self.click_calls.fetch_add(1, Ordering::SeqCst);
     Ok(self.action.clone())
@@ -144,8 +184,14 @@ async fn resolved_window_click_returns_direct_action_and_publishes_through_typed
   let dispatch = configure().tracing_store(store.clone()).build().expect("memory dispatch");
   let root = dispatcher::with_default(&dispatch, || Context::root(RunId::new()));
   let expected = InputActionResult::single_success(InputDeliveryPath::WindowTargetedMouse);
-  let future =
-    root.in_scope(|| click_resolved_window_point(&capability, test_window(), auv_driver::geometry::WindowPoint::new(640.0, 360.0)));
+  let future = root.in_scope(|| {
+    click_resolved_window_point(
+      &capability,
+      test_window(),
+      auv_driver::geometry::WindowPoint::new(640.0, 360.0),
+      auv_driver::ClickOptions::default(),
+    )
+  });
 
   let delivered = root.instrument(future).await.expect("direct window click result");
   dispatch.flush().await.expect("flush input action telemetry");
@@ -182,8 +228,14 @@ async fn invalid_input_artifact_does_not_change_the_typed_call_or_reexecute_driv
   let store = Arc::new(MemoryTracingStore::new());
   let dispatch = configure().tracing_store(store.clone()).build().expect("memory dispatch");
   let root = dispatcher::with_default(&dispatch, || Context::root(RunId::new()));
-  let future =
-    root.in_scope(|| click_resolved_window_point(&capability, test_window(), auv_driver::geometry::WindowPoint::new(640.0, 360.0)));
+  let future = root.in_scope(|| {
+    click_resolved_window_point(
+      &capability,
+      test_window(),
+      auv_driver::geometry::WindowPoint::new(640.0, 360.0),
+      auv_driver::ClickOptions::default(),
+    )
+  });
 
   let delivered = root.instrument(future).await.expect("artifact preparation must not replace the direct input result");
   dispatch.flush().await.expect("typed preparation diagnostic should flush");
@@ -405,11 +457,43 @@ fn input_action_output_reports_explicit_domain_values() {
   let output = input_action_output(&result).expect("input result should serialize");
 
   let report = output.report.as_ref().expect("input action report");
+  assert_eq!(field_value(report, "Delivery"), "delivered");
+  assert_eq!(field_value(report, "Verification"), "delivery_only");
   assert_eq!(field_value(report, "Path"), "window_targeted_keyboard_scroll");
   assert_eq!(field_value(report, "Mouse disturbance"), "none");
   assert_eq!(field_value(report, "Focus disturbance"), "foreground");
   assert_eq!(field_value(report, "Clipboard disturbance"), "temporary");
   assert_eq!(output.result(), Some(&serde_json::to_value(&result).expect("fixture should serialize")));
+}
+
+#[test]
+fn focus_text_human_output_exposes_target_selection_delivery_and_verification_boundary() {
+  let result = test_focus_result("Search documents");
+
+  for (candidate, command) in [
+    ("", focus_text_input_invoke_command()),
+    ("root/AXTextArea[0]", ax_focus_text_input_invoke_command()),
+  ] {
+    let output = focus_text_output(&result, candidate).expect("focus result should serialize");
+    assert_eq!(output.result(), Some(&serde_json::to_value(&result).expect("fixture should serialize")));
+
+    let invoke_result = InvokeResult::from_command_result(RunId::new(), &command, Ok(output));
+    let human = invoke_result.render_to_string(InvokeOutputOptions::default()).expect("human output should render");
+
+    assert!(human.contains("Delivery: delivered"), "focus output omitted its delivery boundary: {human}");
+    assert!(human.contains("Target: com.example.Editor"), "focus output omitted its target: {human}");
+    if candidate.is_empty() {
+      assert!(human.contains("Query: Search documents"), "focus output omitted its query: {human}");
+    } else {
+      assert!(human.contains("Candidate: root/AXTextArea[0]"), "focus output omitted its candidate: {human}");
+    }
+    assert!(human.contains("Resolved AX path: root/AXTextArea[0]"), "focus output omitted its resolved path: {human}");
+    assert!(human.contains("Focus method: ax_focus"), "focus output omitted its delivery method: {human}");
+    assert!(
+      human.contains("Verification: delivery_only; focused element was not read back after AX delivery"),
+      "focus output omitted its verification boundary: {human}"
+    );
+  }
 }
 
 #[test]
@@ -420,13 +504,58 @@ fn window_point_click_result_keeps_resolved_target_and_delivery_together() {
     action: InputActionResult::single_success(InputDeliveryPath::WindowTargetedMouse),
   };
 
-  let output = window_point_click_output(WindowPointClickOutcome::Delivered { click }).expect("click result should serialize");
+  let output =
+    window_point_click_output(WindowPointClickOutcome::Delivered { click }.into_result(), crate::commands::overlay::OverlayStatus::Disabled)
+      .expect("click result should serialize");
   let result = output.result().expect("click should have a result");
 
   assert_eq!(result["window"]["reference"]["id"], "window-1");
   assert_eq!(result["point"]["x"], 640.0);
   assert_eq!(result["point"]["y"], 360.0);
   assert_eq!(result["action"]["selected_path"], "window_targeted_mouse");
+  let report = output.report.as_ref().expect("window point click report");
+  assert_eq!(field_value(report, "Delivery"), "delivered");
+  assert_eq!(field_value(report, "Verification"), "delivery_only");
+}
+
+#[test]
+fn window_point_dry_run_reports_validation_without_delivery() {
+  let output = window_point_click_output(
+    WindowPointClickOutcome::Validated {
+      window: test_window(),
+      point: auv_driver::geometry::WindowPoint::new(640.0, 360.0),
+    }
+    .into_result(),
+    crate::commands::overlay::OverlayStatus::Disabled,
+  )
+  .expect("validated point should serialize");
+
+  let report = output.report.as_ref().expect("window point validation report");
+  assert_eq!(field_value(report, "Delivery"), "not_performed");
+  assert_eq!(field_value(report, "Verification"), "validation_only");
+  assert_eq!(output.result().expect("validated target result")["action"], serde_json::Value::Null);
+}
+
+#[test]
+fn generic_dry_run_report_does_not_claim_delivery() {
+  let output = validation_only_output();
+  let report = output.report.as_ref().expect("validation-only report");
+
+  assert_eq!(field_value(report, "Delivery"), "not_performed");
+  assert_eq!(field_value(report, "Verification"), "validation_only");
+}
+
+fn test_focus_result(query: &str) -> auv_driver::AxFocusResult {
+  auv_driver::AxFocusResult {
+    app: "com.example.Editor".to_string(),
+    pid: 42,
+    path: "root/AXTextArea[0]".to_string(),
+    role: "AXTextArea".to_string(),
+    title: "Document".to_string(),
+    value: "draft".to_string(),
+    query: query.to_string(),
+    input_action_result: InputActionResult::single_success(InputDeliveryPath::AxFocus),
+  }
 }
 
 fn field_value<'a>(report: &'a InvokeReport, label: &str) -> &'a str {

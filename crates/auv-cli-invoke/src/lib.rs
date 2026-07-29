@@ -83,7 +83,7 @@ pub fn parse_invoke_args(arguments: &[String]) -> Result<InvokeCliParse, String>
 
 pub fn invoke_argument_consumes_value(argument: &str) -> bool {
   match argument {
-    "--dry-run" | "--detail" | "--wide" | "--json" | "--format" | "--help" | "-h" => false,
+    "--dry-run" | "--no-overlay" | "--detail" | "--wide" | "--json" | "--format" | "--help" | "-h" => false,
     other => other.starts_with("--"),
   }
 }
@@ -127,6 +127,10 @@ fn normalize_for_clap(tokens: &[String]) -> Result<NormalizedInvokeArguments, St
         clap_arguments.push(token.clone());
         index += 1;
       }
+      "--no-overlay" => {
+        inputs.insert("overlay".to_string(), "false".to_string());
+        index += 1;
+      }
       "--target" | "--label" => {
         clap_arguments.push(token.clone());
         if let Some(value) = tokens.get(index + 1) {
@@ -162,3 +166,7 @@ fn normalize_for_clap(tokens: &[String]) -> Result<NormalizedInvokeArguments, St
     help: None,
   })
 }
+
+#[cfg(test)]
+#[path = "lib_test.rs"]
+mod tests;

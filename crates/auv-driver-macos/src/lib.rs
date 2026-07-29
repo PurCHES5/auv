@@ -27,9 +27,12 @@ pub mod native;
 pub use accessibility::{DEFAULT_AX_MAX_CHILDREN, DEFAULT_AX_MAX_DEPTH};
 pub use application::ApplicationControl;
 pub use auv_driver_common::vision::{OcrMatch, OcrMatches};
+pub use auv_driver_common::{ApplicationActivationResult, ApplicationActivationVerification};
 pub use auv_driver_common::{AxFocusResult, AxTextRead};
 pub use descriptor::{MacosDriverDescriptor, macos_driver_descriptor};
 pub use driver::{MacosDriver, MacosDriverSession};
 pub use readiness::assess_readiness;
+#[cfg(feature = "overlay")]
+pub use session::OverlayApi;
 pub use session::{AccessibilityApi, ClipboardApi, InputApi, PermissionApi, VisionApi, WindowApi};
 pub use types::{ObservedAxNode, ObservedAxTreeSnapshot};

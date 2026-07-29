@@ -3,9 +3,10 @@ use crate::{
   arg::{IMAGE_TEXT_ARGS, REGION_ARGS, SCREEN_TEXT_ARGS, TARGET_ARGS},
   invoke_command,
 };
+use auv_tracing::ArtifactMetadata;
 
 #[cfg(target_os = "macos")]
-use crate::artifact::emit_png;
+use crate::artifact::{emit_png, emit_png_with_receipt};
 
 /// A complete, finite capture region with a strictly positive size.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -46,15 +47,13 @@ impl Region {
 }
 
 pub fn group() -> CommandGroup {
+  // TODO(invoke-screen-stubs): row and image commands stay intentionally
+  // unregistered until owner-approved implementations have behavioral evidence.
   CommandGroup::new("screen", "SCREEN")
     .command(capture_region_invoke_command())
     .command(find_screen_text_invoke_command())
     .command(wait_for_screen_text_invoke_command())
-    .command(find_screen_rows_invoke_command())
-    .command(wait_for_screen_rows_invoke_command())
-    .command(find_image_text_invoke_command())
     .command(click_screen_text_invoke_command())
-    .command(click_screen_row_invoke_command())
 }
 
 #[invoke_command(
@@ -73,8 +72,8 @@ async fn capture_region(input: InvokeCommandInput) -> InvokeCommandResult {
 
   #[cfg(target_os = "macos")]
   {
-    let capture = capture_screen_region(region).await?;
-    region_capture_output(&capture)
+    let (capture, artifact) = capture_screen_region_recorded(region).await?;
+    region_capture_output(&capture, artifact)
   }
   #[cfg(not(target_os = "macos"))]
   {
@@ -84,6 +83,10 @@ async fn capture_region(input: InvokeCommandInput) -> InvokeCommandResult {
 }
 
 pub async fn capture_screen_region(region: auv_driver::Rect) -> Result<auv_driver::RegionCapture, String> {
+  capture_screen_region_recorded(region).await.map(|(capture, _)| capture)
+}
+
+async fn capture_screen_region_recorded(region: auv_driver::Rect) -> Result<(auv_driver::RegionCapture, Option<ArtifactMetadata>), String> {
   #[cfg(target_os = "macos")]
   {
     let session = auv_driver::open_local().map_err(|error| error.to_string())?;
@@ -94,8 +97,8 @@ pub async fn capture_screen_region(region: auv_driver::Rect) -> Result<auv_drive
         ..auv_driver::CaptureOptions::default()
       })
       .map_err(|error| error.to_string())?;
-    emit_png("auv.driver.screen_region_capture", &capture.capture.image);
-    Ok(capture)
+    let artifact = emit_png_with_receipt("auv.driver.screen_region_capture", &capture.capture.image).await;
+    Ok((capture, artifact))
   }
   #[cfg(not(target_os = "macos"))]
   {
@@ -104,7 +107,7 @@ pub async fn capture_screen_region(region: auv_driver::Rect) -> Result<auv_drive
   }
 }
 
-fn region_capture_output(capture: &auv_driver::RegionCapture) -> InvokeCommandResult {
+fn region_capture_output(capture: &auv_driver::RegionCapture, artifact: Option<ArtifactMetadata>) -> InvokeCommandResult {
   let mut output = InvokeCommandOutput::from_result(&super::display_capture_result(&capture.display, &capture.capture))?;
   output.report = Some(InvokeReport::new(
     vec![
@@ -113,7 +116,7 @@ fn region_capture_output(capture: &auv_driver::RegionCapture) -> InvokeCommandRe
     ],
     Vec::new(),
   ));
-  Ok(output)
+  Ok(output.with_artifacts(artifact))
 }
 
 #[invoke_command(
@@ -255,11 +258,11 @@ async fn click_screen_text(input: InvokeCommandInput) -> InvokeCommandResult {
     use auv_driver::{CaptureOptions, Click, RatioRect};
 
     reject_target_activation(&input, "screen.clickText")?;
+    let query = input.required_input("query")?.to_string();
     if input.dry_run {
-      return Ok(InvokeCommandOutput::completed());
+      return Ok(super::input::validation_only_output());
     }
 
-    let query = input.required_input("query")?.to_string();
     let result = click_recognized_screen_text(query).await?;
     screen_text_click_output(&result)
   }
@@ -282,8 +285,8 @@ fn screen_text_click_output(result: &ScreenTextClick) -> InvokeCommandResult {
   let mut output = InvokeCommandOutput::from_result(result)?;
   output.report = Some(crate::commands::ocr::match_report(&result.matches.matches, Some(0)));
   if let Some(report) = output.report.as_mut() {
+    report.fields.extend(super::input::input_action_report_fields(&result.action));
     report.fields.push(InvokeReportField::new("Click point", format!("{:.0},{:.0}", result.point.x, result.point.y)));
-    report.fields.push(InvokeReportField::new("Input path", result.action.selected_path.as_str()));
   }
   Ok(output)
 }

@@ -16,21 +16,48 @@ pub(crate) fn emit_png(purpose: &str, image: &RgbaImage) {
   if !auv_tracing::Context::current().can_publish_artifacts() {
     return;
   }
+  match prepare_png(purpose, image) {
+    Ok(emission) => drop(emission),
+    Err(error) => emit_preparation_failure(purpose, error),
+  }
+}
+
+pub(crate) async fn emit_png_with_receipt(purpose: &str, image: &RgbaImage) -> Option<ArtifactMetadata> {
+  if !auv_tracing::Context::current().can_publish_artifacts() {
+    return None;
+  }
+  let emission = match prepare_png(purpose, image) {
+    Ok(emission) => emission,
+    Err(error) => {
+      emit_preparation_failure(purpose, error);
+      return None;
+    }
+  };
+  match emission.await {
+    Ok(metadata) => metadata,
+    Err(error) => {
+      emit_preparation_failure(purpose, error.to_string());
+      None
+    }
+  }
+}
+
+fn prepare_png(purpose: &str, image: &RgbaImage) -> Result<auv_tracing::ArtifactEmission, String> {
   let mut body = Vec::new();
-  let emission = PngEncoder::new(&mut body)
+  PngEncoder::new(&mut body)
     .write_image(image.as_raw(), image.width(), image.height(), ExtendedColorType::Rgba8)
     .map_err(|error| format!("failed to encode {purpose} PNG artifact: {error}"))
     .and_then(|()| {
       let options = EmitBytesOptions::new().with_purpose(purpose).with_content_type("image/png").with_file_extension("png");
       auv_tracing::emit_bytes_artifact(options, body).map_err(|error| format!("invalid {purpose} artifact bytes: {error}"))
-    });
-  match emission {
-    Ok(emission) => drop(emission),
-    Err(error) => auv_tracing::emit_event!(ArtifactPreparationFailed {
-      purpose: purpose.to_string(),
-      error,
-    }),
-  }
+    })
+}
+
+fn emit_preparation_failure(purpose: &str, error: String) {
+  auv_tracing::emit_event!(ArtifactPreparationFailed {
+    purpose: purpose.to_string(),
+    error,
+  });
 }
 
 pub(crate) async fn emit_bytes_with_receipt(options: EmitBytesOptions, body: Vec<u8>) -> Option<ArtifactMetadata> {
@@ -62,6 +89,29 @@ where
       purpose: purpose.to_string(),
       error,
     }),
+  }
+}
+
+pub(crate) async fn emit_prepared_with_receipt<R>(purpose: &str, artifact: Result<NewArtifact<R>, String>) -> Option<ArtifactMetadata>
+where
+  R: futures_util::io::AsyncRead + Unpin + Send + 'static,
+{
+  if !auv_tracing::Context::current().can_publish_artifacts() {
+    return None;
+  }
+  let emission = match artifact {
+    Ok(artifact) => auv_tracing::emit_artifact!(artifact),
+    Err(error) => {
+      emit_preparation_failure(purpose, error);
+      return None;
+    }
+  };
+  match emission.await {
+    Ok(metadata) => metadata,
+    Err(error) => {
+      emit_preparation_failure(purpose, error.to_string());
+      None
+    }
   }
 }
 

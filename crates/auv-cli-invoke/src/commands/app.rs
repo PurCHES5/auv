@@ -42,11 +42,22 @@ pub async fn read_permissions() -> Result<auv_driver::PermissionProbe, String> {
   args = TARGET_ARGS,
 )]
 async fn activate_app(input: InvokeCommandInput) -> InvokeCommandResult {
-  activate_application(input.target_application_id).await?;
-  Ok(InvokeCommandOutput::completed())
+  let result = activate_application(input.target_application_id).await?;
+  let mut fields = vec![
+    InvokeReportField::new("Requested target", &result.requested_bundle_id),
+    InvokeReportField::new("Result", "activation request completed"),
+    InvokeReportField::new("Verification", result.verification.status()),
+  ];
+  if let Some(observed_bundle_id) = result.verification.observed_bundle_id() {
+    fields.push(InvokeReportField::new("Observed foreground", observed_bundle_id));
+  }
+  if let auv_driver::ApplicationActivationVerification::Unavailable { reason } = &result.verification {
+    fields.push(InvokeReportField::new("Verification detail", reason));
+  }
+  Ok(InvokeCommandOutput::from_result(&result)?.with_report(InvokeReport::new(fields, Vec::new())))
 }
 
-pub async fn activate_application(_target_application_id: Option<String>) -> Result<(), String> {
+pub async fn activate_application(_target_application_id: Option<String>) -> Result<auv_driver::ApplicationActivationResult, String> {
   let target_application_id = _target_application_id
     .as_deref()
     .filter(|value| !value.trim().is_empty())

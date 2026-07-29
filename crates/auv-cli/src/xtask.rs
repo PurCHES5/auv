@@ -15,9 +15,9 @@ fn generate_swift_bridge_for_ide_impl(project_root: &Path) -> Result<Vec<String>
   )?;
   let overlay_generated_dir = generate_one_swift_bridge_for_ide(
     project_root,
-    "crates/auv-overlay-macos/src/native/binding.rs",
-    "crates/auv-overlay-macos/native/swift/Sources/AuvMacosOverlayNative/Generated",
-    "auv_overlay_macos",
+    "crates/auv-driver-overlay-macos/src/native/binding.rs",
+    "crates/auv-driver-overlay-macos/native/swift/Sources/AuvMacosOverlayNative/Generated",
+    "auv_driver_overlay_macos",
   )?;
 
   Ok(vec![driver_generated_dir, overlay_generated_dir])

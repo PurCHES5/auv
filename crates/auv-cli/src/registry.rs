@@ -2,7 +2,7 @@
 
 use auv_cli_invoke::{InvokeRegistry, default_registry};
 
-use crate::integrations::{balatro, textedit};
+use crate::integrations::textedit;
 
 /// Product invoke registry used for CLI adapters and MCP catalog metadata.
 ///
@@ -12,7 +12,6 @@ use crate::integrations::{balatro, textedit};
 /// invoking commands from this registry.
 pub fn product_registry() -> InvokeRegistry {
   let mut groups = default_registry().groups().to_vec();
-  groups.push(balatro::group());
   groups.push(textedit::group());
   InvokeRegistry::from_groups(groups)
 }

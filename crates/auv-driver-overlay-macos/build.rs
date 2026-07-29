@@ -2,6 +2,7 @@ const MACOS_OVERLAY_FFI_RS: &str = "src/native/binding.rs";
 const MACOS_OVERLAY_SWIFT_PACKAGE: &str = "native/swift/Package.swift";
 const MACOS_OVERLAY_SWIFT_TARGET_DIR: &str = "native/swift/Sources/AuvMacosOverlayNative";
 const MACOS_OVERLAY_SWIFT_MODULE: &str = "AuvMacosOverlayNative";
+const MACOS_OVERLAY_BRIDGE_CRATE: &str = "auv_driver_overlay_macos";
 
 fn main() {
   let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
@@ -26,7 +27,7 @@ fn build_macos_overlay_native() {
   let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
   let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
   let generated_dir = out_dir.join("generated");
-  let crate_bridge_dir = generated_dir.join("auv_overlay_macos");
+  let crate_bridge_dir = generated_dir.join(MACOS_OVERLAY_BRIDGE_CRATE);
   let bridge_header = out_dir.join("native-bridging-header.h");
   let swift_lib = out_dir.join(format!("lib{MACOS_OVERLAY_SWIFT_MODULE}.a"));
   let swift_target_dir = manifest_dir.join(MACOS_OVERLAY_SWIFT_TARGET_DIR);
@@ -41,14 +42,14 @@ fn build_macos_overlay_native() {
   }
 
   swift_bridge_build::parse_bridges(vec![manifest_dir.join(MACOS_OVERLAY_FFI_RS)])
-    .write_all_concatenated(&generated_dir, "auv_overlay_macos");
+    .write_all_concatenated(&generated_dir, MACOS_OVERLAY_BRIDGE_CRATE);
 
   fs::write(
     &bridge_header,
     format!(
       "#include \"{}\"\n#include \"{}\"\n",
       generated_dir.join("SwiftBridgeCore.h").display(),
-      crate_bridge_dir.join("auv_overlay_macos.h").display()
+      crate_bridge_dir.join(format!("{MACOS_OVERLAY_BRIDGE_CRATE}.h")).display()
     ),
   )
   .expect("write Swift bridge header");
@@ -66,7 +67,12 @@ fn build_macos_overlay_native() {
   for source in &swift_sources {
     command.arg(source);
   }
-  let status = command.arg(crate_bridge_dir.join("auv_overlay_macos.swift")).arg("-o").arg(&swift_lib).status().expect("spawn swiftc");
+  let status = command
+    .arg(crate_bridge_dir.join(format!("{MACOS_OVERLAY_BRIDGE_CRATE}.swift")))
+    .arg("-o")
+    .arg(&swift_lib)
+    .status()
+    .expect("spawn swiftc");
 
   if !status.success() {
     panic!("swiftc failed with status {status}");

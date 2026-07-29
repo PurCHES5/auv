@@ -586,7 +586,14 @@ pub(crate) async fn dispatch(command: CliCommand) -> Result<i32, String> {
       if let Some(failure) = flush_cli_recording(&authority.dispatch).await {
         eprintln!("warning: invoke recording failure for run {run_id}: {failure}");
       }
-      let result = auv_cli_invoke::InvokeResult::from_command_result(run_id, &command, direct_result);
+      let artifact_paths = direct_result
+        .as_ref()
+        .ok()
+        .into_iter()
+        .flat_map(auv_cli_invoke::InvokeCommandOutput::artifacts)
+        .map(|metadata| (metadata.uri().clone(), authority.store.artifact_path(metadata)))
+        .collect::<Vec<_>>();
+      let result = auv_cli_invoke::InvokeResult::from_command_result(run_id, &command, direct_result).with_artifact_paths(artifact_paths);
       let outcome = auv_cli_invoke::render_invoke_result(&result, output)?;
       exit_code = outcome.exit_code;
     }
@@ -729,16 +736,18 @@ fn resolve_store_root(project_root: &Path, explicit: Option<&String>) -> PathBuf
 #[derive(Clone)]
 struct CliTracing {
   dispatch: auv_tracing::Dispatch,
+  store: Arc<auv_tracing::FileTracingStore>,
 }
 
 fn build_cli_tracing(project_root: &Path, options: &TracingOptions) -> Result<CliTracing, String> {
   let store_root = resolve_store_root(project_root, options.store_root.as_ref());
-  let store = auv_tracing::FileTracingStore::open(&store_root)
-    .map(|store| Arc::new(store) as Arc<dyn auv_tracing::TracingStore>)
-    .map_err(|error| format!("failed to open tracing store {}: {error}", store_root.display()))?;
+  let store = Arc::new(
+    auv_tracing::FileTracingStore::open(&store_root)
+      .map_err(|error| format!("failed to open tracing store {}: {error}", store_root.display()))?,
+  );
   let dispatch =
-    auv_tracing::configure().tracing_store(store).build().map_err(|error| format!("failed to configure invoke tracing: {error}"))?;
-  Ok(CliTracing { dispatch })
+    auv_tracing::configure().tracing_store(store.clone()).build().map_err(|error| format!("failed to configure invoke tracing: {error}"))?;
+  Ok(CliTracing { dispatch, store })
 }
 
 #[derive(serde::Serialize)]

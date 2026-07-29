@@ -104,7 +104,7 @@ fn region_capture_result_keeps_pixels_out_of_json() {
     },
   };
 
-  let output = region_capture_output(&capture).expect("region result should serialize");
+  let output = region_capture_output(&capture, None).expect("region result should serialize");
   let result = output.result().expect("capture should have a result");
 
   assert_eq!(result["display"]["id"], "display_1");
@@ -136,4 +136,13 @@ fn screen_text_click_result_keeps_resolution_and_delivery_together() {
   assert_eq!(result["matches"]["matches"][0]["text"], "Pause");
   assert_eq!(result["point"]["x"], 75.0);
   assert_eq!(result["action"]["selected_path"], "foreground_system_events");
+  let report = output.report.as_ref().expect("screen click report");
+  assert_eq!(report_field(report, "Delivery"), "delivered");
+  assert_eq!(report_field(report, "Verification"), "delivery_only");
+  assert_eq!(report_field(report, "Path"), "foreground_system_events");
+}
+
+#[cfg(target_os = "macos")]
+fn report_field<'a>(report: &'a InvokeReport, label: &str) -> &'a str {
+  report.fields.iter().find(|field| field.label == label).map(|field| field.value.as_str()).expect("report field")
 }

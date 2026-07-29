@@ -17,7 +17,7 @@ recognition / candidates
   -> operation result / verification evidence / artifacts
 ```
 
-`auv-overlay-macos` is not an input backend for this crate.
+`auv-driver-overlay-macos` is not an input backend for this crate.
 
 ## Current Rust Surface
 

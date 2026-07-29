@@ -11,7 +11,7 @@ struct Event {
 fn file_store_writes_artifact_bytes_before_the_metadata_record() {
   let directory = tempfile::tempdir().unwrap();
   let store = Arc::new(FileTracingStore::open(directory.path()).unwrap());
-  let dispatch = configure().tracing_store(store).build().unwrap();
+  let dispatch = configure().tracing_store(store.clone()).build().unwrap();
   let run_id = RunId::new();
   let body = b"artifact".to_vec();
   let emission = dispatcher::with_default(&dispatch, || {
@@ -24,6 +24,7 @@ fn file_store_writes_artifact_bytes_before_the_metadata_record() {
   futures_executor::block_on(dispatch.flush()).unwrap();
 
   let path = directory.path().join("artifacts").join(run_id.to_string()).join(format!("{}.txt", metadata.uri().artifact_id()));
+  assert_eq!(store.artifact_path(&metadata), path);
   assert_eq!(std::fs::read(path).unwrap(), body);
   let line = std::fs::read_to_string(directory.path().join("records.jsonl")).unwrap();
   let value: serde_json::Value = serde_json::from_str(line.trim()).unwrap();

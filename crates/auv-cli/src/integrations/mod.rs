@@ -7,7 +7,6 @@
 //! for sibling submodules. Cross-integration glue uses
 //! `crate::integrations::<app>::...`.
 
-pub mod balatro;
 pub mod godot;
 pub mod minecraft;
 pub mod osu;

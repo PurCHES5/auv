@@ -2,7 +2,7 @@ use crate::{ArgSpec, CommandGroup, CommandNode, InvokeCommand, InvokeRegistry};
 
 pub fn render_help_index(registry: &InvokeRegistry) -> String {
   let mut help = String::from(
-    "USAGE\n  auv invoke <command> [options]\n\nOPTIONS\n  --json    Render machine-readable JSON output\n  --detail  Include diagnostic detail in human output\n  --wide    Include extra columns in human table output\n\nUse auv invoke <command> --help for command-specific options.\n",
+    "USAGE\n  auv invoke <command> [options]\n\nOPTIONS\n  --no-overlay  Disable live visual overlay presentation\n  --json        Render machine-readable JSON output\n  --detail      Include diagnostic detail in human output\n  --wide        Include extra columns in human table output\n\nUse auv invoke <command> --help for command-specific options.\n",
   );
 
   for group in registry.groups() {
@@ -74,9 +74,10 @@ pub fn render_command_help(command: &InvokeCommand) -> String {
     help.push_str(arg.help);
     help.push('\n');
   }
-  help.push_str("  --json    Render machine-readable JSON output\n");
-  help.push_str("  --detail  Include diagnostic detail in human output\n");
-  help.push_str("  --wide    Include extra columns in human table output\n");
+  help.push_str("  --no-overlay  Disable live visual overlay presentation\n");
+  help.push_str("  --json        Render machine-readable JSON output\n");
+  help.push_str("  --detail      Include diagnostic detail in human output\n");
+  help.push_str("  --wide        Include extra columns in human table output\n");
 
   help
 }

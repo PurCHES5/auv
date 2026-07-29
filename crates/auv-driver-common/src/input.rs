@@ -20,6 +20,24 @@ pub enum MouseButton {
 pub enum Click {
   Single,
   Double { interval: Duration },
+  Repeated { count: u8, interval: Duration },
+}
+
+impl Click {
+  pub const fn count(&self) -> u8 {
+    match self {
+      Self::Single => 1,
+      Self::Double { .. } => 2,
+      Self::Repeated { count, .. } => *count,
+    }
+  }
+
+  pub const fn interval(&self) -> Option<Duration> {
+    match self {
+      Self::Single => None,
+      Self::Double { interval } | Self::Repeated { interval, .. } => Some(*interval),
+    }
+  }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -63,6 +81,19 @@ pub enum InputPolicy {
   #[default]
   BackgroundPreferred,
   ForegroundPreferred,
+  // TODO(input-policy-foreground-only): An exact forced-foreground mode is
+  // deferred because foreground activation/restoration semantics are not yet
+  // represented by ClickOptions; add it when that lifecycle contract lands.
+}
+
+impl InputPolicy {
+  pub const fn as_str(self) -> &'static str {
+    match self {
+      Self::BackgroundOnly => "background_only",
+      Self::BackgroundPreferred => "background_preferred",
+      Self::ForegroundPreferred => "foreground_preferred",
+    }
+  }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

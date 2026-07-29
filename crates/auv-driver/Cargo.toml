@@ -12,8 +12,13 @@ documentation.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
+[features]
+default = []
+overlay = ["dep:auv-driver-overlay", "auv-driver-linux/overlay", "auv-driver-macos/overlay", "auv-driver-windows/overlay"]
+
 [dependencies]
 auv-driver-common = { path = "../auv-driver-common" }
+auv-driver-overlay = { path = "../auv-driver-overlay", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 auv-driver-linux = { path = "../auv-driver-linux" }

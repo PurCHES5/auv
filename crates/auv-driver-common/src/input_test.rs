@@ -24,6 +24,10 @@ fn click_and_click_options_serde_roundtrip() {
     Click::Double {
       interval: Duration::from_millis(42),
     },
+    Click::Repeated {
+      count: 3,
+      interval: Duration::from_millis(75),
+    },
   ];
 
   for click in clicks {

@@ -30,6 +30,9 @@ use crate::native::window::ListWindowsOptions;
 use crate::support::{build_window_candidates, parse_app_selector, resolve_app_ref};
 use crate::types::{WindowRef as NativeWindowRef, WindowSelection};
 
+#[cfg(feature = "overlay")]
+use auv_driver_overlay::{Overlay, ShowOptions};
+
 #[derive(Clone, Copy, Debug)]
 pub struct WindowApi<'a> {
   session: &'a MacosDriverSession,
@@ -65,6 +68,12 @@ pub struct AccessibilityApi<'a> {
   session: &'a MacosDriverSession,
 }
 
+#[cfg(feature = "overlay")]
+#[derive(Clone, Copy, Debug)]
+pub struct OverlayApi<'a> {
+  session: &'a MacosDriverSession,
+}
+
 impl MacosDriverSession {
   // Session APIs are grouped by automation target, not by native backend
   // mechanism. Window operations are relative to an application window;
@@ -96,6 +105,28 @@ impl MacosDriverSession {
 
   pub fn accessibility(&self) -> AccessibilityApi<'_> {
     AccessibilityApi { session: self }
+  }
+
+  #[cfg(feature = "overlay")]
+  pub fn overlay(&self) -> OverlayApi<'_> {
+    OverlayApi { session: self }
+  }
+}
+
+#[cfg(feature = "overlay")]
+impl OverlayApi<'_> {
+  pub fn show(&self, overlay: &Overlay, options: ShowOptions) -> DriverResult<()> {
+    let _ = self.session;
+    auv_driver_overlay::show(overlay, options).map_err(|error| DriverError::Backend {
+      message: error.to_string(),
+    })
+  }
+
+  pub fn remove(&self) -> DriverResult<()> {
+    let _ = self.session;
+    auv_driver_overlay::remove().map_err(|error| DriverError::Backend {
+      message: error.to_string(),
+    })
   }
 }
 
@@ -563,10 +594,7 @@ impl WindowInput for WindowApi<'_> {
 impl InputApi<'_> {
   pub fn click_at(&self, point: Point, click: Click) -> DriverResult<InputActionResult> {
     let _ = self.session;
-    let (count, interval) = match click {
-      Click::Single => (1, 0),
-      Click::Double { interval } => (2, duration_millis(interval)?),
-    };
+    let (count, interval) = click_parts(&click)?;
     crate::native::pointer::click_point(point.x, point.y, 0, count, interval).map_err(backend)?;
     Ok(foreground_system_events_result(DisturbanceLevel::Temporary, DisturbanceLevel::Unknown, DisturbanceLevel::None))
   }
@@ -916,6 +944,8 @@ fn click_parts(click: &Click) -> DriverResult<(i64, u64)> {
   match click {
     Click::Single => Ok((1, 0)),
     Click::Double { interval } => Ok((2, duration_millis(*interval)?)),
+    Click::Repeated { count: 0, .. } => Err(invalid_input("repeated click count must be greater than zero")),
+    Click::Repeated { count, interval } => Ok((i64::from(*count), duration_millis(*interval)?)),
   }
 }
 

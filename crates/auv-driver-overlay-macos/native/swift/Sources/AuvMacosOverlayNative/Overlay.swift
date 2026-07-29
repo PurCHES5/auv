@@ -1,6 +1,7 @@
 import AppKit
 import CoreGraphics
 import Foundation
+import QuartzCore
 
 /// Pixel-art cursor sprite ported from the AUV design system.
 ///
@@ -54,6 +55,13 @@ enum AuvOverlayCursorVariant {
 final class NativeOverlayCursorView: NSView {
   var label: String = "auv · replay"
   var variant: AuvOverlayCursorVariant = .auv
+  var customImage: NSImage?
+  var labelForeground: NSColor = .white
+  var labelBackground: NSColor?
+  var labelPadding = NSEdgeInsets(top: 3, left: 8, bottom: 3, right: 8)
+  var labelCornerRadius: CGFloat = 999
+  var spriteSize: CGFloat = 24
+  var labelGap: CGFloat = 6
 
   /// Set by `NativeOverlayController.flashCursor` to start the click
   /// ripple animation: an expanding lime ring emanating from the
@@ -84,34 +92,45 @@ final class NativeOverlayCursorView: NSView {
     // 8pt gap + pill that auto-sizes to the label width. The view's
     // frame is laid out to fit; everything draws against (0, 0) in
     // flipped (top-left origin) coordinates.
-    let spriteSize: CGFloat = 24
     let spriteOrigin = NSPoint(x: 0, y: 0)
-    drawPixelSprite(variant.sprite, origin: spriteOrigin, outputSize: spriteSize)
+    if let customImage {
+      customImage.draw(
+        in: NSRect(origin: spriteOrigin, size: NSSize(width: spriteSize, height: spriteSize)),
+        from: .zero,
+        operation: .sourceOver,
+        fraction: 1.0,
+        respectFlipped: true,
+        hints: [.interpolation: NSImageInterpolation.high]
+      )
+    } else {
+      drawPixelSprite(variant.sprite, origin: spriteOrigin, outputSize: spriteSize)
+    }
+
+    guard !label.isEmpty else { return }
 
     // Label pill — mono 11pt, white text, brand background, 999px
     // pill radius. Padding 3/8 per design.
     let pillFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold)
     let pillAttributes: [NSAttributedString.Key: Any] = [
       .font: pillFont,
-      .foregroundColor: NSColor.white,
+      .foregroundColor: labelForeground,
     ]
     let textSize = (label as NSString).size(withAttributes: pillAttributes)
-    let pillPaddingX: CGFloat = 8
-    let pillPaddingY: CGFloat = 3
-    let pillWidth = ceil(textSize.width) + pillPaddingX * 2
-    let pillHeight = ceil(textSize.height) + pillPaddingY * 2
-    let pillOriginX = spriteSize + 6
+    let pillWidth = ceil(textSize.width) + labelPadding.left + labelPadding.right
+    let pillHeight = ceil(textSize.height) + labelPadding.top + labelPadding.bottom
+    let pillOriginX = spriteSize + labelGap
     let pillOriginY = (spriteSize - pillHeight) / 2
     let pillRect = NSRect(x: pillOriginX, y: pillOriginY, width: pillWidth, height: pillHeight)
-    let pillPath = NSBezierPath(roundedRect: pillRect, xRadius: pillHeight / 2, yRadius: pillHeight / 2)
-    variant.pillBackground.setFill()
+    let radius = min(labelCornerRadius, pillHeight / 2)
+    let pillPath = NSBezierPath(roundedRect: pillRect, xRadius: radius, yRadius: radius)
+    (labelBackground ?? variant.pillBackground).setFill()
     pillPath.fill()
 
     let textRect = NSRect(
-      x: pillRect.minX + pillPaddingX,
-      y: pillRect.minY + pillPaddingY,
-      width: pillRect.width - pillPaddingX * 2,
-      height: pillRect.height - pillPaddingY * 2
+      x: pillRect.minX + labelPadding.left,
+      y: pillRect.minY + labelPadding.top,
+      width: pillRect.width - labelPadding.left - labelPadding.right,
+      height: pillRect.height - labelPadding.top - labelPadding.bottom
     )
     (label as NSString).draw(in: textRect, withAttributes: pillAttributes)
   }
@@ -120,12 +139,14 @@ final class NativeOverlayCursorView: NSView {
   /// Used by the controller to resize the host window so the pill
   /// never gets clipped by a fixed-width frame.
   func intrinsicLayoutSize() -> NSSize {
-    let spriteSize: CGFloat = 24
+    guard !label.isEmpty else {
+      return NSSize(width: spriteSize, height: spriteSize)
+    }
     let pillFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold)
     let textSize = (label as NSString).size(withAttributes: [.font: pillFont])
-    let pillWidth = ceil(textSize.width) + 16
-    let pillHeight = ceil(textSize.height) + 6
-    let width = spriteSize + 6 + pillWidth
+    let pillWidth = ceil(textSize.width) + labelPadding.left + labelPadding.right
+    let pillHeight = ceil(textSize.height) + labelPadding.top + labelPadding.bottom
+    let width = spriteSize + labelGap + pillWidth
     let height = max(spriteSize, pillHeight)
     return NSSize(width: width, height: height)
   }
@@ -186,6 +207,80 @@ final class NativeOverlayCursorView: NSView {
   }
 }
 
+final class NativeOverlayOutlineView: NSView {
+  var label: String = ""
+  var borderColor: NSColor = AuvOverlayCursorVariant.auv.pillBackground
+  var borderWidth: CGFloat = 3
+  var cornerRadius: CGFloat = 8
+
+  override var isFlipped: Bool { true }
+
+  override func draw(_ dirtyRect: NSRect) {
+    super.draw(dirtyRect)
+    let inset = max(1, borderWidth / 2)
+    let path = NSBezierPath(
+      roundedRect: bounds.insetBy(dx: inset, dy: inset),
+      xRadius: max(0, cornerRadius),
+      yRadius: max(0, cornerRadius)
+    )
+    path.lineWidth = borderWidth
+    borderColor.setStroke()
+    path.stroke()
+
+    guard !label.isEmpty else { return }
+    let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold)
+    let attributes: [NSAttributedString.Key: Any] = [
+      .font: font,
+      .foregroundColor: NSColor.white,
+      .backgroundColor: borderColor,
+    ]
+    let size = (label as NSString).size(withAttributes: attributes)
+    let labelRect = NSRect(x: 8, y: 8, width: ceil(size.width) + 12, height: ceil(size.height) + 6)
+    borderColor.setFill()
+    NSBezierPath(roundedRect: labelRect, xRadius: labelRect.height / 2, yRadius: labelRect.height / 2).fill()
+    (label as NSString).draw(
+      in: labelRect.insetBy(dx: 6, dy: 3),
+      withAttributes: [.font: font, .foregroundColor: NSColor.white]
+    )
+  }
+}
+
+final class NativeOverlayStatusView: NSView {
+  var text: String = ""
+  var background: NSColor = AuvOverlayCursorVariant.auv.pillBackground
+  var foreground: NSColor = .white
+  var padding = NSEdgeInsets(top: 7, left: 12, bottom: 7, right: 12)
+  var cornerRadius: CGFloat = 9
+
+  override var isFlipped: Bool { true }
+
+  func intrinsicLayoutSize() -> NSSize {
+    let size = (text as NSString).size(withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold)])
+    return NSSize(
+      width: ceil(size.width) + padding.left + padding.right,
+      height: ceil(size.height) + padding.top + padding.bottom
+    )
+  }
+
+  override func draw(_ dirtyRect: NSRect) {
+    super.draw(dirtyRect)
+    background.setFill()
+    NSBezierPath(roundedRect: bounds, xRadius: max(0, cornerRadius), yRadius: max(0, cornerRadius)).fill()
+    (text as NSString).draw(
+      in: NSRect(
+        x: bounds.minX + padding.left,
+        y: bounds.minY + padding.top,
+        width: bounds.width - padding.left - padding.right,
+        height: bounds.height - padding.top - padding.bottom
+      ),
+      withAttributes: [
+        .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold),
+        .foregroundColor: foreground,
+      ]
+    )
+  }
+}
+
 final class NativeOverlayCursorState {
   let window: NSWindow
   let view: NativeOverlayCursorView
@@ -204,6 +299,8 @@ final class NativeOverlayCursorState {
 
 final class NativeOverlayController {
   private var cursors: [String: NativeOverlayCursorState] = [:]
+  private var outlines: [String: (window: NSWindow, view: NativeOverlayOutlineView)] = [:]
+  private var statuses: [String: (window: NSWindow, view: NativeOverlayStatusView)] = [:]
   private var userCursorTrackingTimer: Timer?
   private var userCursorTrackingLabel: String = "you"
 
@@ -211,8 +308,10 @@ final class NativeOverlayController {
     runOnMain {
       let resolvedLabel = label.toString()
       self.hideCursor(id: "you")
+      let state = self.ensureCursor(id: "auv", label: resolvedLabel, variant: .auv)
+      state.view.customImage = nil
       self.placeCursor(
-        state: self.ensureCursor(id: "auv", label: resolvedLabel, variant: .auv),
+        state: state,
         x: x,
         y: y,
         label: resolvedLabel,
@@ -231,8 +330,10 @@ final class NativeOverlayController {
       let resolvedLabel = label.toString()
       let resolvedUserLabel = user_label.toString()
       self.startUserCursorTracking(label: resolvedUserLabel)
+      let state = self.ensureCursor(id: "auv", label: resolvedLabel, variant: .auv)
+      state.view.customImage = nil
       self.placeCursor(
-        state: self.ensureCursor(id: "auv", label: resolvedLabel, variant: .auv),
+        state: state,
         x: x,
         y: y,
         label: resolvedLabel.isEmpty ? "auv · replay" : resolvedLabel,
@@ -256,8 +357,10 @@ final class NativeOverlayController {
 
       let duration = max(0.0, Double(duration_ms) / 1000.0)
       let targetLabel = resolvedLabel.isEmpty ? "auv · replay" : resolvedLabel
+      let state = self.ensureCursor(id: "auv", label: targetLabel, variant: .auv)
+      state.view.customImage = nil
       self.moveCursor(
-        state: self.ensureCursor(id: "auv", label: targetLabel, variant: .auv),
+        state: state,
         targetX: x,
         targetY: y,
         label: targetLabel,
@@ -279,8 +382,10 @@ final class NativeOverlayController {
       let resolvedId = self.normalizeCursorId(cursor_id.toString(), fallback: "auv")
       let resolvedLabel = label.toString()
       let resolvedVariant = self.variantFrom(variant.toString())
+      let state = self.ensureCursor(id: resolvedId, label: resolvedLabel, variant: resolvedVariant)
+      state.view.customImage = nil
       self.placeCursor(
-        state: self.ensureCursor(id: resolvedId, label: resolvedLabel, variant: resolvedVariant),
+        state: state,
         x: x,
         y: y,
         label: resolvedLabel.isEmpty ? resolvedId : resolvedLabel,
@@ -295,14 +400,42 @@ final class NativeOverlayController {
     y: Double,
     label: RustString,
     variant: RustString,
-    duration_ms: UInt64
+    duration_ms: UInt64,
+    foreground_red: Double,
+    foreground_green: Double,
+    foreground_blue: Double,
+    foreground_alpha: Double,
+    background_red: Double,
+    background_green: Double,
+    background_blue: Double,
+    background_alpha: Double,
+    padding_top: Double,
+    padding_right: Double,
+    padding_bottom: Double,
+    padding_left: Double,
+    corner_radius: Double,
+    sprite_size: Double,
+    label_gap: Double
   ) -> NativeActionResponse {
     runOnMain {
       let resolvedId = self.normalizeCursorId(cursor_id.toString(), fallback: "auv")
       let resolvedLabel = label.toString()
       let resolvedVariant = self.variantFrom(variant.toString())
-      let targetLabel = resolvedLabel.isEmpty ? resolvedId : resolvedLabel
+      let targetLabel = resolvedLabel
       let state = self.ensureCursor(id: resolvedId, label: targetLabel, variant: resolvedVariant)
+      state.view.customImage = nil
+      self.applyCursorStyle(
+        state.view,
+        foreground: self.color(foreground_red, foreground_green, foreground_blue, foreground_alpha),
+        background: self.color(background_red, background_green, background_blue, background_alpha),
+        paddingTop: padding_top,
+        paddingRight: padding_right,
+        paddingBottom: padding_bottom,
+        paddingLeft: padding_left,
+        cornerRadius: corner_radius,
+        spriteSize: sprite_size,
+        labelGap: label_gap
+      )
       let startPoint = self.cursorStartPoint(state)
       self.moveCursor(
         state: state,
@@ -313,6 +446,153 @@ final class NativeOverlayController {
         duration: max(0.0, Double(duration_ms) / 1000.0),
         startPoint: startPoint
       )
+    }
+  }
+
+  func move_overlay_cursor_svg(
+    cursor_id: RustString,
+    x: Double,
+    y: Double,
+    label: RustString,
+    svg: RustString,
+    duration_ms: UInt64,
+    foreground_red: Double,
+    foreground_green: Double,
+    foreground_blue: Double,
+    foreground_alpha: Double,
+    background_red: Double,
+    background_green: Double,
+    background_blue: Double,
+    background_alpha: Double,
+    padding_top: Double,
+    padding_right: Double,
+    padding_bottom: Double,
+    padding_left: Double,
+    corner_radius: Double,
+    sprite_size: Double,
+    label_gap: Double
+  ) -> NativeActionResponse {
+    let source = svg.toString()
+    guard
+      let data = source.data(using: .utf8),
+      let image = NSImage(data: data),
+      image.isValid
+    else {
+      return nativeActionError(
+        "runtime cursor SVG could not be decoded by AppKit",
+        "provide a self-contained SVG with a finite viewBox"
+      )
+    }
+
+    return runOnMain {
+      let resolvedId = self.normalizeCursorId(cursor_id.toString(), fallback: "auv")
+      let resolvedLabel = label.toString()
+      let targetLabel = resolvedLabel
+      let state = self.ensureCursor(id: resolvedId, label: targetLabel, variant: .auv)
+      state.view.customImage = image
+      self.applyCursorStyle(
+        state.view,
+        foreground: self.color(foreground_red, foreground_green, foreground_blue, foreground_alpha),
+        background: self.color(background_red, background_green, background_blue, background_alpha),
+        paddingTop: padding_top,
+        paddingRight: padding_right,
+        paddingBottom: padding_bottom,
+        paddingLeft: padding_left,
+        cornerRadius: corner_radius,
+        spriteSize: sprite_size,
+        labelGap: label_gap
+      )
+      self.moveCursor(
+        state: state,
+        targetX: x,
+        targetY: y,
+        label: targetLabel,
+        variant: .auv,
+        duration: max(0.0, Double(duration_ms) / 1000.0),
+        startPoint: self.cursorStartPoint(state)
+      )
+    }
+  }
+
+  func show_overlay_outline(
+    layer_id: RustString,
+    x: Double,
+    y: Double,
+    width: Double,
+    height: Double,
+    label: RustString,
+    red: Double,
+    green: Double,
+    blue: Double,
+    alpha: Double,
+    border_width: Double,
+    corner_radius: Double,
+    duration_ms: UInt64
+  ) -> NativeActionResponse {
+    guard width > 0, height > 0, width.isFinite, height.isFinite else {
+      return nativeActionError("overlay outline requires a finite positive size", "check the selected target geometry")
+    }
+    return runOnMain {
+      let id = self.normalizeCursorId(layer_id.toString(), fallback: "outline")
+      let layer = self.ensureOutline(id: id)
+      layer.view.label = label.toString()
+      layer.view.borderColor = NSColor(
+        srgbRed: min(1, max(0, red)),
+        green: min(1, max(0, green)),
+        blue: min(1, max(0, blue)),
+        alpha: min(1, max(0, alpha))
+      )
+      layer.view.borderWidth = max(1, border_width)
+      layer.view.cornerRadius = max(0, corner_radius)
+      layer.view.needsDisplay = true
+      self.placeWindow(layer.window, auvRect: CGRect(x: x, y: y, width: width, height: height))
+      self.animateAppearance(layer.window, durationMs: duration_ms)
+    }
+  }
+
+  func show_overlay_status(
+    layer_id: RustString,
+    x: Double,
+    y: Double,
+    text: RustString,
+    foreground_red: Double,
+    foreground_green: Double,
+    foreground_blue: Double,
+    foreground_alpha: Double,
+    background_red: Double,
+    background_green: Double,
+    background_blue: Double,
+    background_alpha: Double,
+    padding_top: Double,
+    padding_right: Double,
+    padding_bottom: Double,
+    padding_left: Double,
+    corner_radius: Double,
+    duration_ms: UInt64
+  ) -> NativeActionResponse {
+    runOnMain {
+      let id = self.normalizeCursorId(layer_id.toString(), fallback: "status")
+      let layer = self.ensureStatus(id: id)
+      layer.view.text = text.toString()
+      layer.view.foreground = self.color(
+        foreground_red,
+        foreground_green,
+        foreground_blue,
+        foreground_alpha
+      )
+      layer.view.background = self.color(background_red, background_green, background_blue, background_alpha)
+      layer.view.padding = NSEdgeInsets(
+        top: max(0, padding_top),
+        left: max(0, padding_left),
+        bottom: max(0, padding_bottom),
+        right: max(0, padding_right)
+      )
+      layer.view.cornerRadius = max(0, corner_radius)
+      let size = layer.view.intrinsicLayoutSize()
+      layer.view.frame = NSRect(origin: .zero, size: size)
+      layer.view.needsDisplay = true
+      self.placeWindow(layer.window, auvRect: CGRect(x: x, y: y, width: size.width, height: size.height))
+      self.animateAppearance(layer.window, durationMs: duration_ms)
     }
   }
 
@@ -364,6 +644,12 @@ final class NativeOverlayController {
       for state in self.cursors.values {
         state.window.orderOut(nil)
       }
+      for layer in self.outlines.values {
+        layer.window.orderOut(nil)
+      }
+      for layer in self.statuses.values {
+        layer.window.orderOut(nil)
+      }
     }
   }
 
@@ -374,7 +660,17 @@ final class NativeOverlayController {
         state.window.orderOut(nil)
         state.window.close()
       }
+      for layer in self.outlines.values {
+        layer.window.orderOut(nil)
+        layer.window.close()
+      }
+      for layer in self.statuses.values {
+        layer.window.orderOut(nil)
+        layer.window.close()
+      }
       self.cursors.removeAll()
+      self.outlines.removeAll()
+      self.statuses.removeAll()
     }
   }
 
@@ -415,6 +711,73 @@ final class NativeOverlayController {
     window.isReleasedWhenClosed = false
 
     return (window, view)
+  }
+
+  private func ensureOutline(id: String) -> (window: NSWindow, view: NativeOverlayOutlineView) {
+    if let layer = outlines[id] { return layer }
+    let view = NativeOverlayOutlineView(frame: .zero)
+    let window = makeOverlayWindow(contentView: view)
+    let layer = (window: window, view: view)
+    outlines[id] = layer
+    return layer
+  }
+
+  private func ensureStatus(id: String) -> (window: NSWindow, view: NativeOverlayStatusView) {
+    if let layer = statuses[id] { return layer }
+    let view = NativeOverlayStatusView(frame: .zero)
+    let window = makeOverlayWindow(contentView: view)
+    let layer = (window: window, view: view)
+    statuses[id] = layer
+    return layer
+  }
+
+  private func makeOverlayWindow(contentView: NSView) -> NSWindow {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.accessory)
+    let window = NSWindow(
+      contentRect: .zero,
+      styleMask: [.borderless],
+      backing: .buffered,
+      defer: false
+    )
+    window.contentView = contentView
+    window.isOpaque = false
+    window.backgroundColor = .clear
+    window.ignoresMouseEvents = true
+    window.hasShadow = false
+    window.level = .screenSaver
+    window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+    window.isReleasedWhenClosed = false
+    return window
+  }
+
+  private func placeWindow(_ window: NSWindow, auvRect: CGRect) {
+    let topLeft = appKitPoint(fromAuvScreenPoint: auvRect.origin)
+    let frame = NSRect(
+      x: topLeft.x,
+      y: topLeft.y - auvRect.height,
+      width: auvRect.width,
+      height: auvRect.height
+    )
+    window.contentView?.frame = NSRect(origin: .zero, size: frame.size)
+    window.setFrame(frame, display: true)
+    window.orderFrontRegardless()
+    window.displayIfNeeded()
+  }
+
+  private func animateAppearance(_ window: NSWindow, durationMs: UInt64) {
+    let duration = max(0.0, Double(durationMs) / 1000.0)
+    guard duration > 0 else {
+      window.alphaValue = 1
+      return
+    }
+    window.alphaValue = 0.28
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = duration
+      context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+      window.animator().alphaValue = 1
+    }
+    drainEvents(until: Date().addingTimeInterval(duration))
   }
 
   private func placeCursor(
@@ -485,7 +848,7 @@ final class NativeOverlayController {
     while true {
       let elapsed = Date().timeIntervalSince(start)
       let rawT = min(1.0, max(0.0, elapsed / duration))
-      let eased = 1.0 - pow(1.0 - rawT, 3.0)
+      let eased = easeInOutExpo(rawT)
       let currentX = startPoint.x + (targetX - startPoint.x) * eased
       let currentY = startPoint.y + (targetY - startPoint.y) * eased
       placeCursor(
@@ -510,8 +873,18 @@ final class NativeOverlayController {
     )
   }
 
+  private func easeInOutExpo(_ t: Double) -> Double {
+    if t <= 0 { return 0 }
+    if t >= 1 { return 1 }
+    if t < 0.5 {
+      return pow(2, 20 * t - 10) / 2
+    }
+    return (2 - pow(2, -20 * t + 10)) / 2
+  }
+
   private func flashCursor(id: String, x: Double, y: Double, label: String, durationMs: UInt64) {
     let state = ensureCursor(id: id, label: label, variant: .auvClick)
+    state.view.customImage = nil
     let previousLabel = state.label
     let previousVariant = state.variant
     let targetLabel = label.isEmpty ? "auv · click" : label
@@ -595,6 +968,40 @@ final class NativeOverlayController {
       return (x, y)
     }
     return currentMouseLogicalPoint()
+  }
+
+  private func applyCursorStyle(
+    _ view: NativeOverlayCursorView,
+    foreground: NSColor,
+    background: NSColor,
+    paddingTop: Double,
+    paddingRight: Double,
+    paddingBottom: Double,
+    paddingLeft: Double,
+    cornerRadius: Double,
+    spriteSize: Double,
+    labelGap: Double
+  ) {
+    view.labelForeground = foreground
+    view.labelBackground = background
+    view.labelPadding = NSEdgeInsets(
+      top: max(0, paddingTop),
+      left: max(0, paddingLeft),
+      bottom: max(0, paddingBottom),
+      right: max(0, paddingRight)
+    )
+    view.labelCornerRadius = max(0, cornerRadius)
+    view.spriteSize = max(1, spriteSize)
+    view.labelGap = max(0, labelGap)
+  }
+
+  private func color(_ red: Double, _ green: Double, _ blue: Double, _ alpha: Double) -> NSColor {
+    NSColor(
+      srgbRed: min(1, max(0, red)),
+      green: min(1, max(0, green)),
+      blue: min(1, max(0, blue)),
+      alpha: min(1, max(0, alpha))
+    )
   }
 
   private func normalizeCursorId(_ raw: String, fallback: String) -> String {

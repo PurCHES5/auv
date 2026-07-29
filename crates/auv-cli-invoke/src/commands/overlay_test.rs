@@ -1,0 +1,95 @@
+use std::collections::BTreeMap;
+
+use super::*;
+
+#[test]
+fn every_overlay_primitive_and_component_is_registered_and_dry_run_visualizable() {
+  let registry = crate::default_registry();
+  let cases = [
+    ("overlay.outline", rect_inputs()),
+    ("overlay.cursor", point_inputs()),
+    ("overlay.status", status_inputs()),
+    ("overlay.captureFrame", rect_inputs()),
+    ("overlay.clickTarget", click_target_inputs()),
+  ];
+
+  for (command_id, inputs) in cases {
+    let command = registry.resolve(command_id).unwrap_or_else(|| panic!("{command_id} should be registered"));
+    let output = futures_executor::block_on(command.invoke(InvokeCommandInput {
+      command_id: command_id.to_string(),
+      target_application_id: None,
+      inputs,
+      dry_run: true,
+      cancellation: crate::InvokeCancellation::new(),
+    }))
+    .unwrap_or_else(|error| panic!("{command_id} dry run should build its real overlay: {error}"));
+
+    let report = output.report.expect("debug overlay command should report its composition");
+    assert_eq!(report.fields.last().expect("overlay field").value, "disabled");
+  }
+}
+
+#[test]
+fn style_arguments_refine_presets_deterministically() {
+  let input = input(
+    "overlay.outline",
+    [
+      ("padding", "4"),
+      ("border-color", "#7fd030cc"),
+      ("border-width", "5"),
+      ("corner-radius", "12"),
+    ],
+  );
+  let style = outline_style(&input, OutlineStyle::selected(), "padding", "corner-radius").expect("style should parse");
+
+  assert_eq!(style.padding, Insets::all(4.0));
+  assert_eq!(style.stroke.width, 5.0);
+  assert_eq!(style.stroke.color, Color::rgba(127.0 / 255.0, 208.0 / 255.0, 48.0 / 255.0, 204.0 / 255.0));
+  assert_eq!(style.corner_radius, 12.0);
+}
+
+fn rect_inputs() -> BTreeMap<String, String> {
+  pairs([
+    ("x", "100"),
+    ("y", "120"),
+    ("width", "240"),
+    ("height", "80"),
+    ("label", "Target"),
+  ])
+}
+
+fn point_inputs() -> BTreeMap<String, String> {
+  pairs([("x", "100"), ("y", "120"), ("label", "auv · cursor")])
+}
+
+fn status_inputs() -> BTreeMap<String, String> {
+  pairs([("x", "100"), ("y", "120"), ("text", "processing")])
+}
+
+fn click_target_inputs() -> BTreeMap<String, String> {
+  pairs([
+    ("x", "100"),
+    ("y", "120"),
+    ("width", "240"),
+    ("height", "80"),
+    ("outline-label", "Quest Start"),
+    ("outline-label-visible", "true"),
+    ("cursor-label", "auv · click"),
+    ("cursor-label-visible", "false"),
+    ("status", "click target"),
+  ])
+}
+
+fn input<const N: usize>(command_id: &str, values: [(&str, &str); N]) -> InvokeCommandInput {
+  InvokeCommandInput {
+    command_id: command_id.to_string(),
+    target_application_id: None,
+    inputs: pairs(values),
+    dry_run: true,
+    cancellation: crate::InvokeCancellation::new(),
+  }
+}
+
+fn pairs<const N: usize>(values: [(&str, &str); N]) -> BTreeMap<String, String> {
+  values.into_iter().map(|(key, value)| (key.to_string(), value.to_string())).collect()
+}

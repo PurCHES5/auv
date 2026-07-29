@@ -249,12 +249,6 @@ fn window_selector(input: &McpInvokeInput) -> auv_driver::WindowSelector {
   selector
 }
 
-macro_rules! deferred_adapter {
-  ($id:literal) => {
-    McpInvokeAdapter::new($id, |_input| async move { unimplemented!($id) })
-  };
-}
-
 fn click_window_point_adapter() -> McpInvokeAdapter {
   click_window_point_adapter_with(auv_cli_invoke::commands::input::click_window_point_domain)
 }
@@ -317,8 +311,8 @@ pub fn core_invoke_adapters() -> Vec<McpInvokeAdapter> {
       McpInvokeSuccess::from_result(&permissions)
     }),
     McpInvokeAdapter::new("app.activate", |input| async move {
-      auv_cli_invoke::commands::app::activate_application(input.target_application_id).await?;
-      Ok(completed(Value::Null))
+      let result = auv_cli_invoke::commands::app::activate_application(input.target_application_id).await?;
+      McpInvokeSuccess::from_result(&result)
     }),
     McpInvokeAdapter::new("scan.frame", |input| async move {
       if input.dry_run {
@@ -454,42 +448,11 @@ pub fn core_invoke_adapters() -> Vec<McpInvokeAdapter> {
     }),
   ];
 
+  // TODO(invoke-mcp-stubs): adapters for intentionally unregistered invoke
+  // commands remain absent until owner-approved implementations have behavioral evidence.
   adapters.extend([
-    deferred_adapter!("display.projectScreenshotPoint"),
-    deferred_adapter!("display.identifyPoint"),
     focus_text_adapter("input.focusText"),
-    deferred_adapter!("input.pressButton"),
-    deferred_adapter!("input.axPressButton"),
     focus_text_adapter("input.axFocusText"),
-    deferred_adapter!("input.axClickWindowText"),
-    deferred_adapter!("input.smartPress"),
-    deferred_adapter!("input.clickPoint"),
-    deferred_adapter!("input.teachClick"),
-    deferred_adapter!("input.scrollPoint"),
-    deferred_adapter!("screen.findRows"),
-    deferred_adapter!("screen.waitForRows"),
-    deferred_adapter!("screen.findImageText"),
-    deferred_adapter!("screen.clickRow"),
-    deferred_adapter!("window.captureAxTree"),
-    deferred_adapter!("window.findRows"),
-    deferred_adapter!("window.waitForRows"),
-    deferred_adapter!("window.observeRegion"),
-    deferred_adapter!("window.findIconMatch"),
-    deferred_adapter!("window.scrollRegion"),
-    deferred_adapter!("window.verifyText"),
-    deferred_adapter!("window.clickRow"),
-    deferred_adapter!("overlay.clickPoint"),
-    deferred_adapter!("overlay.showCursor"),
-    deferred_adapter!("overlay.showDualCursor"),
-    deferred_adapter!("overlay.applyCursorBatch"),
-    deferred_adapter!("overlay.setCursor"),
-    deferred_adapter!("overlay.moveCursor"),
-    deferred_adapter!("overlay.moveCursorById"),
-    deferred_adapter!("overlay.flashCursor"),
-    deferred_adapter!("overlay.flashCursorById"),
-    deferred_adapter!("overlay.hideCursorId"),
-    deferred_adapter!("overlay.hideCursor"),
-    deferred_adapter!("overlay.shutdown"),
     McpInvokeAdapter::new("mediaControl.nowPlaying", |_input| async move {
       let result = auv_cli_invoke::commands::media_control::read_now_playing().await?;
       McpInvokeSuccess::from_result(&result)
@@ -706,4 +669,14 @@ pub async fn serve_stdio_with_registry(
     .await
     .map_err(|error| format!("failed to serve MCP stdio transport: {error}"))?;
   service.waiting().await.map(|_| ()).map_err(|error| format!("mcp stdio server exited with error: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+  use super::McpServer;
+
+  #[test]
+  fn default_mcp_server_accepts_its_invoke_registry_and_adapter_catalog() {
+    McpServer::new(std::path::PathBuf::from(".")).expect("default MCP invoke catalogs should agree");
+  }
 }

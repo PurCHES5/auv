@@ -6,9 +6,11 @@ use std::time::Duration;
 #[cfg(target_os = "macos")]
 use std::process::Command;
 
+use auv_driver_common::application::{ApplicationActivationResult, ApplicationActivationVerification};
 use auv_driver_common::error::{DriverError, DriverResult};
 
 use crate::MacosDriverSession;
+use crate::native::window::ListWindowsOptions;
 
 /// Typed application control that is independent of `CGWindowID` discovery.
 ///
@@ -16,11 +18,11 @@ use crate::MacosDriverSession;
 /// bundle id. Screenshot, coordinate, and window-targeted input paths should
 /// continue to resolve a concrete window through `WindowApi`.
 pub trait ApplicationControl {
-  fn activate_bundle_id(&self, bundle_id: &str, settle: Duration) -> DriverResult<()>;
+  fn activate_bundle_id(&self, bundle_id: &str, settle: Duration) -> DriverResult<ApplicationActivationResult>;
 }
 
 impl ApplicationControl for MacosDriverSession {
-  fn activate_bundle_id(&self, bundle_id: &str, settle: Duration) -> DriverResult<()> {
+  fn activate_bundle_id(&self, bundle_id: &str, settle: Duration) -> DriverResult<ApplicationActivationResult> {
     let _ = self;
     let script = activation_script(bundle_id)?;
     run_activation_script(&script)?;
@@ -31,8 +33,32 @@ impl ApplicationControl for MacosDriverSession {
       std::thread::sleep(settle);
     }
 
-    Ok(())
+    let requested_bundle_id = bundle_id.trim().to_string();
+    let observation = observe_frontmost_bundle_id();
+    Ok(ApplicationActivationResult {
+      verification: activation_verification(&requested_bundle_id, observation),
+      requested_bundle_id,
+    })
   }
+}
+
+fn activation_verification(requested_bundle_id: &str, observation: Result<String, String>) -> ApplicationActivationVerification {
+  match observation {
+    Ok(observed_bundle_id) if observed_bundle_id.eq_ignore_ascii_case(requested_bundle_id) => {
+      ApplicationActivationVerification::VerifiedForeground { observed_bundle_id }
+    }
+    Ok(observed_bundle_id) if observed_bundle_id.trim().is_empty() => ApplicationActivationVerification::Unavailable {
+      reason: "WindowServer observation did not identify a frontmost application bundle id".to_string(),
+    },
+    Ok(observed_bundle_id) => ApplicationActivationVerification::ForegroundMismatch { observed_bundle_id },
+    Err(reason) => ApplicationActivationVerification::Unavailable { reason },
+  }
+}
+
+fn observe_frontmost_bundle_id() -> Result<String, String> {
+  crate::native::window::list_windows(ListWindowsOptions::all_visible(1))
+    .map(|snapshot| snapshot.frontmost_app_bundle_id)
+    .map_err(|error| format!("frontmost application observation failed: {error}"))
 }
 
 fn activation_script(bundle_id: &str) -> DriverResult<String> {

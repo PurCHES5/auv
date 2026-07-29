@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use auv_tracing::ArtifactMetadata;
+
 use crate::InvokeReport;
 use crate::arg::ArgSpec;
 
@@ -79,12 +81,22 @@ impl InvokeCommandInput {
   pub fn target_or_input_target(&self) -> Option<&str> {
     self.target_application_id.as_deref().or_else(|| self.inputs.get("target").map(String::as_str)).filter(|value| !value.trim().is_empty())
   }
+
+  /// Resolves the shared invoke presentation policy. Overlay presentation is
+  /// enabled unless a frontend explicitly supplies `--no-overlay` or
+  /// `--overlay false`.
+  pub fn overlay_enabled(&self) -> Result<bool, String> {
+    self.inputs.get("overlay").map_or(Ok(true), |value| {
+      value.parse::<bool>().map_err(|error| format!("{} received invalid --overlay value {value:?}: {error}", self.command_id))
+    })
+  }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct InvokeCommandOutput {
   pub report: Option<InvokeReport>,
   result: Option<serde_json::Value>,
+  artifacts: Vec<ArtifactMetadata>,
 }
 
 impl InvokeCommandOutput {
@@ -99,12 +111,23 @@ impl InvokeCommandOutput {
     Ok(Self {
       report: None,
       result: Some(serde_json::to_value(result).map_err(|error| format!("failed to serialize invoke result: {error}"))?),
+      artifacts: Vec::new(),
     })
   }
 
   pub fn with_report(mut self, report: InvokeReport) -> Self {
     self.report = Some(report);
     self
+  }
+
+  /// Attaches artifacts that are part of the direct command result.
+  pub fn with_artifacts(mut self, artifacts: impl IntoIterator<Item = ArtifactMetadata>) -> Self {
+    self.artifacts.extend(artifacts);
+    self
+  }
+
+  pub fn artifacts(&self) -> &[ArtifactMetadata] {
+    &self.artifacts
   }
 
   pub(crate) fn result(&self) -> Option<&serde_json::Value> {

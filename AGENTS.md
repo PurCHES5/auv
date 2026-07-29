@@ -149,7 +149,7 @@ recognition / AX / candidates
 
 Keep visual presentation separate from input delivery:
 
-- `auv-overlay-macos` is a visual trust/debug layer. It may show an AUV cursor,
+- `auv-driver-overlay-macos` is a visual trust/debug adapter. It may show an AUV cursor,
   a user cursor, movement, or click ripples, but it does not prove semantic
   success and must not be treated as the input backend.
 - `auv-driver` / `auv-driver-macos` owns typed input delivery such as
@@ -428,15 +428,15 @@ Use this root-cause block format in regression tests when relevant:
 - For SourceKit or IDE indexing, run `scripts/generate-swift-bridge` to generate
   ignored files under:
   - `crates/auv-driver-macos/native/swift/Sources/AuvMacosNative/Generated/`
-  - `crates/auv-overlay-macos/native/swift/Sources/AuvMacosOverlayNative/Generated/`
+  - `crates/auv-driver-overlay-macos/native/swift/Sources/AuvMacosOverlayNative/Generated/`
 - After generating those files, use SwiftPM-side checks so generated bridge
   types are visible to the IDE:
   - `cd crates/auv-driver-macos/native/swift && swift build`
-  - `cd crates/auv-overlay-macos/native/swift && swift build`
+  - `cd crates/auv-driver-overlay-macos/native/swift && swift build`
 - Do not commit generated directories.
 - Regenerate bridge files after changing:
   - `crates/auv-driver-macos/src/native/binding.rs`
-  - `crates/auv-overlay-macos/src/native/binding.rs`
+  - `crates/auv-driver-overlay-macos/src/native/binding.rs`
 - When a change touches Rust/Swift FFI declarations or Swift native source
   files, rerun `scripts/generate-swift-bridge` before validating.
 - Run the SwiftPM build for every touched Swift package.

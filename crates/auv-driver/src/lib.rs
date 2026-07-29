@@ -1,5 +1,8 @@
 pub use auv_driver_common::*;
 
+#[cfg(feature = "overlay")]
+pub use auv_driver_overlay as overlay;
+
 use std::ops::{Deref, DerefMut};
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]

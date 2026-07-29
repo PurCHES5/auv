@@ -11,24 +11,20 @@ use crate::{InvokeReport, InvokeReportField};
 use auv_tracing::{Attributes, ByteLength, NewArtifact};
 use futures_util::io::Cursor as AsyncCursor;
 
-use auv_driver::{INPUT_ACTION_RESULT_PURPOSE, WindowInput as _};
+use auv_driver::overlay::{Overlay, components::ClickTarget};
+use auv_driver::{INPUT_ACTION_RESULT_PURPOSE, ScreenPoint, WindowInput as _};
 const ROOT_STRUCTURED_ARTIFACT_JSON_BYTE_LIMIT: u64 = 4 * 1024 * 1024;
 
 pub fn group() -> CommandGroup {
+  // TODO(invoke-input-stubs): incomplete input commands stay intentionally
+  // unregistered until owner-approved implementations have behavioral evidence.
   CommandGroup::new("input", "INPUT")
     .command(focus_text_input_invoke_command())
-    .command(press_button_invoke_command())
-    .command(ax_press_button_invoke_command())
     .command(ax_focus_text_input_invoke_command())
-    .command(ax_click_window_text_invoke_command())
-    .command(smart_press_invoke_command())
     .command(type_text_invoke_command())
     .command(paste_text_preserve_clipboard_invoke_command())
     .command(press_key_invoke_command())
-    .command(click_point_invoke_command())
     .command(click_window_point_invoke_command())
-    .command(teach_click_invoke_command())
-    .command(scroll_point_invoke_command())
 }
 
 #[invoke_command(
@@ -44,7 +40,8 @@ async fn focus_text_input(input: InvokeCommandInput) -> InvokeCommandResult {
   let app = input.target_or_input_target().ok_or_else(|| "input.focusText requires --target".to_string())?.to_string();
   let query = input.inputs.get("query").cloned().unwrap_or_default();
   let candidate = input.inputs.get("candidate").cloned().unwrap_or_default();
-  InvokeCommandOutput::from_result(&focus_text(app, query, candidate).await?)
+  let result = focus_text(app, query, candidate.clone()).await?;
+  focus_text_output(&result, &candidate)
 }
 
 pub async fn focus_text(app: String, query: String, candidate: String) -> Result<auv_driver::AxFocusResult, String> {
@@ -96,7 +93,8 @@ async fn ax_focus_text_input(input: InvokeCommandInput) -> InvokeCommandResult {
   let app = input.target_or_input_target().ok_or_else(|| "input.axFocusText requires --target".to_string())?.to_string();
   let query = input.inputs.get("query").cloned().unwrap_or_default();
   let candidate = input.inputs.get("candidate").cloned().unwrap_or_default();
-  InvokeCommandOutput::from_result(&focus_text(app, query, candidate).await?)
+  let result = focus_text(app, query, candidate.clone()).await?;
+  focus_text_output(&result, &candidate)
 }
 
 #[invoke_command(
@@ -133,11 +131,11 @@ async fn type_text(input: InvokeCommandInput) -> InvokeCommandResult {
   #[cfg(target_os = "macos")]
   {
     reject_target_activation(&input, "input.typeText")?;
+    let text = input.required_input("text")?.to_string();
     if input.dry_run {
-      return Ok(InvokeCommandOutput::completed());
+      return Ok(validation_only_output());
     }
 
-    let text = input.required_input("text")?.to_string();
     let result = type_text_into_active_control(text).await?;
     input_action_output(&result)
   }
@@ -173,11 +171,11 @@ async fn paste_text_preserve_clipboard(input: InvokeCommandInput) -> InvokeComma
   #[cfg(target_os = "macos")]
   {
     reject_target_activation(&input, "input.pasteText")?;
+    let text = input.required_input("text")?.to_string();
     if input.dry_run {
-      return Ok(InvokeCommandOutput::completed());
+      return Ok(validation_only_output());
     }
 
-    let text = input.required_input("text")?.to_string();
     let result = paste_text_into_active_control(text).await?;
     input_action_output(&result)
   }
@@ -219,11 +217,11 @@ async fn press_key(input: InvokeCommandInput) -> InvokeCommandResult {
   #[cfg(target_os = "macos")]
   {
     reject_target_activation(&input, "input.key")?;
+    let key = input.required_input("key")?.to_string();
     if input.dry_run {
-      return Ok(InvokeCommandOutput::completed());
+      return Ok(validation_only_output());
     }
 
-    let key = input.required_input("key")?.to_string();
     let result = press_key_in_active_app(key.clone()).await?;
     let mut fields = input_action_report_fields(&result);
     fields.insert(1, InvokeReportField::new("Key", key));
@@ -278,8 +276,31 @@ async fn click_point(_input: InvokeCommandInput) -> InvokeCommandResult {
   args = WINDOW_CLICK_POINT_ARGS,
 )]
 async fn click_window_point(input: InvokeCommandInput) -> InvokeCommandResult {
-  let outcome = click_window_point_domain(input).await?;
-  window_point_click_output(outcome)
+  #[cfg(target_os = "macos")]
+  {
+    let presentation_input = input.clone();
+    let capability = LocalWindowPointCapability::open()?;
+    let outcome = click_window_point_with_capability(input, &capability).await?;
+    let result = outcome.into_result();
+    let point = result.point.point();
+    let screen_point = ScreenPoint::new(result.window.frame.origin.x + point.x, result.window.frame.origin.y + point.y);
+    let click_overlay =
+      Overlay::new().with_layer(ClickTarget::new(screen_point).with_cursor_label("auv · click").with_status("click delivered"));
+    let overlay = super::overlay::show_overlay(
+      &presentation_input,
+      &capability.session,
+      click_overlay,
+      auv_driver::overlay::ShowOptions::new()
+        .with_motion_ease(std::time::Duration::from_millis(420), auv_driver::overlay::Easing::EaseInOutExpo)
+        .with_auto_removal_after(std::time::Duration::from_millis(140)),
+    )?;
+    window_point_click_output(result, overlay)
+  }
+  #[cfg(not(target_os = "macos"))]
+  {
+    let _ = input;
+    Err("input.clickWindowPoint is only available on macOS".to_string())
+  }
 }
 
 /// Resolves and optionally delivers `input.clickWindowPoint`, returning the
@@ -305,6 +326,7 @@ trait WindowPointCapability {
     &self,
     window: &auv_driver::Window,
     point: auv_driver::geometry::WindowPoint,
+    options: auv_driver::ClickOptions,
   ) -> auv_driver::DriverResult<auv_driver::InputActionResult>;
 }
 
@@ -330,8 +352,9 @@ impl WindowPointCapability for LocalWindowPointCapability {
     &self,
     window: &auv_driver::Window,
     point: auv_driver::geometry::WindowPoint,
+    options: auv_driver::ClickOptions,
   ) -> auv_driver::DriverResult<auv_driver::InputActionResult> {
-    self.session.window().click(window, point, auv_driver::ClickOptions::default())
+    self.session.window().click(window, point, options)
   }
 }
 
@@ -345,12 +368,13 @@ where
   let point = WindowPointInput::parse(&input.inputs, &input.command_id)?;
   let window = capability.resolve(click_window_selector(&input)).map_err(|error| error.to_string())?;
   let point = point.resolve(&window, &input.command_id)?;
+  let options = window_click_options(&input)?;
   input.cancellation.check().map_err(|error| error.to_string())?;
   if input.dry_run {
     return Ok(WindowPointClickOutcome::Validated { window, point });
   }
 
-  let click = click_resolved_window_point(capability, window, point).await?;
+  let click = click_resolved_window_point(capability, window, point, options).await?;
   Ok(WindowPointClickOutcome::Delivered { click })
 }
 
@@ -459,15 +483,17 @@ impl WindowPointClickOutcome {
   }
 }
 
-fn window_point_click_output(outcome: WindowPointClickOutcome) -> InvokeCommandResult {
-  let result = outcome.into_result();
+fn window_point_click_output(result: WindowPointClickResult, overlay: super::overlay::OverlayStatus) -> InvokeCommandResult {
   match &result.action {
     None => {
       let mut output = InvokeCommandOutput::from_result(&result)?;
       output.report = Some(InvokeReport::new(
         vec![
+          InvokeReportField::new("Delivery", "not_performed"),
+          InvokeReportField::new("Verification", "validation_only"),
           InvokeReportField::new("Window ID", result.window.reference.id.clone()),
           InvokeReportField::new("Window point", format!("{:.0},{:.0}", result.point.point().x, result.point.point().y)),
+          overlay.report_field(),
         ],
         Vec::new(),
       ));
@@ -486,6 +512,7 @@ fn window_point_click_output(outcome: WindowPointClickOutcome) -> InvokeCommandR
         fields.push(InvokeReportField::new("Bundle ID", bundle_id.clone()));
       }
       fields.push(InvokeReportField::new("Window point", format!("{:.0},{:.0}", result.point.point().x, result.point.point().y)));
+      fields.push(overlay.report_field());
       Ok(InvokeCommandOutput::from_result(&result)?.with_report(InvokeReport::new(fields, Vec::new())))
     }
   }
@@ -497,7 +524,7 @@ pub async fn click_point_in_window(selector: auv_driver::WindowSelector, point: 
     let capability = LocalWindowPointCapability::open()?;
     let window = capability.resolve(selector).map_err(|error| error.to_string())?;
     let point = point.resolve(&window, "input.clickWindowPoint")?;
-    click_resolved_window_point(&capability, window, point).await
+    click_resolved_window_point(&capability, window, point, auv_driver::ClickOptions::default()).await
   }
   #[cfg(not(target_os = "macos"))]
   {
@@ -510,17 +537,56 @@ async fn click_resolved_window_point<C>(
   capability: &C,
   window: auv_driver::Window,
   point: auv_driver::geometry::WindowPoint,
+  options: auv_driver::ClickOptions,
 ) -> Result<WindowPointClick, String>
 where
   C: WindowPointCapability + Sync + ?Sized,
 {
-  let action = capability.click(&window, point).map_err(|error| error.to_string())?;
+  let action = capability.click(&window, point, options).map_err(|error| error.to_string())?;
   emit_input_action_result(&action);
   Ok(WindowPointClick {
     window,
     point,
     action,
   })
+}
+
+pub(crate) fn window_click_options(input: &InvokeCommandInput) -> Result<auv_driver::ClickOptions, String> {
+  let mut options = auv_driver::ClickOptions::default();
+  if let Some(policy) = input.inputs.get("input-policy") {
+    options.policy = match policy.as_str() {
+      "background-only" | "background_only" => auv_driver::InputPolicy::BackgroundOnly,
+      "background-preferred" | "background_preferred" => auv_driver::InputPolicy::BackgroundPreferred,
+      "foreground-preferred" | "foreground_preferred" => auv_driver::InputPolicy::ForegroundPreferred,
+      _ => {
+        return Err(format!(
+          "{} received invalid --input-policy {policy:?}; expected background-only, background-preferred, or foreground-preferred",
+          input.command_id
+        ));
+      }
+    };
+  }
+
+  let count = input.inputs.get("click-count").map_or(Ok(1_u8), |value| {
+    value.parse::<u8>().map_err(|error| format!("{} received invalid --click-count {value:?}: {error}", input.command_id))
+  })?;
+  if count == 0 {
+    return Err(format!("{} requires --click-count to be between 1 and 255", input.command_id));
+  }
+  let interval_ms = input.inputs.get("click-interval-ms").map_or(Ok(75_u64), |value| {
+    value.parse::<u64>().map_err(|error| format!("{} received invalid --click-interval-ms {value:?}: {error}", input.command_id))
+  })?;
+  options.click = match count {
+    1 => auv_driver::Click::Single,
+    2 => auv_driver::Click::Double {
+      interval: std::time::Duration::from_millis(interval_ms),
+    },
+    count => auv_driver::Click::Repeated {
+      count,
+      interval: std::time::Duration::from_millis(interval_ms),
+    },
+  };
+  Ok(options)
 }
 
 #[invoke_command(
@@ -602,9 +668,29 @@ fn input_action_output(result: &auv_driver::InputActionResult) -> InvokeCommandR
   Ok(InvokeCommandOutput::from_result(result)?.with_report(InvokeReport::new(input_action_report_fields(result), Vec::new())))
 }
 
-fn input_action_report_fields(result: &auv_driver::InputActionResult) -> Vec<InvokeReportField> {
+fn focus_text_output(result: &auv_driver::AxFocusResult, candidate: &str) -> InvokeCommandResult {
   let mut fields = vec![
-    InvokeReportField::new("Result", "delivered"),
+    InvokeReportField::new("Delivery", "delivered"),
+    InvokeReportField::new("Target", result.app.clone()),
+  ];
+  if candidate.trim().is_empty() {
+    fields.push(InvokeReportField::new("Query", result.query.clone()));
+  } else {
+    fields.push(InvokeReportField::new("Candidate", candidate));
+  }
+  fields.extend([
+    InvokeReportField::new("Resolved AX path", result.path.clone()),
+    InvokeReportField::new("Role", result.role.clone()),
+    InvokeReportField::new("Focus method", result.input_action_result.selected_path.as_str()),
+    InvokeReportField::new("Verification", "delivery_only; focused element was not read back after AX delivery"),
+  ]);
+  Ok(InvokeCommandOutput::from_result(result)?.with_report(InvokeReport::new(fields, Vec::new())))
+}
+
+pub(super) fn input_action_report_fields(result: &auv_driver::InputActionResult) -> Vec<InvokeReportField> {
+  let mut fields = vec![
+    InvokeReportField::new("Delivery", "delivered"),
+    InvokeReportField::new("Verification", "delivery_only"),
     InvokeReportField::new("Path", result.selected_path.as_str()),
     InvokeReportField::new("Attempts", result.attempts.len().to_string()),
     InvokeReportField::new("Mouse disturbance", result.mouse_disturbance.as_str()),
@@ -615,6 +701,16 @@ fn input_action_report_fields(result: &auv_driver::InputActionResult) -> Vec<Inv
     fields.push(InvokeReportField::new("Fallback reason", reason));
   }
   fields
+}
+
+pub(super) fn validation_only_output() -> InvokeCommandOutput {
+  InvokeCommandOutput::completed().with_report(InvokeReport::new(
+    vec![
+      InvokeReportField::new("Delivery", "not_performed"),
+      InvokeReportField::new("Verification", "validation_only"),
+    ],
+    Vec::new(),
+  ))
 }
 
 pub(super) fn emit_input_action_result(result: &auv_driver::InputActionResult) {
