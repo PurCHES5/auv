@@ -14,8 +14,8 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tokio_util::sync::CancellationToken;
 use tonic::{Request, Response, Status};
 
-use crate::api::session_service::SessionApiError;
-use crate::api::session_service::handler::SessionApiHandler;
+use crate::session_service::SessionApiError;
+use crate::session_service::handler::SessionApiHandler;
 
 pub const DEFAULT_SESSION_API_HOST: &str = "127.0.0.1";
 pub const DEFAULT_SESSION_API_PORT: u16 = 9847;
@@ -135,6 +135,9 @@ impl SessionServiceGrpc {
 
 #[tonic::async_trait]
 impl SessionService for SessionServiceGrpc {
+  /// Triggering workflow:
+  /// tonic `SessionService/CreateSession` -> `SessionServiceGrpc::create_session`
+  /// -> `SessionApiHandler::create_session` -> `SessionRegistry::create`.
   async fn create_session(&self, request: Request<proto::CreateSessionRequest>) -> Result<Response<proto::CreateSessionResponse>, Status> {
     let cancel = CancellationToken::new();
     let _guard = RpcCancelGuard(cancel.clone());
@@ -143,6 +146,9 @@ impl SessionService for SessionServiceGrpc {
     run_blocking_rpc(cancel, move || handler.create_session(inner)).await.map(Response::new)
   }
 
+  /// Triggering workflow:
+  /// tonic `SessionService/Invoke` -> `SessionServiceGrpc::invoke`
+  /// -> `SessionApiHandler::invoke` -> `InvokeCommand::invoke`.
   async fn invoke(&self, request: Request<proto::InvokeRequest>) -> Result<Response<proto::InvokeResponse>, Status> {
     self.handler.invoke(request.into_inner()).await.map(Response::new).map_err(map_session_error)
   }
@@ -190,7 +196,7 @@ mod tests {
   use auv_api_proto::v1::session::session_service_client::SessionServiceClient;
   use tonic::Code;
 
-  use crate::api::session_service::test_fixtures::session_api_temp_store_root;
+  use crate::session_service::test_fixtures::session_api_temp_store_root;
 
   use super::*;
 

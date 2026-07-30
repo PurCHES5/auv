@@ -18,6 +18,19 @@ fn fallback_reason_is_derived_from_attempts_and_not_duplicated_on_the_wire() {
 }
 
 #[test]
+fn input_action_result_rejects_success_on_a_path_other_than_the_selected_path() {
+  let result = InputActionResult {
+    selected_path: InputDeliveryPath::WindowTargetedMouse,
+    attempts: vec![InputAttempt::success(InputDeliveryPath::AxPress)],
+    mouse_disturbance: DisturbanceLevel::None,
+    focus_disturbance: DisturbanceLevel::None,
+    clipboard_disturbance: DisturbanceLevel::None,
+  };
+
+  assert_eq!(result.validate(), Err("successful input attempt must match selected_path".to_string()));
+}
+
+#[test]
 fn click_and_click_options_serde_roundtrip() {
   let clicks = [
     Click::Single,

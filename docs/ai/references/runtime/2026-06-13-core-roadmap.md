@@ -2,6 +2,11 @@
 
 Date: 2026-06-13
 
+Current status (2026-07-31): superseded as a package roadmap. AUV retains the
+runtime responsibility but no longer has an `auv-runtime` package. Use
+[`2026-07-31-auv-runtime-package-retirement-handoff.md`](2026-07-31-auv-runtime-package-retirement-handoff.md)
+for current ownership.
+
 Status: proposed forward plan for the AUV core lane. The C-series slices draw on
 existing approved design notes and carry that approval. The G-series graduation
 slices are scheduled and scoped here but each still requires its own named design

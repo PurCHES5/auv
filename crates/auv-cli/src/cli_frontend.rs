@@ -55,12 +55,12 @@ pub(crate) async fn dispatch(command: CliCommand) -> Result<i32, String> {
   } = &command
   {
     let store_root = resolve_store_root(&project_root, store_root.as_ref());
-    let config = auv_runtime::api::session_service::transport::SessionApiServeConfig {
+    let config = crate::session_service::transport::SessionApiServeConfig {
       host: host.clone(),
       port: *port,
       store_root,
     };
-    auv_runtime::api::session_service::transport::serve(config).await?;
+    crate::session_service::transport::serve(config).await?;
     return Ok(0);
   }
 
@@ -238,8 +238,8 @@ fn permission_status_line(status: &str) -> String {
   }
 }
 
-fn resolve_store_root(project_root: &Path, explicit: Option<&PathBuf>) -> PathBuf {
-  explicit.cloned().unwrap_or_else(|| auv_runtime::default_project_store_root(project_root.to_path_buf()))
+pub(crate) fn resolve_store_root(project_root: &Path, explicit: Option<&PathBuf>) -> PathBuf {
+  explicit.cloned().unwrap_or_else(|| project_root.join(".auv").join("store"))
 }
 
 #[derive(Clone)]

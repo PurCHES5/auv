@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use crate::model::now_millis;
+use super::now_millis;
 
 /// Opaque handle allocated by the session service.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

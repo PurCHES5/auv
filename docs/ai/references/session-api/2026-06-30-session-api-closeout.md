@@ -6,6 +6,11 @@ Durable reference folded from intermediate handoffs along the same responsibilit
 
 Merged closeout / landed reference. Prefer this document over the absorbed intermediate notes.
 
+Current ownership update (2026-07-31): the built-in session and MCP frontends
+now live in `crates/auv-cli`; there is no `auv-runtime` package. The transport
+behavior recorded here remains covered. See the
+[`auv-runtime` package retirement handoff](../runtime/2026-07-31-auv-runtime-package-retirement-handoff.md).
+
 ## Absorbed sources
 
 - **2026-06-30 AUV API-P1: Session proto boundary review and minimal surface design** — formerly `2026-06-30-auv-api-p1-session-proto-boundary-review.md`

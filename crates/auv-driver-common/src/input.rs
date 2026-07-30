@@ -423,6 +423,14 @@ impl InputActionResult {
   pub fn fallback_reason(&self) -> Option<&str> {
     self.attempts.iter().find(|attempt| !attempt.succeeded).and_then(|attempt| attempt.message.as_deref())
   }
+
+  /// Validates invariants shared by direct results and persisted evidence.
+  pub fn validate(&self) -> Result<(), String> {
+    if self.attempts.iter().any(|attempt| attempt.succeeded && attempt.path != self.selected_path) {
+      return Err("successful input attempt must match selected_path".to_string());
+    }
+    Ok(())
+  }
 }
 
 #[cfg(test)]

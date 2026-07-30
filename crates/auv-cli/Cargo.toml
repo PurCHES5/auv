@@ -19,7 +19,6 @@ name = "auv"
 path = "src/main.rs"
 
 [dependencies]
-auv-runtime = { path = "../.." }
 clap = { version = "4.5", features = ["derive"] }
 auv-driver = { path = "../auv-driver" }
 auv-driver-macos = { path = "../auv-driver-macos" }
@@ -28,8 +27,12 @@ auv-api-proto = { path = "../auv-api-proto" }
 auv-tracing = { path = "../auv-tracing", features = ["file-store"] }
 serde.workspace = true
 serde_json.workspace = true
+schemars = "1.2.1"
 tokio = { version = "1", features = ["fs", "macros", "net", "rt-multi-thread", "sync"] }
+tokio-stream = "0.1"
+tokio-util = { version = "0.7", features = ["rt"] }
 tonic = { version = "0.14", features = ["transport"] }
+rmcp = { version = "0.6", features = ["server", "client", "transport-io"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-core-graphics.workspace = true
@@ -40,7 +43,6 @@ swift-bridge-build.workspace = true
 auv-api-proto = { path = "../auv-api-proto" }
 auv-tracing = { path = "../auv-tracing", features = ["file-store", "memory-store"] }
 axum = { version = "0.8", default-features = false }
-rmcp = { version = "0.6", features = ["server", "client", "transport-io"] }
 tempfile.workspace = true
 tokio = { version = "1", features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "time"] }
 tonic = { version = "0.14", features = ["transport"] }

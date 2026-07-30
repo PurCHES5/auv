@@ -21,6 +21,7 @@ pub use command::{
   CommandGroup, CommandNode, InvokeCancellation, InvokeCancelled, InvokeCommand, InvokeCommandCliParse, InvokeCommandFuture,
   InvokeCommandHandler, InvokeCommandInput, InvokeCommandOutput, InvokeCommandResult, InvokeNamespace, TypedInvokeArgs,
 };
+pub use commands::input::emit_input_action_result;
 pub use help::{render_command_help, render_help_index};
 pub use models::{
   ExecutionTarget, InvokeOutputOptions, InvokeReport, InvokeReportField, InvokeReportSection, InvokeReportTable, InvokeReportTableRow,

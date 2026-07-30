@@ -3,8 +3,7 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-use auv_cli_invoke::InvokeCliParse;
-use auv_runtime::model::{AuvResult, ExecutionTarget, InvokeRequest};
+use auv_cli_invoke::{ExecutionTarget, InvokeCliParse, InvokeRequest};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, error::ErrorKind};
 
 use crate::commands::doctor::DoctorArgs;
@@ -13,6 +12,8 @@ use crate::commands::mcp::{McpArgs, McpCommand};
 use crate::commands::permissions::{PermissionsArgs, PermissionsCommand};
 use crate::commands::plugin::{PluginArgs, PluginCommand};
 use crate::commands::session::{SessionArgs, SessionCommand};
+
+type AuvResult<T> = Result<T, String>;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TracingOptions {

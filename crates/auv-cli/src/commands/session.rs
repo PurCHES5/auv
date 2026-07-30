@@ -21,11 +21,11 @@ pub enum SessionCommand {
 #[derive(Clone, Debug, Args)]
 pub struct SessionServeArgs {
   /// Host interface on which the session API listens.
-  #[arg(long, default_value = auv_runtime::api::session_service::transport::DEFAULT_SESSION_API_HOST)]
+  #[arg(long, default_value = crate::session_service::transport::DEFAULT_SESSION_API_HOST)]
   pub host: String,
 
   /// TCP port on which the session API listens.
-  #[arg(long, default_value_t = auv_runtime::api::session_service::transport::DEFAULT_SESSION_API_PORT)]
+  #[arg(long, default_value_t = crate::session_service::transport::DEFAULT_SESSION_API_PORT)]
   pub port: u16,
 
   /// Root directory used for recorded run data.

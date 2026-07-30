@@ -2,7 +2,12 @@
 
 Execution, contract, action seam, admission, query readiness, core roadmaps
 
-Count: **31**
+Current package decision: [`2026-07-31-auv-runtime-package-retirement-handoff.md`](2026-07-31-auv-runtime-package-retirement-handoff.md).
+The dated notes below remain historical design and evidence records. Any path
+or ownership statement that assigns current code to the root `src/` tree or an
+`auv-runtime` package is superseded by the retirement handoff.
+
+Count: **32**
 
 - [`2026-05-27-action-resolver-v0.md`](2026-05-27-action-resolver-v0.md)
 - [`2026-06-13-core-graduation-local-handoff.md`](2026-06-13-core-graduation-local-handoff.md)
@@ -35,6 +40,7 @@ Count: **31**
 - [`2026-07-07-archived-candidate-action-removal-spec.md`](2026-07-07-archived-candidate-action-removal-spec.md)
 - [`2026-07-19-core-contract-ownership-review.md`](2026-07-19-core-contract-ownership-review.md)
 - [`2026-07-19-core-dependency-and-crate-tier-inventory.md`](2026-07-19-core-dependency-and-crate-tier-inventory.md)
+- [`2026-07-31-auv-runtime-package-retirement-handoff.md`](2026-07-31-auv-runtime-package-retirement-handoff.md)
 
 ## Related
 

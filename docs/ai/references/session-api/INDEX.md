@@ -2,6 +2,9 @@
 
 Session API, proto, MCP frontend, operator guides
 
+Current ownership: MCP and the session server are built into `auv-cli`; see the
+[`auv-runtime` package retirement handoff](../runtime/2026-07-31-auv-runtime-package-retirement-handoff.md).
+
 Count: **9**
 
 - [`2026-06-10-stateful-session-daemon-js-repl-v0.md`](2026-06-10-stateful-session-daemon-js-repl-v0.md)

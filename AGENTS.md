@@ -9,11 +9,11 @@ view.
 - AUV turns application UI workflows into command-like, inspectable,
   replayable, and eventually shortcut-like operations.
 - AUV is not only a CLI wrapper and not a generic LLM agent.
-- Design around reusable runtime APIs, first-party drivers, implicit run
+- Design around reusable typed operation APIs, first-party drivers, implicit run
   recording, artifact capture, replay, and inspection.
 - Keep CLI, MCP, library calls, and future UI surfaces on the same execution
   model.
-- Prefer explicit boundaries between runtime, drivers, Rust command
+- Prefer explicit boundaries between operation execution, drivers, Rust command
   frontends, run storage, and reference documentation.
 - Use `docs/TERMS_AND_CONCEPTS.md` as the shared vocabulary for run recording,
   inspection, trace data, artifacts, and viewer-facing APIs.
@@ -31,9 +31,14 @@ AUV is currently pulling its active roadmap back to the Application Use Via
 core: invoke, run recording, artifacts, inspection, app-local Rust commands,
 and distill/compile/run reuse across frontends. The former SkillBundle surface
 has been retired; do not reintroduce bundle execution, export, or verification
-as compatibility. The important work is to make the remaining runtime surfaces
+as compatibility. The important work is to make the remaining execution surfaces
 agree on one shared execution model. Prefer changes that tighten or reconnect
-the existing core runtime over polishing one archived vertical proof.
+the existing core responsibilities over polishing one archived vertical proof.
+
+There is no `auv-runtime` package or root Cargo package. Runtime is an
+architectural responsibility distributed across typed operation modules,
+frontend roots, drivers, and `auv-tracing`; do not recreate a catch-all runtime
+crate without an owner-approved producer/consumer need.
 
 The macOS AX copilot work remains valuable, but it is no longer the active
 product lane. Treat `candidate-action` as a frozen archived vertical proof. Do
@@ -44,12 +49,12 @@ paths.
 Good convergence work usually has one of these shapes:
 
 - Defines or tightens a shared contract in `docs/TERMS_AND_CONCEPTS.md`,
-  `src/contract.rs`, run records, artifacts, or typed command facts.
+  its owning domain crate, run records, artifacts, or typed command facts.
 - Reconnects invoke and typed Rust command surfaces so CLI, library, MCP, and future UI
-  frontends share the same runtime execution path.
+  frontends share the same typed execution path.
 - Connects an existing producer to an existing consumer with typed evidence,
   for example `RecognitionResult -> CandidateRef -> action -> app-owned result`.
-- Aligns typed driver results with runtime evidence, for example
+- Aligns typed driver results with tracing evidence, for example
   `InputActionResult -> app-owned result -> tracing events/artifacts`.
 - Fixes a reproduced bug in a narrow path and adds a regression test.
 - Turns a known boundary into explicit metadata, failure layers, fallback
@@ -138,13 +143,14 @@ the decision survives the next read of the code.
 
 ## Current Contract Seam
 
-The active macOS automation seam is:
+The active input-delivery seam is:
 
 ```text
-recognition / AX / candidates
-  -> ActionResolver
-  -> auv-driver InputActionResult
-  -> app-owned operation result / tracing events / artifacts
+typed command or app-owned operation
+  -> auv-driver capability
+  -> InputActionResult
+  -> direct app-owned result + tracing event/artifact
+  -> separate verification when semantic success is required
 ```
 
 Keep visual presentation separate from input delivery:
@@ -155,15 +161,15 @@ Keep visual presentation separate from input delivery:
 - `auv-driver` / `auv-driver-macos` owns typed input delivery such as
   `WindowTargetedMouse`, `WindowTargetedKeyboard`, foreground fallback,
   disturbance metadata, attempts, and fallback reasons.
-- `ActionResolver` should choose and explain the method, then consume or map
-  typed driver results. Do not grow a parallel action-result schema unless a
-  concrete gap is first documented.
+- Command and app modules should consume or map typed driver results. Do not
+  grow a parallel action-result schema unless a concrete gap is first
+  documented.
 - Verification remains separate from activation. A successful click, AX press,
   or overlay animation is not semantic success without a verification result or
   an explicit `activation_only` boundary.
 
-This seam stays in AUV core because multiple runtime and read-side paths depend
-on it.
+This seam stays in AUV core because multiple command and app paths depend on
+the shared driver result and tracing artifact.
 
 The `RecognitionResult -> Candidate` promotion gate (`candidate_promotion` +
 `stability`) was retired on 2026-07-23 (branch
@@ -176,14 +182,15 @@ production consumer.
 
 ## Architecture Surfaces
 
-- **Runtime**: Owns execution semantics, implicit run recording, artifact
-  persistence, and the common model used by all frontends.
+- **Runtime responsibility**: Typed operation modules own execution semantics;
+  frontend roots own run-context lifecycle; `auv-tracing` owns recording and
+  artifact persistence. This is not represented by an aggregate runtime crate.
 - **Drivers**: Expose platform or application capabilities through narrow,
   capability-oriented APIs.
 - **Rust operation crates**: Describe reusable app/domain workflows through
   typed Rust APIs and app-local commands.
 - **Command frontends**: Parse and present user-facing commands; they should
-  call shared runtime APIs rather than owning core behavior.
+  call typed command or operation interfaces rather than duplicate behavior.
 - **Run storage**: Owns durable records, artifacts, trace data, and replayable
   inputs.
 - **Inspection/viewer APIs**: Read durable run data and artifacts; do not
@@ -193,10 +200,13 @@ production consumer.
 
 ## Key Path Index
 
-- `src/runtime.rs`: implicit run execution and artifact persistence.
-- `src/catalog.rs`: command catalog and default command definitions.
-- `src/driver/macos/`: macOS driver implementation, dispatch, support, and
-  tests.
+- `crates/auv-cli-invoke/`: typed invoke commands, registry, direct results,
+  and command-local argument parsing.
+- `crates/auv-cli/src/`: root CLI, built-in MCP frontend, session frontend, and
+  frontend-owned tracing contexts.
+- `crates/auv-tracing/`: run contexts, trace dispatch, artifact persistence,
+  and write-side stores.
+- `crates/auv-driver*/`: shared and platform-specific driver capabilities.
 - `docs/README.md`: documentation layout, placement rules, and quick entry
   points.
 - `docs/TERMS_AND_CONCEPTS.md`: shared vocabulary for core AUV concepts.
@@ -229,12 +239,12 @@ production consumer.
 ## Development Practices
 
 - Do not treat CLI as the only architecture surface.
-- Design changes should account for library/runtime calls, CLI frontends, run
+- Design changes should account for library calls, CLI frontends, run
   recording, replay, and inspection.
-- Favor clear module boundaries; shared behavior belongs behind runtime,
+- Favor clear module boundaries; shared behavior belongs behind operation,
   driver, storage, Rust operation, or inspection boundaries rather than local one-off
   helpers.
-- Keep runtime entrypoints lean; move reusable policy, validation, recording,
+- Keep frontend entrypoints lean; move reusable policy, validation, recording,
   replay, and persistence behavior into the modules that own those decisions.
 - Before planning or writing new utilities, commands, driver helpers, operation
   helpers, or artifact builders, search for existing internal implementations
@@ -316,7 +326,7 @@ production consumer.
 ## Testing Practices
 
 - Focused unit tests live next to the code they cover with `#[cfg(test)]`.
-- The current repo already has Rust unit coverage for catalog, runtime,
+- The current repo already has Rust unit coverage for invoke, tracing,
   driver, and CLI behavior.
 - Add regression tests for behavior changes and keep them narrow.
 - Use `cargo test` for the full suite and include regression tests for bug
@@ -387,7 +397,7 @@ Use this root-cause block format in regression tests when relevant:
   layer with a similar signature.
 - Adjacent layers should expose different abstractions:
   - CLI frontends parse and present.
-  - Runtime APIs execute and record.
+  - Typed command and operation interfaces execute.
   - Drivers expose capabilities.
   - Storage owns persistence semantics.
   - Inspectors read durable run data.
@@ -398,7 +408,7 @@ Use this root-cause block format in regression tests when relevant:
   lifecycle logic, or names a stable domain concept.
 - Keep reusable domain contracts and rendering/building logic in the crate or
   module that owns that domain.
-- Runtime entrypoints should wire dependencies and call those boundaries instead
+- Frontend entrypoints should wire dependencies and call those boundaries instead
   of inlining large reusable contracts.
 - Prefer early returns and simple control flow when it improves readability.
 - Do not introduce pass-through helpers or shallow modules solely to reduce

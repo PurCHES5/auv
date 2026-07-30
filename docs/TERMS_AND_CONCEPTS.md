@@ -81,17 +81,34 @@ outside `auv-tracing`. The current `auv-inspect-model` and `auv-inspect-server`
 crates do not define this boundary, and this document does not stabilize an
 inspector API yet.
 
-## Product CLI package / auv-cli (provisional)
+## Core CLI frontend / auv-cli
 
-Provisional packaging term for the core command frontend package (`auv-cli`,
-located at `crates/auv-cli`):
+The core command frontend package (`auv-cli`, located at `crates/auv-cli`):
 
-- Owns the root `auv` binary, core CLI frontend, core invoke registry assembly,
-  MCP bootstrap, session serving, and development xtasks.
-- Depends on library-only `auv-runtime` and core CLI/runtime crates, not on
-  supported app or game crates.
+- Owns the root `auv` binary, core CLI frontend, core invoke entrypoint,
+  built-in MCP server, session serving, and development xtasks.
+- Depends directly on the command, driver, protocol, and tracing crates needed
+  by those frontends. There is no `auv-runtime` package or root Cargo package.
 - Supported app/game packages own their command frontends and integration
-  wiring; they must not depend on `auv-cli` to reach runtime types.
+  wiring; they must not depend on `auv-cli` to reach command or tracing types.
+
+## Runtime responsibility
+
+Runtime is an architectural responsibility, not a crate name. Typed app or
+command modules execute operations and return direct results. Frontend roots
+create tracing contexts and flush recording. `auv-tracing` persists emitted
+events and artifacts without executing operations. AUV does not have or require
+an `auv-runtime` package that aggregates these responsibilities.
+
+## CLI plugin
+
+A CLI plugin is an independently installed executable named `auv-<name>` that
+extends the root command at one top-level name. For example,
+`auv balatro cards play` delegates to `auv-balatro cards play`. The root CLI
+resolves plugins through `PATH`, gives built-ins precedence, forwards remaining
+operating-system arguments unchanged, and exposes its executable through
+`AUV_PATH`. Plugins own their nested command trees and help; they are not loaded
+into the core invoke or MCP registry.
 
 ## Device
 
@@ -646,25 +663,31 @@ bundle, recipe, skill, `debug.*`, `verify.*`, and app-specific `music.*`
 command ids should not be retained as executable compatibility aliases.
 
 The crate for this boundary is `auv-cli-invoke`. It owns invoke command
-registration, argument metadata, and help rendering. Commands are organized as
+registration, typed clap arguments, and help rendering. Commands are organized as
 a domain-owned command tree: each domain exposes its own group or subtree, while
 the registry composes groups and flattens them for lookup. Command declarations
 are handler-first: the annotated handler function generates the invoke command
-export, so command id, argument metadata, driver mapping, and handler identity
-stay together. Atomic driver capabilities remain typed APIs in their owning
+export, so command id, typed arguments, inline examples, and handler identity
+stay together. Natural primary operands are positional. CLI argv is parsed by
+the command-local clap type, while MCP decodes protocol fields directly into
+the same input type without reconstructing argv. Atomic driver capabilities remain typed APIs in their owning
 driver crates; V1 does not reserve an unused cross-driver operation metadata
 schema. The CLI boundary is not the core runtime and should not own run
 recording semantics, recipe execution, or bundle discovery.
 
 An invoke handler returns its direct value or error independently from run
-recording. The CLI-only `InvokeCommandOutput` may carry a frontend report for
-human or `--json` presentation; it does not carry a generic summary, backend,
-notes, known-limits, verification, signal, or artifact bag. Command failure is
-the `Err` branch rather than a successful output with an optional failure field.
-Artifact discovery and reading are deferred to a separate inspector boundary;
-CLI and MCP invoke responses do not reconstruct their direct result from trace
-records. MCP maps the same typed domain function through its own adapter and
-does not reuse the CLI output type.
+recording. `InvokeCommandOutput` is the registered command's cross-frontend
+direct-result envelope: it may carry the typed result projection and owned
+artifact receipts, plus an optional CLI report. CLI rendering consumes that
+report; MCP consumes only the direct result and does not reconstruct it from
+trace records. The envelope does not carry a generic summary, backend, notes,
+known-limits, verification, or signal bag. Command failure is the `Err` branch
+rather than a successful output with an optional failure field. The MCP adapter
+decodes protocol fields into the same command-local input type and invokes the
+same registered handler without simulating argv. It disables incidental live
+overlay presentation; explicit `overlay.*` commands remain visual operations by
+definition. Artifact discovery and reading remain a separate inspector
+boundary.
 
 ## Historical Terms
 

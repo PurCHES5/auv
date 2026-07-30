@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use auv_api_proto::v1::session as proto;
 use auv_cli_invoke::{ExecutionTarget, InvokeRequest as HostInvokeRequest, InvokeResult};
 
-use crate::api::session_service::SessionApiError;
+use crate::session_service::SessionApiError;
 
 #[derive(serde::Deserialize, Default)]
 #[serde(deny_unknown_fields)]
@@ -59,7 +59,7 @@ pub fn invoke_result_to_response(result: &InvokeResult, recording_failure: Optio
 
 #[cfg(test)]
 mod tests {
-  use crate::api::session_service::SessionApiError;
+  use crate::session_service::SessionApiError;
   use auv_api_proto::v1::session as proto;
   use auv_cli_invoke::{InvokeCommandOutput, InvokeResult, default_registry};
   use auv_tracing::RunId;

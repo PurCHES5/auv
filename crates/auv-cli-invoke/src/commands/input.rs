@@ -647,7 +647,8 @@ pub(super) fn validation_only_output() -> InvokeCommandOutput {
   ))
 }
 
-pub(super) fn emit_input_action_result(result: &auv_driver::InputActionResult) {
+/// Emits validated input-delivery evidence into the active tracing context.
+pub fn emit_input_action_result(result: &auv_driver::InputActionResult) {
   if !auv_tracing::Context::current().can_publish_artifacts() {
     return;
   }
@@ -655,9 +656,7 @@ pub(super) fn emit_input_action_result(result: &auv_driver::InputActionResult) {
 }
 
 fn input_action_result_artifact(result: &auv_driver::InputActionResult) -> Result<NewArtifact<AsyncCursor<Vec<u8>>>, String> {
-  if result.attempts.iter().any(|attempt| attempt.succeeded && attempt.path != result.selected_path) {
-    return Err(format!("{INPUT_ACTION_RESULT_PURPOSE} failed domain validation: successful input attempt must match selected_path"));
-  }
+  result.validate().map_err(|error| format!("{INPUT_ACTION_RESULT_PURPOSE} failed domain validation: {error}"))?;
   NewArtifact::from_json(
     INPUT_ACTION_RESULT_PURPOSE,
     Attributes::empty(),

@@ -9,8 +9,9 @@ use crate::{
   BlockPosition, MINECRAFT_STRUCTURED_ARTIFACT_JSON_BYTE_LIMIT, MinecraftBlockTarget, MinecraftProjectionArtifact, MinecraftSpatialFrame,
   MinecraftTargetSemantics, MismatchRefusalReason, TailFrameWaitConfig, bind_capture_to_frame, mc6_projection_target_for_frame,
 };
-use auv_runtime::model::AuvResult;
 use auv_tracing::{ArtifactMetadata, Attributes, ByteLength, Context, EmitBytesOptions, EventPayload};
+
+type AuvResult<T> = Result<T, String>;
 use image::{DynamicImage, ExtendedColorType, ImageEncoder, ImageFormat, ImageReader, Limits, RgbImage, codecs::png::PngEncoder};
 
 use super::query_live_action::DirectWindowPointClickExecutor;
@@ -186,8 +187,14 @@ pub async fn run_minecraft_live_click(inputs: MinecraftLiveClickInputs) -> AuvRe
   let input_action = executor.click(window_point)?;
   let context = Context::current();
   super::keep_artifact_receipt(
-    auv_runtime::run_read::INPUT_ACTION_RESULT_PURPOSE,
-    auv_runtime::run_read::publish_input_action_result(Some(&context), &input_action).await,
+    auv_driver::INPUT_ACTION_RESULT_PURPOSE,
+    crate::run_read::publish_json_artifact(
+      Some(&context),
+      auv_driver::INPUT_ACTION_RESULT_PURPOSE,
+      &input_action,
+      auv_driver::InputActionResult::validate,
+    )
+    .await,
   );
 
   let post_sample_path = inputs.post_telemetry_sample.as_deref().unwrap_or(&inputs.telemetry_sample);

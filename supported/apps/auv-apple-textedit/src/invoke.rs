@@ -1,13 +1,13 @@
 //! TextEdit product invoke backed by the app-owned typed command report.
 
 use crate::{DocumentCommandReport, DocumentWrite, TextEditAction, TextEditDriver, VerificationOutcome};
-use auv_cli_invoke::arg::TEXTEDIT_DOCUMENT_WRITE_ARGS;
 use auv_cli_invoke::{
   CommandGroup, InvokeCommandInput, InvokeCommandOutput, InvokeCommandResult, InvokeReport, InvokeReportField, InvokeReportSection,
   invoke_command,
 };
 use auv_driver::DriverError;
 use auv_tracing::{Context, EventPayload};
+use clap::{ArgAction, Args};
 
 pub const DOCUMENT_WRITE_COMMAND_ID: &str = "app.textedit.document.write";
 
@@ -15,15 +15,33 @@ pub fn group() -> CommandGroup {
   CommandGroup::new("textedit", "TEXTEDIT").command(document_write_invoke_command())
 }
 
+#[derive(Clone, Debug, Args, serde::Serialize, serde::Deserialize)]
+struct DocumentWriteInvokeArgs {
+  /// Document body text to write.
+  #[arg(long, value_name = "TEXT")]
+  content: String,
+  /// Replace the existing document body before paste.
+  #[arg(long, default_value_t = true, action = ArgAction::Set)]
+  replace: bool,
+  /// Run AX text verification after paste.
+  #[arg(long, default_value_t = true, action = ArgAction::Set)]
+  verify: bool,
+}
+
 #[invoke_command(
   id = "app.textedit.document.write",
   group = "app",
   description = "Write TextEdit document body through typed AX focus, clipboard paste, and optional AX verification.",
-  args = TEXTEDIT_DOCUMENT_WRITE_ARGS,
+  input = DocumentWriteInvokeArgs,
 )]
-async fn document_write(input: InvokeCommandInput) -> InvokeCommandResult {
+async fn document_write(input: InvokeCommandInput, args: DocumentWriteInvokeArgs) -> InvokeCommandResult {
   reject_production_fixture_inputs(&input.inputs)?;
-  let command = parse_document_write(&input)?;
+  let mut command = DocumentWrite::defaults_with_content(args.content);
+  command.replace = args.replace;
+  command.verify = args.verify;
+  if let Some(target) = input.target_application_id.as_ref() {
+    command.app_id = target.clone();
+  }
   if input.dry_run {
     return Ok(InvokeCommandOutput::completed());
   }
@@ -92,7 +110,7 @@ where
   let context = Context::current();
   for action in &report.actions {
     if let Some(result) = &action.input_action_result {
-      context.in_scope(|| auv_runtime::run_read::emit_input_action_result(result));
+      context.in_scope(|| auv_cli_invoke::emit_input_action_result(result));
     }
   }
   if report.verification.is_some()
@@ -206,33 +224,6 @@ fn document_write_report(report: &DocumentCommandReport, command: &DocumentWrite
     ],
     sections,
   )
-}
-
-fn parse_document_write(input: &InvokeCommandInput) -> Result<DocumentWrite, String> {
-  let content = input
-    .inputs
-    .get("content")
-    .map(String::as_str)
-    .ok_or_else(|| "app.textedit.document.write missing required flag --content".to_string())?;
-  let mut command = DocumentWrite::defaults_with_content(content);
-  if let Some(target) = &input.target_application_id {
-    command.app_id = target.clone();
-  }
-  if let Some(replace) = input.inputs.get("replace") {
-    command.replace = parse_bool(replace, "replace")?;
-  }
-  if let Some(verify) = input.inputs.get("verify") {
-    command.verify = parse_bool(verify, "verify")?;
-  }
-  Ok(command)
-}
-
-fn parse_bool(value: &str, name: &str) -> Result<bool, String> {
-  match value.trim().to_ascii_lowercase().as_str() {
-    "true" | "1" | "yes" => Ok(true),
-    "false" | "0" | "no" => Ok(false),
-    other => Err(format!("invalid --{name} value {other}; expected true or false")),
-  }
 }
 
 fn action_name(action: TextEditAction) -> &'static str {

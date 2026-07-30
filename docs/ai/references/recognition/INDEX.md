@@ -2,6 +2,11 @@
 
 RecognitionResult, detectors, evidence boundaries
 
+The root `RecognitionResult` / `CandidateRef` contract module was retired on
+2026-07-31 after its production consumers had disappeared. The older v0 notes
+below are historical inputs, not approval to recreate a shared root contract;
+new recognition types must be owned by a concrete producer and consumer.
+
 Count: **7**
 
 - [`2026-05-24-maa-recognition-pipeline-research.md`](2026-05-24-maa-recognition-pipeline-research.md)

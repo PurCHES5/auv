@@ -14,13 +14,12 @@ repository.workspace = true
 
 [features]
 default = []
-tracing = ["dep:auv-runtime", "dep:auv-tracing"]
+tracing = ["dep:auv-tracing"]
 
 [dependencies]
 auv-file = { path = "../../../crates/auv-file" }
 auv-query-readiness = { path = "../../../crates/auv-query-readiness" }
 auv-driver = { path = "../../../crates/auv-driver" }
-auv-runtime = { path = "../../..", optional = true }
 auv-task-object-detection = { path = "../../../crates/auv-task-object-detection" }
 auv-tracing = { path = "../../../crates/auv-tracing", optional = true }
 image.workspace = true

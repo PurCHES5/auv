@@ -10,6 +10,11 @@ Update (2026-07-28): this document remains the 2026-07-19 inventory snapshot.
 types locally while preserving the existing JSON labels. The historical counts
 and original verdict below are retained as snapshot evidence.
 
+Update (2026-07-31): the root `auv-runtime` package and `src/` tree were
+retired. This file remains a historical dependency snapshot and must not be
+used as the current workspace map. See
+[`2026-07-31-auv-runtime-package-retirement-handoff.md`](2026-07-31-auv-runtime-package-retirement-handoff.md).
+
 ## Purpose
 
 Produce an accurate core dependency map and a maintenance-tier for every

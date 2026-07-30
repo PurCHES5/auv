@@ -5,6 +5,11 @@ Responsibility: runtime (core result contracts)
 Type: review
 Milestone: Workstream 3 / PR 7
 
+Current status (2026-07-31): historical review. The root contracts described
+below were retired after their production consumers disappeared. Current
+ownership is recorded in
+[`2026-07-31-auv-runtime-package-retirement-handoff.md`](2026-07-31-auv-runtime-package-retirement-handoff.md).
+
 ## Purpose
 
 Review the six core result contracts for ownership, stable-vs-platform fields,

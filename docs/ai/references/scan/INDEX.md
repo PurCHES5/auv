@@ -2,6 +2,10 @@
 
 Temporal scan / surface observation read-models
 
+The former root `src/scroll_scan` orchestration had no production consumer and
+was retired with the root package. `auv-scan` remains the owner of the temporal
+scan contracts described by current references in this folder.
+
 Count: **12**
 
 - [`2026-07-02-scan-charter.md`](2026-07-02-scan-charter.md)

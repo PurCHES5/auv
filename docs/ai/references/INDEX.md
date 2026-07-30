@@ -62,7 +62,7 @@ Do not put engineering slice codes (`a2`, `p14`, scan-step codes, etc.) in navig
 | You want… | Start here |
 |---|---|
 | Shared vocabulary | [`../../TERMS_AND_CONCEPTS.md`](../../TERMS_AND_CONCEPTS.md) |
-| Core roadmap | [`runtime/2026-06-13-core-roadmap.md`](runtime/2026-06-13-core-roadmap.md) |
+| Current runtime responsibility and package ownership | [`runtime/2026-07-31-auv-runtime-package-retirement-handoff.md`](runtime/2026-07-31-auv-runtime-package-retirement-handoff.md) |
 | Invoke / CLI design | [`invoke-cli/2026-06-11-cli-invoke-driver-console-design.md`](invoke-cli/2026-06-11-cli-invoke-driver-console-design.md) |
 | Current AUV tracing / run storage / Inspect contract | [`inspect/INDEX.md`](inspect/INDEX.md) |
 | Temporal scan | [`scan/INDEX.md`](scan/INDEX.md) |

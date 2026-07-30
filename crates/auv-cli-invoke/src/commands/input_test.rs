@@ -177,7 +177,7 @@ fn click_window_point_live_resolves_once_before_clicking() {
 }
 
 #[tokio::test]
-async fn resolved_window_click_returns_direct_action_and_publishes_through_typed_root_contract() {
+async fn resolved_window_click_returns_direct_action_and_publishes_through_typed_driver_contract() {
   let capability = ControlledWindowCapability::new();
   let store = Arc::new(MemoryTracingStore::new());
   let dispatch = configure().tracing_store(store.clone()).build().expect("memory dispatch");

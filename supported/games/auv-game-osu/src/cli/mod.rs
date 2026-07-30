@@ -12,8 +12,9 @@ use crate::{
   evaluate_detection_fixture, export_dataset, query_visual_truth_spatial, run_benchmark, validate_visual_truth_semantic,
   visual_truth_query_action_wiring_lineage_from_manifest, wire_visual_truth_spatial_query_manifest_to_action,
 };
-use auv_runtime::model::AuvResult;
 use auv_tracing::Context;
+
+type AuvResult<T> = Result<T, String>;
 
 #[cfg(target_os = "macos")]
 use self::query_live_action::DirectWindowPointClickExecutor;
@@ -178,7 +179,13 @@ pub async fn run_osu_query_wired_live_action_with_executor<E: VisualTruthQueryLi
   let output = run_osu_query_wired_live_action_core(&inputs, live_projection, executor).await?;
   if let Some(action) = &output.wiring.input_action {
     let context = Context::current();
-    let _ = auv_runtime::run_read::publish_input_action_result(Some(&context), action).await;
+    let _ = crate::run_read::publish_json_artifact(
+      Some(&context),
+      auv_driver::INPUT_ACTION_RESULT_PURPOSE,
+      action,
+      auv_driver::InputActionResult::validate,
+    )
+    .await;
   }
   Ok(output)
 }

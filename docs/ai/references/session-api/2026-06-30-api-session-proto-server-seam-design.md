@@ -1,5 +1,11 @@
 # 2026-06-30 AUV API-P4: Session proto server seam design
 
+> Historical design: the accepted transport shape remains useful, but the
+> implementation moved from root `src/api/session_service` to
+> `crates/auv-cli/src/session_service` on 2026-07-31. MCP moved alongside it to
+> `crates/auv-cli/src/mcp.rs`. See the
+> [`auv-runtime` package retirement handoff](../runtime/2026-07-31-auv-runtime-package-retirement-handoff.md).
+
 Date: 2026-06-30
 
 Status: **docs-only seam design** — defines the minimum owned boundary for a

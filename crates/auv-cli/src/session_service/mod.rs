@@ -1,4 +1,4 @@
-//! Session API service seam (API-P4 boundary).
+//! Session API frontend owned by the `auv` executable crate.
 //!
 //! Owns the execute-facing `SessionService` surface separately from the
 //! inspect viewer/server API and the tool-facing `mcp`.
@@ -53,3 +53,7 @@ impl fmt::Display for SessionApiError {
 }
 
 impl std::error::Error for SessionApiError {}
+
+fn now_millis() -> u64 {
+  u64::try_from(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis()).unwrap_or(u64::MAX)
+}

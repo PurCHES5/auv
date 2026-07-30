@@ -9,8 +9,9 @@ use crate::{
   TextureSweepReport, TextureSweepSampleBuildInputs, TextureSweepSampleBuildOutput, TextureSweepThresholds,
   build_texture_sweep_samples_from_bundles, evaluate_texture_sweep, export_3dgs_scene_packet, prepare_texture_sweep_resource_packs,
 };
-use auv_runtime::model::AuvResult;
 use auv_tracing::{ArtifactMetadata, Context, EventPayload};
+
+type AuvResult<T> = Result<T, String>;
 
 #[derive(serde::Serialize)]
 struct MinecraftArtifactPublicationFailed {

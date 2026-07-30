@@ -7,9 +7,9 @@ use auv_api_proto::v1::session as proto;
 use auv_cli_invoke::{InvokeCancellation, InvokeCommandInput, InvokeResult, default_registry};
 use auv_tracing::{Context, FileTracingStore, RunId, TracingStore, configure, dispatcher};
 
-use crate::api::session_service::SessionApiError;
-use crate::api::session_service::mapper;
-use crate::api::session_service::registry::SessionRegistry;
+use crate::session_service::SessionApiError;
+use crate::session_service::mapper;
+use crate::session_service::registry::SessionRegistry;
 
 #[derive(serde::Serialize)]
 struct SessionFrontendLifecycle {
@@ -40,6 +40,11 @@ impl SessionApiHandler {
       .map_err(|error| SessionApiError::Storage(error.to_string()))
   }
 
+  /// Allocates the session handle returned by the gRPC frontend.
+  ///
+  /// Triggering workflow:
+  /// `SessionServiceGrpc::create_session` -> `SessionApiHandler::create_session`
+  /// -> `SessionRegistry::create` -> `CreateSessionResponse`.
   pub fn create_session(&self, _request: proto::CreateSessionRequest) -> Result<proto::CreateSessionResponse, SessionApiError> {
     let session_id = self.registry.lock().expect("session registry mutex poisoned").create();
     Ok(proto::CreateSessionResponse {
@@ -52,6 +57,10 @@ impl SessionApiHandler {
   /// Executes one command under a frontend-owned root context. The direct
   /// command result is mapped before recording failures are reported, so
   /// instrumentation can never re-execute application work.
+  ///
+  /// Triggering workflow:
+  /// `SessionServiceGrpc::invoke` -> `SessionApiHandler::invoke`
+  /// -> `InvokeCommand::invoke` -> `auv_tracing::Dispatch::flush`.
   pub async fn invoke(&self, request: proto::InvokeRequest) -> Result<proto::InvokeResponse, SessionApiError> {
     let session = request.session.ok_or(SessionApiError::MissingField("session"))?;
     if !self.registry.lock().expect("session registry mutex poisoned").contains(&session.session_id) {

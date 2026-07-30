@@ -366,7 +366,6 @@ dependencies = [
  "auv-cli-invoke",
  "auv-driver",
  "auv-driver-macos",
- "auv-runtime",
  "auv-tracing",
  "clap",
  "serde",
@@ -380,18 +379,20 @@ dependencies = [
  "auv-cli-invoke",
  "auv-driver",
  "auv-driver-macos",
- "auv-runtime",
  "auv-tracing",
  "axum",
  "clap",
  "objc2-core-foundation",
  "objc2-core-graphics",
  "rmcp",
+ "schemars",
  "serde",
  "serde_json",
  "swift-bridge-build",
  "tempfile",
  "tokio",
+ "tokio-stream",
+ "tokio-util",
  "tonic",
  "tower",
 ]
@@ -574,7 +575,6 @@ dependencies = [
  "auv-driver",
  "auv-file",
  "auv-query-readiness",
- "auv-runtime",
  "auv-tracing",
  "futures-executor",
  "image",
@@ -592,7 +592,6 @@ dependencies = [
  "auv-driver-macos",
  "auv-file",
  "auv-query-readiness",
- "auv-runtime",
  "auv-task-object-detection",
  "auv-tracing",
  "futures-executor",
@@ -703,36 +702,6 @@ dependencies = [
 [[package]]
 name = "auv-query-readiness"
 version = "0.0.1"
-
-[[package]]
-name = "auv-runtime"
-version = "0.0.1"
-dependencies = [
- "anyhow",
- "auv-api-proto",
- "auv-cli-invoke",
- "auv-driver",
- "auv-driver-macos",
- "auv-media-macos",
- "auv-scan",
- "auv-tracing",
- "auv-view",
- "futures-util",
- "image",
- "objc2-core-foundation",
- "objc2-core-graphics",
- "rmcp",
- "schemars",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "swift-bridge-build",
- "thiserror 2.0.18",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "tonic",
-]
 
 [[package]]
 name = "auv-scan"
