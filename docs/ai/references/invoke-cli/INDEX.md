@@ -2,7 +2,7 @@
 
 Invoke routing, CLI handlers, catalog, output contracts
 
-Count: **15**
+Count: **16**
 
 - [`2026-06-10-cli-invoke-catalog-removal.md`](2026-06-10-cli-invoke-catalog-removal.md)
 - [`2026-06-11-cli-invoke-driver-console-design.md`](2026-06-11-cli-invoke-driver-console-design.md)
@@ -19,6 +19,7 @@ Count: **15**
 - [`2026-07-03-cli-output-contract-design.md`](2026-07-03-cli-output-contract-design.md)
 - [`2026-07-03-cli-output-contract-implementation-plan.md`](2026-07-03-cli-output-contract-implementation-plan.md)
 - [`2026-07-06-core-ri3-runtime-invoke-surface-parity-audit-handoff.md`](2026-07-06-core-ri3-runtime-invoke-surface-parity-audit-handoff.md)
+- [`2026-07-29-invoke-stdout-audit-and-repair.md`](2026-07-29-invoke-stdout-audit-and-repair.md)
 
 ## Related
 

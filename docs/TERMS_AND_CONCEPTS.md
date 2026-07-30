@@ -262,6 +262,46 @@ applications. When a native window id is available, it should be treated as the
 authoritative target identity; title matching is only a fallback when no native
 window id was requested.
 
+## Overlay Display
+
+An overlay display is temporary visual feedback drawn over the live
+desktop to make AUV's selected scope, target geometry, and recent operation
+visible to a person. It is a trust and debugging surface, not an input delivery
+backend, an observation artifact, or semantic verification.
+
+An overlay display may follow a successful operation, such as outlining a
+captured display or showing the delivered click point. Rendering success proves
+only that the platform adapter rendered the requested visual layers. Overlay
+unavailability or rendering failure should be reported separately and should
+not change the underlying operation result.
+
+## Overlay
+
+An overlay is an ordered, renderer-independent collection of visual layers.
+The initial shared layer vocabulary is `cursor`, `outline`, and `status`.
+Cursor layers may use a built-in image or a runtime-provided SVG. A layer owns
+content and geometry, while its typed style owns visual appearance; callers do
+not manage native layer identifiers.
+
+Outline and cursor labels retain content independently from visibility. Their
+labels are hidden unless the caller explicitly enables label presentation.
+Composite overlays keep target-outline and actor-cursor labels separate rather
+than copying one string into both layers. Status text remains the body of its
+layer and is visible whenever the status layer is present.
+
+An overlay component is a reusable composition that expands into layers. The
+initial shared components are `capture frame` and `click target`. Components
+express visual composition only and do not perform capture or input delivery.
+
+Overlay geometry uses the same screen coordinate contract as driver display,
+window, and input results. `ShowOptions` separately defines motion and
+lifecycle policy through `MotionOptions` and `LifecycleOptions`. The public
+driver API shows or removes overlays; the platform overlay adapter renders or
+removes their native layers. The adapter owns private layer identity, native
+windows, animation timing, inherited starting positions, and rendering details.
+Runtime and command frontends provide target state and display policy; they do
+not drive animation frames across the platform seam.
+
 ## Region
 
 A region is a crop or filter applied inside an observation scope.
@@ -393,6 +433,13 @@ a background-only click might be delivered through an AX action, a pid-targeted
 CGEvent, a browser protocol command, or an ADB input path depending on the
 target and driver capabilities.
 
+The current typed values are `background_only`, `background_preferred`, and
+`foreground_preferred`. They describe allowed ordering and disturbance policy,
+not a promise that the selected path name will contain “background” or
+“foreground”; the resulting `InputActionResult` remains authoritative for the
+path actually used. Click cardinality is a separate option and may request a
+single, double, or explicitly counted repeated click with an interval.
+
 ## Scroll Delivery Strategy
 
 Scroll delivery strategy is a provisional driver contract for the ordered
@@ -420,6 +467,18 @@ Preparation behavior should be recorded in action results and traces because it
 is central to whether an operation can run without disrupting the user's current
 work. When preparation creates temporary state, the API should return an input
 preparation lease that can be passed back to restore the previous state.
+
+## Application Activation Result
+
+Application activation result is the typed evidence returned after a platform
+accepts a request to bring one application to the foreground. Request delivery
+is not itself proof that the target became frontmost. The result therefore keeps
+the requested application identity separate from post-activation verification.
+
+Verification is `verified_foreground` only when a platform observation reports
+the requested application as frontmost. A mismatched observation or unavailable
+observation is an explicit activation-only outcome; callers must not promote it
+to semantic success or recover that claim by taking an unrelated screenshot.
 
 ## Action Executor
 

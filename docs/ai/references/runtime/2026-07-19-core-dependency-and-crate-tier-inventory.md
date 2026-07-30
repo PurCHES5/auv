@@ -25,7 +25,7 @@ root depends on it." Doc-only: **no crate moved, no workspace member changed**
   test` only compiles `auv-runtime` + `auv-cli` and their dependency trees
   (**25/36 crates** on macOS; 11 excluded: `auv-apple-{music,notes}`,
   `auv-driver-{linux,windows}`, `auv-gnome-control-center`, `auv-netease-music`,
-  `auv-overlay-macos`, `auv-qqmusic`, `auv-steam`, `auv-inference-ort`, and
+  `auv-driver-overlay-macos`, `auv-qqmusic`, `auv-steam`, `auv-inference-ort`, and
   `auv-media-macos`). Experimental crates (e.g.
   `auv-driver-linux`) are **not** built by default, which is why their failing
   tests can survive (see the OCR-stub test noted in the error-chain inventory).
@@ -146,7 +146,7 @@ workspace description is empty).
 | auv-netease-music | **Experimental compile-maintained** | NetEase Music product CLI lib: sidebar playlist scan + agent-callable output |
 | auv-gnome-control-center | **Experimental compile-maintained** | GNOME Control Center product workflows (Settings labels/page flow) over `auv-driver-linux` |
 | auv-steam | **Experimental compile-maintained** | Steam product CLI lib: local installed-library queries |
-| auv-overlay-macos | **Experimental compile-maintained** | macOS visual overlay (cursor flash/move/dual-cursor); trust/debug layer, explicitly NOT the input backend |
+| auv-driver-overlay-macos | **Experimental compile-maintained** | macOS driver presentation adapter (cursor, outline, status, runtime SVG); explicitly NOT the input backend |
 | auv-scan | **Core-maintained** | Temporal scan wire contracts, frame artifacts, producers, read-side projections (S line); root-only public import path |
 | auv-view | **Core-maintained** | Generic view-parser IR shared by app crates (extracted from netease); framework-level, wide pub-field v0 API |
 | auv-file | **Core-adjacent** (experimental-friendly shared infra) | Narrow JSON artifact file-IO helpers (core-b1 graduation); broader file abstraction deferred |

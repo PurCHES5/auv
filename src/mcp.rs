@@ -253,6 +253,27 @@ fn click_window_point_adapter() -> McpInvokeAdapter {
   click_window_point_adapter_with(auv_cli_invoke::commands::input::click_window_point_domain)
 }
 
+fn overlay_adapter(command: InvokeCommand) -> McpInvokeAdapter {
+  let command_id = command.id;
+  McpInvokeAdapter::new(command_id, move |input| {
+    let command = command.clone();
+    async move {
+      // Overlay debug commands have presentation as their observable effect;
+      // reuse their typed handler so CLI and MCP share parsing and composition.
+      command
+        .invoke(InvokeCommandInput {
+          command_id: command_id.to_string(),
+          target_application_id: input.target_application_id,
+          inputs: input.inputs,
+          dry_run: input.dry_run,
+          cancellation: input.cancellation,
+        })
+        .await?;
+      Ok(McpInvokeSuccess::empty())
+    }
+  })
+}
+
 fn media_control_adapter(id: &'static str, command: auv_media_macos::MediaCommand) -> McpInvokeAdapter {
   McpInvokeAdapter::new(id, move |_input| async move {
     let result = auv_cli_invoke::commands::media_control::control_media(command).await?;
@@ -446,6 +467,11 @@ pub fn core_invoke_adapters() -> Vec<McpInvokeAdapter> {
       let result = auv_cli_invoke::commands::window::click_recognized_window_text(window_selector(&input), query).await?;
       McpInvokeSuccess::from_result(&result)
     }),
+    overlay_adapter(auv_cli_invoke::commands::overlay::show_outline_invoke_command()),
+    overlay_adapter(auv_cli_invoke::commands::overlay::show_cursor_invoke_command()),
+    overlay_adapter(auv_cli_invoke::commands::overlay::show_status_invoke_command()),
+    overlay_adapter(auv_cli_invoke::commands::overlay::show_capture_frame_invoke_command()),
+    overlay_adapter(auv_cli_invoke::commands::overlay::show_click_target_invoke_command()),
   ];
 
   // TODO(invoke-mcp-stubs): adapters for intentionally unregistered invoke
@@ -673,10 +699,42 @@ pub async fn serve_stdio_with_registry(
 
 #[cfg(test)]
 mod tests {
-  use super::McpServer;
+  use std::collections::BTreeMap;
+
+  use super::{McpInvokeInput, McpServer, core_invoke_adapters};
 
   #[test]
   fn default_mcp_server_accepts_its_invoke_registry_and_adapter_catalog() {
     McpServer::new(std::path::PathBuf::from(".")).expect("default MCP invoke catalogs should agree");
+  }
+
+  #[tokio::test]
+  async fn overlay_mcp_adapters_execute_the_shared_dry_run_commands() {
+    let cases = [
+      ("overlay.outline", pairs(&[("x", "10"), ("y", "20"), ("width", "120"), ("height", "40")])),
+      ("overlay.cursor", pairs(&[("x", "10"), ("y", "20")])),
+      ("overlay.status", pairs(&[("x", "10"), ("y", "20"), ("text", "processing")])),
+      ("overlay.captureFrame", pairs(&[("x", "10"), ("y", "20"), ("width", "120"), ("height", "40")])),
+      ("overlay.clickTarget", pairs(&[("x", "10"), ("y", "20"), ("width", "120"), ("height", "40")])),
+    ];
+    let adapters = core_invoke_adapters();
+
+    for (command_id, inputs) in cases {
+      let adapter =
+        adapters.iter().find(|adapter| adapter.command_id == command_id).unwrap_or_else(|| panic!("missing {command_id} adapter"));
+      adapter
+        .invoke(McpInvokeInput {
+          target_application_id: None,
+          inputs,
+          dry_run: true,
+          cancellation: Default::default(),
+        })
+        .await
+        .unwrap_or_else(|error| panic!("{command_id} MCP dry run failed: {error}"));
+    }
+  }
+
+  fn pairs(values: &[(&str, &str)]) -> BTreeMap<String, String> {
+    values.iter().map(|(key, value)| ((*key).to_string(), (*value).to_string())).collect()
   }
 }
