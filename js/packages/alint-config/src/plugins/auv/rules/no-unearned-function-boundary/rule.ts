@@ -1,36 +1,37 @@
 import { defineRule } from "@alint-js/plugin";
 
 import { judgeSource } from "../../agents/judge";
-import { privateSchemaToolkitInstructions, privateSchemaToolkitPrompt } from "./prompt";
+import { unearnedFunctionBoundaryInstructions, unearnedFunctionBoundaryPrompt } from "./prompt";
 
-export const privateSchemaToolkitRule = defineRule({
-  create: ctx => ({
+export const unearnedFunctionBoundaryRule = defineRule({
+  cacheKey: `${unearnedFunctionBoundaryInstructions}\n${unearnedFunctionBoundaryPrompt}`,
+  create: context => ({
     /**
-     * Reviews one Rust source target for private schema toolkits.
+     * Reviews one Rust source target for unearned function boundaries.
      *
      * Triggering workflow:
      *
-     * {@link privateSchemaToolkitRule}
+     * {@link unearnedFunctionBoundaryRule}
      *   -> `onTargetFile`
      *     -> {@link judgeSource}
      *
      * Upstream:
-     * - {@link privateSchemaToolkitRule}
+     * - {@link unearnedFunctionBoundaryRule}
      *
      * Downstream:
      * - {@link judgeSource}
      */
     async onTargetFile(target) {
       const findings = await judgeSource({
-        context: ctx,
-        instructions: privateSchemaToolkitInstructions,
-        operation: "private-schema-toolkit-review",
-        prompt: `${privateSchemaToolkitPrompt}\n\nFile path:\n${target.file.path}`,
-        source: ctx.src.getText(await ctx.src.readFile(target.file)),
+        context,
+        instructions: unearnedFunctionBoundaryInstructions,
+        operation: "unearned-function-boundary-review",
+        prompt: `${unearnedFunctionBoundaryPrompt}\n\nFile path:\n${target.file.path}`,
+        source: context.src.getText(await context.src.readFile(target.file)),
       });
 
       for (const finding of findings) {
-        ctx.report({
+        context.report({
           evidence: {
             confidence: finding.confidence,
             suggestion: finding.suggestion,

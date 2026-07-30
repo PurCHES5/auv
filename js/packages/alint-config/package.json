@@ -19,10 +19,10 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@alint-js/agent-apeira": "^0.0.33",
-    "@alint-js/core": "^0.0.33",
-    "@alint-js/plugin": "^0.0.33",
-    "@alint-js/tools-fs": "^0.0.33"
+    "@alint-js/agent-apeira": "catalog:",
+    "@alint-js/core": "catalog:",
+    "@alint-js/plugin": "catalog:",
+    "@alint-js/tools-fs": "catalog:"
   },
   "devDependencies": {
     "vitest": "catalog:vitest"

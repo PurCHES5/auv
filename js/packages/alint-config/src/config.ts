@@ -7,7 +7,7 @@ export default defineConfig([
     name: "auv/rust",
     directories: ["crates/*"],
     files: ["**/*.rs"],
-    language: "text/plain",
+    language: "plaintext",
     agent: createApeiraAdapter(),
     plugins: {
       rust: auv,
@@ -15,13 +15,15 @@ export default defineConfig([
     rules: {
       "rust/no-vacant-control-boundary": "warn",
       "rust/no-private-schema-toolkit": "warn",
+      "rust/no-unearned-function-boundary": "warn",
       "rust/prefer-established-foundation": "warn",
+      "rust/unsafe-safety-comment": "warn",
     },
   },
   {
     name: "auv/rust-test-contracts",
-    files: ["src/**/*.rs", "tests/**/*.rs", "crates/*/src/**/*.rs", "crates/*/tests/**/*.rs"],
-    language: "text/plain",
+    files: ["**/{src,tests,examples}/**/*.rs"],
+    language: "plaintext",
     agent: createApeiraAdapter(),
     plugins: {
       rust: auv,
@@ -29,28 +31,62 @@ export default defineConfig([
     rules: {
       "rust/no-mod-names-checks-in-tests": "error",
       "rust/no-source-files-compare-in-tests": "error",
+      "rust/no-platform-coded-test-paths": "error",
+    },
+  },
+  {
+    name: "auv/side-by-side-rust-unit-tests",
+    files: [
+      "**/{src,examples}/**/*.rs",
+    ],
+    language: "plaintext",
+    agent: createApeiraAdapter(),
+    plugins: {
+      rust: auv,
+    },
+    rules: {
+      "rust/require-side-by-side-unit-tests": "error",
+    },
+  },
+  {
+    name: "auv/app-game-test-organization",
+    files: [
+      "supported/**/{src,tests,examples}/**/*.rs",
+    ],
+    language: "plaintext",
+    agent: createApeiraAdapter(),
+    plugins: {
+      rust: auv,
+    },
+    rules: {
+      "rust/require-case-scoped-app-game-tests": "error",
+    },
+  },
+  {
+    name: "auv/non-runtime-test-ownership",
+    files: [
+      "**/{src,tests,examples}/**/*.rs",
+    ],
+    language: "plaintext",
+    agent: createApeiraAdapter(),
+    plugins: {
+      rust: auv,
+    },
+    rules: {
+      "rust/restrict-non-runtime-unit-tests": "error",
     },
   },
   {
     name: "auv/app-integration-directories",
     directories: [
-      "crates/auv-apple-music",
-      "crates/auv-apple-notes",
-      "crates/auv-apple-textedit",
-      "crates/auv-gnome-control-center",
-      "crates/auv-netease-music",
-      "crates/auv-qqmusic",
+      "supported/**",
     ],
     agent: createApeiraAdapter(),
     plugins: {
       rust: auv,
     },
     rules: {
-      "rust/require-platform-scoped-app-integration": "warn",
+      "rust/require-platform-scoped-app-integration": 'off',
     },
-  },
-  {
-    name: "auv/repo-text-and-scripts",
-    files: ["**/*.{toml,md,yml,yaml,json,js,mjs,cjs,ts,tsx,mts,cts,vue}"],
   },
 ]);

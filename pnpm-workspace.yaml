@@ -6,16 +6,16 @@ allowBuilds:
   esbuild: true
 
 minimumReleaseAgeExclude:
-  - '@alint-js/agent-apeira@0.0.33'
-  - '@alint-js/cli@0.0.33'
-  - '@alint-js/config@0.0.33'
-  - '@alint-js/core@0.0.33'
+  - '@alint-js/agent-apeira@0.1.5'
+  - '@alint-js/cli@0.1.5'
+  - '@alint-js/config@0.1.5'
+  - '@alint-js/core@0.1.5'
   - '@xsai/generate-text@0.5.0-beta.7'
   - '@xsai/shared-chat@0.5.0-beta.7'
   - '@xsai/shared@0.5.0-beta.7'
   - '@xsai/tool@0.5.0-beta.7'
   - xsschema@0.5.0-beta.7
-  - '@alint-js/tools-fs@0.0.33'
+  - '@alint-js/tools-fs@0.1.5'
   - '@apeira/core@0.0.7'
   - '@apeira/session@0.0.7'
   - '@apeira/storage@0.0.7'
@@ -23,14 +23,15 @@ minimumReleaseAgeExclude:
   - '@xsai/shared-stream@0.5.0-beta.7'
   - '@xsai/stream-text@0.5.0-beta.7'
   - apeira@0.0.7
-  - '@alint-js/plugin@0.0.33'
+  - '@alint-js/plugin@0.1.5'
   - '@moeru/std@0.1.0-beta.20'
 
 catalog:
-  '@alint-js/agent-apeira': '^0.0.33'
-  '@alint-js/plugin': '^0.0.33'
-  '@alint-js/tools-fs': '^0.0.33'
-  '@alint-js/cli': ^0.0.33
+  '@alint-js/agent-apeira': '^0.1.5'
+  '@alint-js/plugin': '^0.1.5'
+  '@alint-js/tools-fs': '^0.1.5'
+  '@alint-js/cli': ^0.1.5
+  '@alint-js/core': ^0.1.5
   '@types/node': ^26.0.1
   taze: ^19.14.1
   tsdown: ^0.22.3

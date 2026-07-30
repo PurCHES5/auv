@@ -1,0 +1,8 @@
+{
+  "false-positive/parser.rs": 0,
+  "false-positive/parser_test.rs": 0,
+  "true-positive/implicit_tests_module.rs": 1,
+  "true-positive/inline_module.rs": 1,
+  "true-positive/orphan_test.rs": 1,
+  "true-positive/test_build_adapter.rs": 1
+}

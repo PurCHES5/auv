@@ -32,7 +32,7 @@ async function reviewModuleNameChecks(context: RuleContext, target: FileTarget):
     instructions: noModNamesChecksInTestsInstructions,
     operation: "mod-names-checks-in-tests-review",
     prompt: `${noModNamesChecksInTestsPrompt}\n\nFile path:\n${target.file.path}`,
-    source: context.src.getText(target),
+    source: context.src.getText(await context.src.readFile(target.file)),
   });
 
   for (const finding of findings) {

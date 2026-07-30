@@ -1,0 +1,4 @@
+{
+  "false-positive/coordinate_transform.rs": 0,
+  "true-positive/artifact_workflow.rs": 1
+}
