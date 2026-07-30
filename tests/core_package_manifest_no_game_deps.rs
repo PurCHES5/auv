@@ -70,6 +70,22 @@ fn root_auv_runtime_package_dependencies_exclude_game_and_godot_crates() {
   assert!(
     offenders.is_empty(),
     "auv-runtime package [dependencies]/[dev-dependencies]/[target.*.dependencies] must not list game/godot crates; found {offenders:?}. \
-     Keep donor wiring in the product CLI package. Companion falsifier: rg 'auv_game_' src/"
+     Keep supported-product dependencies outside the core runtime package. Companion falsifier: rg 'auv_game_' src/"
   );
+}
+
+#[test]
+fn auv_cli_package_dependencies_exclude_supported_apps_and_games() {
+  let cargo_toml = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/crates/auv-cli/Cargo.toml"));
+  let mut offenders = Vec::new();
+
+  for table in package_dependency_table_bodies(cargo_toml) {
+    for key in dependency_keys(&table) {
+      if key.starts_with("auv-game-") || matches!(key.as_str(), "auv-godot" | "auv-apple-textedit") {
+        offenders.push(key);
+      }
+    }
+  }
+
+  assert!(offenders.is_empty(), "auv-cli must remain a core command frontend without supported app/game dependencies; found {offenders:?}");
 }

@@ -45,7 +45,7 @@ exclude:
   # NOTICE(qodana-archived_lane_exemption): minecraft vertical is frozen; deprecations are expected.
   - name: RsDeprecation
     paths:
-      - crates/auv-game-minecraft
+      - supported/games/auv-game-minecraft
   # NOTICE(qodana-false_positive): cfg(feature) catch-all arm is unreachable in single-feature CI builds.
   - name: RsUnreachablePatterns
     paths:

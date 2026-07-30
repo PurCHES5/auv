@@ -1,11 +1,10 @@
-//! AUV product assembly: CLI frontends, app integrations, and MCP bootstrap.
+//! AUV core command frontend and MCP bootstrap.
 //!
-//! This crate owns product bins and app-specific coupling. `auv-runtime` stays
-//! library-only without `auv-game-*` dependencies.
+//! Supported crates own app/game behavior and command frontends. This crate
+//! assembles only the root core CLI over `auv-runtime` and `auv-cli-invoke`.
 
 pub mod cli;
 pub mod cli_frontend;
-pub mod integrations;
 pub mod mcp;
 pub mod registry;
 pub mod xtask;

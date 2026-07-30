@@ -363,8 +363,10 @@ dependencies = [
 name = "auv-apple-textedit"
 version = "0.0.1"
 dependencies = [
+ "auv-cli-invoke",
  "auv-driver",
  "auv-driver-macos",
+ "auv-runtime",
  "auv-tracing",
  "clap",
  "serde",
@@ -375,28 +377,18 @@ name = "auv-cli"
 version = "0.0.1"
 dependencies = [
  "auv-api-proto",
- "auv-apple-textedit",
  "auv-cli-invoke",
  "auv-cli-invoke-macros",
  "auv-driver",
  "auv-driver-macos",
- "auv-game-minecraft",
- "auv-game-osu",
- "auv-godot",
- "auv-query-readiness",
  "auv-runtime",
- "auv-task-object-detection",
  "auv-tracing",
  "axum",
- "futures-util",
- "image",
  "objc2-core-foundation",
  "objc2-core-graphics",
- "reqwest 0.12.28",
  "rmcp",
  "serde",
  "serde_json",
- "sha2 0.10.9",
  "swift-bridge-build",
  "tempfile",
  "tokio",
@@ -576,6 +568,7 @@ dependencies = [
  "auv-driver",
  "auv-file",
  "auv-query-readiness",
+ "auv-runtime",
  "auv-tracing",
  "futures-executor",
  "image",
@@ -593,6 +586,7 @@ dependencies = [
  "auv-driver-macos",
  "auv-file",
  "auv-query-readiness",
+ "auv-runtime",
  "auv-task-object-detection",
  "auv-tracing",
  "futures-executor",
@@ -2524,7 +2518,7 @@ dependencies = [
  "hf-xet",
  "hyper",
  "pathdiff",
- "reqwest 0.13.4",
+ "reqwest",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -2668,7 +2662,6 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tower-service",
- "webpki-roots",
 ]
 
 [[package]]
@@ -4935,46 +4928,6 @@ checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 
 [[package]]
 name = "reqwest"
-version = "0.12.28"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
-dependencies = [
- "base64",
- "bytes",
- "futures-channel",
- "futures-core",
- "futures-util",
- "http",
- "http-body",
- "http-body-util",
- "hyper",
- "hyper-rustls",
- "hyper-util",
- "js-sys",
- "log",
- "percent-encoding",
- "pin-project-lite",
- "quinn",
- "rustls",
- "rustls-pki-types",
- "serde",
- "serde_json",
- "serde_urlencoded",
- "sync_wrapper",
- "tokio",
- "tokio-rustls",
- "tower",
- "tower-http",
- "tower-service",
- "url",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
- "webpki-roots",
-]
-
-[[package]]
-name = "reqwest"
 version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "219c5811de6525e5416c7d5d53bb656d3afdbc6c5af816e0802bcfa42dbdc1c3"
@@ -5027,7 +4980,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "http",
- "reqwest 0.13.4",
+ "reqwest",
  "thiserror 2.0.18",
  "tower-service",
 ]
@@ -7717,7 +7670,7 @@ dependencies = [
  "more-asserts",
  "rand 0.10.1",
  "redb",
- "reqwest 0.13.4",
+ "reqwest",
  "reqwest-middleware",
  "serde",
  "serde_json",
@@ -7830,7 +7783,7 @@ dependencies = [
  "oneshot",
  "pin-project",
  "rand 0.10.1",
- "reqwest 0.13.4",
+ "reqwest",
  "serde",
  "serde_json",
  "shellexpand",

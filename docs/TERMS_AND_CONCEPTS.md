@@ -83,15 +83,15 @@ inspector API yet.
 
 ## Product CLI package / auv-cli (provisional)
 
-Provisional packaging term for the app-integration composition package
-(`auv-cli`, located at `crates/auv-cli`):
+Provisional packaging term for the core command frontend package (`auv-cli`,
+located at `crates/auv-cli`):
 
-- Owns root `auv` and app-specific bins, CLI frontend, integration wiring,
-  app-owned text inspection sections, query-wired result adapters, and the product
-  `InspectRunExtension` implementation.
-- Depends on library-only `auv-runtime` plus `auv-game-*` / `auv-godot`.
-- Must not be confused with core `auv-runtime`; game crates must not depend on
-  `auv-cli` to reach product types.
+- Owns the root `auv` binary, core CLI frontend, core invoke registry assembly,
+  MCP bootstrap, session serving, and development xtasks.
+- Depends on library-only `auv-runtime` and core CLI/runtime crates, not on
+  supported app or game crates.
+- Supported app/game packages own their command frontends and integration
+  wiring; they must not depend on `auv-cli` to reach runtime types.
 
 ## Device
 

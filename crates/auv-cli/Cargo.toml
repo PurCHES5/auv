@@ -7,7 +7,7 @@ publish.workspace = true
 readme.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "AUV product CLI, app integrations, and inspect assembly"
+description = "AUV product CLI and inspect assembly"
 documentation.workspace = true
 homepage.workspace = true
 repository.workspace = true
@@ -18,41 +18,18 @@ default-run = "auv"
 name = "auv"
 path = "src/bin/auv.rs"
 
-[[bin]]
-name = "auv-godot"
-path = "src/bin/auv-godot.rs"
-
-[[bin]]
-name = "auv-osu"
-path = "src/bin/auv-osu.rs"
-
-[[bin]]
-name = "auv-minecraft"
-path = "src/bin/auv-minecraft.rs"
-
 [dependencies]
 auv-runtime = { path = "../.." }
-auv-apple-textedit = { path = "../auv-apple-textedit" }
 auv-cli-invoke-macros = { path = "../auv-cli-invoke-macros" }
-auv-game-osu = { path = "../auv-game-osu", features = ["tracing"] }
-auv-game-minecraft = { path = "../auv-game-minecraft", features = ["tracing"] }
-auv-godot = { path = "../auv-godot" }
-auv-task-object-detection = { path = "../auv-task-object-detection" }
 auv-driver = { path = "../auv-driver" }
 auv-driver-macos = { path = "../auv-driver-macos" }
 auv-cli-invoke = { path = "../auv-cli-invoke" }
 auv-api-proto = { path = "../auv-api-proto" }
 auv-tracing = { path = "../auv-tracing", features = ["file-store"] }
-auv-query-readiness = { path = "../auv-query-readiness" }
 serde.workspace = true
 serde_json.workspace = true
-sha2.workspace = true
-futures-util = { workspace = true, features = ["io"] }
 tokio = { version = "1", features = ["fs", "macros", "net", "rt-multi-thread", "sync"] }
 tonic = { version = "0.14", features = ["transport"] }
-image.workspace = true
-reqwest.workspace = true
-tempfile.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-core-graphics.workspace = true
@@ -64,6 +41,7 @@ auv-api-proto = { path = "../auv-api-proto" }
 auv-tracing = { path = "../auv-tracing", features = ["file-store", "memory-store"] }
 axum = { version = "0.8", default-features = false }
 rmcp = { version = "0.6", features = ["server", "client", "transport-io"] }
+tempfile.workspace = true
 tokio = { version = "1", features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "time"] }
 tonic = { version = "0.14", features = ["transport"] }
 tower = { version = "0.5", features = ["util"] }
