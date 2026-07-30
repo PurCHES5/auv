@@ -9,7 +9,6 @@ use clap::{CommandFactory, Parser, Subcommand, ValueEnum, error::ErrorKind};
 use crate::commands::doctor::DoctorArgs;
 use crate::commands::invoke::InvokeArgs;
 use crate::commands::mcp::{McpArgs, McpCommand};
-use crate::commands::permissions::{PermissionsArgs, PermissionsCommand};
 use crate::commands::plugin::{PluginArgs, PluginCommand};
 use crate::commands::session::{SessionArgs, SessionCommand};
 
@@ -55,8 +54,8 @@ pub enum CliCommand {
   name = "auv",
   version,
   about = "Invoke and inspect core computer-use capabilities",
-  long_about = "AUV turns computer-use operations into command-like, inspectable, and recorded runs.\n\nThe root CLI owns core invoke, permission, session, and MCP frontends. Installed auv-* executables extend it with application-owned commands.",
-  after_long_help = "Examples:\n  # Inspect available core invoke commands\n  auv invoke --help\n\n  # Check local automation permissions\n  auv permissions check\n\n  # Run an installed application plugin\n  auv balatro --help\n\nUse `auv plugin list` to inspect external commands visible on PATH."
+  long_about = "AUV turns computer-use operations into command-like, inspectable, and recorded runs.\n\nThe root CLI owns core invoke, doctor, session, and MCP frontends. Installed auv-* executables extend it with application-owned commands.",
+  after_long_help = "Examples:\n  # Inspect available core invoke commands\n  auv invoke --help\n\n  # Diagnose local automation readiness\n  auv doctor\n\n  # Run an installed application plugin\n  auv balatro --help\n\nUse `auv plugin list` to inspect external commands visible on PATH."
 )]
 struct RootArgs {
   /// Run a hidden repository development task.
@@ -71,9 +70,6 @@ struct RootArgs {
 enum RootCommand {
   /// Inspect local automation permissions and environment readiness.
   Doctor(DoctorArgs),
-
-  /// Inspect operating-system permissions used by AUV drivers.
-  Permissions(PermissionsArgs),
 
   /// Invoke one core computer-use capability and record its run.
   Invoke(InvokeArgs),
@@ -129,9 +125,6 @@ pub fn parse_cli_os(arguments: impl IntoIterator<Item = OsString>) -> AuvResult<
   match parsed.command {
     None => Ok(CliCommand::Help(help_text())),
     Some(RootCommand::Doctor(args)) => Ok(CliCommand::PermissionCheck { json: args.json }),
-    Some(RootCommand::Permissions(args)) => match args.command {
-      PermissionsCommand::Check(args) => Ok(CliCommand::PermissionCheck { json: args.json }),
-    },
     Some(RootCommand::Invoke(args)) => parse_invoke(args.arguments),
     Some(RootCommand::Session(args)) => match args.command {
       SessionCommand::Serve(args) => Ok(CliCommand::SessionServe {

@@ -64,7 +64,7 @@ Open **System Settings -> Privacy & Security** and enable:
 After changing permissions, restart the terminal process and rerun:
 
 ```sh
-auv permissions check
+auv doctor
 auv app probe com.apple.TextEdit
 ```
 

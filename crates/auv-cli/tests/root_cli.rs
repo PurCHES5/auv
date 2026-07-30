@@ -40,11 +40,14 @@ fn root_help_does_not_advertise_supported_app_or_game_frontends() {
   ] {
     assert!(!help.contains(removed_surface), "root help must not advertise {removed_surface}:\n{help}");
   }
+  assert!(
+    !help.lines().any(|line| line.trim_start().starts_with("permissions ")),
+    "root help must not advertise the removed permissions command:\n{help}"
+  );
 
   for expected in [
     "Commands:",
     "doctor",
-    "permissions",
     "invoke",
     "session",
     "mcp",

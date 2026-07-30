@@ -7,14 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const BUILTIN_COMMANDS: &[&str] = &[
-  "doctor",
-  "permissions",
-  "invoke",
-  "session",
-  "mcp",
-  "plugin",
-];
+const BUILTIN_COMMANDS: &[&str] = &["doctor", "invoke", "session", "mcp", "plugin"];
 
 pub fn execute(command_name: &OsStr, arguments: &[OsString]) -> Result<i32, String> {
   let executable_name = executable_name(command_name);
