@@ -8,5 +8,4 @@ fn no_overlay_is_a_global_flag_without_a_value() {
   };
 
   assert_eq!(inputs.get("overlay").map(String::as_str), Some("false"));
-  assert!(!invoke_argument_consumes_value("--no-overlay"));
 }

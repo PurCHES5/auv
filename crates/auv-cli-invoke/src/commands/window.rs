@@ -1,9 +1,8 @@
 use crate::{
   CommandGroup, InvokeCommandInput, InvokeCommandOutput, InvokeCommandResult, InvokeReport, InvokeReportField, InvokeReportTable,
-  InvokeReportTableRow, InvokeReportValue, OptionalReportText,
-  arg::{NO_ARGS, WINDOW_ARGS, WINDOW_CLICK_TEXT_ARGS, WINDOW_TEXT_ARGS, WINDOW_VERIFY_TEXT_ARGS},
-  invoke_command,
+  InvokeReportValue, OptionalReportText, invoke_command,
 };
+use auv_cli_common::{TableRow, outputs::formats::table::TableOptions};
 use auv_driver::overlay::{
   Overlay,
   components::{CaptureFrame, ClickTarget},
@@ -12,6 +11,7 @@ use auv_driver::overlay::{
 };
 use auv_driver::{ScreenPoint, WindowInput as _};
 use auv_tracing::ArtifactMetadata;
+use clap::{Args, ValueEnum};
 use std::time::Duration;
 
 #[cfg(target_os = "macos")]
@@ -28,13 +28,17 @@ pub fn group() -> CommandGroup {
     .command(click_window_text_invoke_command())
 }
 
+#[derive(Clone, Debug, Args, serde::Serialize, serde::Deserialize)]
+#[command(after_long_help = "Examples:\n  auv invoke window.list --wide")]
+struct ListWindowsArgs {}
+
 #[invoke_command(
   id = "window.list",
   group = "window",
   description = "List visible macOS window candidates using the normalized AUV window selector model.",
-  args = NO_ARGS,
+  input = ListWindowsArgs,
 )]
-async fn list_windows(input: InvokeCommandInput) -> InvokeCommandResult {
+async fn list_windows(input: InvokeCommandInput, _args: ListWindowsArgs) -> InvokeCommandResult {
   #[cfg(target_os = "macos")]
   {
     if input.dry_run {
@@ -63,13 +67,21 @@ pub async fn observe_windows() -> Result<Vec<auv_driver::Window>, String> {
   }
 }
 
+#[derive(Clone, Debug, Args, serde::Serialize, serde::Deserialize)]
+#[command(after_long_help = "Examples:\n  auv invoke window.capture --target com.apple.TextEdit --title Untitled")]
+struct CaptureWindowArgs {
+  /// Window title text used to select the capture target.
+  #[arg(long, value_name = "TEXT")]
+  title: Option<String>,
+}
+
 #[invoke_command(
   id = "window.capture",
   group = "window",
   description = "Capture one single-display window and emit a coordinate contract. If activate_target_before_capture is true, the target app is foregrounded first.",
-  args = WINDOW_ARGS,
+  input = CaptureWindowArgs,
 )]
-async fn capture_window(input: InvokeCommandInput) -> InvokeCommandResult {
+async fn capture_window(input: InvokeCommandInput, args: CaptureWindowArgs) -> InvokeCommandResult {
   #[cfg(target_os = "macos")]
   {
     if input.dry_run {
@@ -77,7 +89,7 @@ async fn capture_window(input: InvokeCommandInput) -> InvokeCommandResult {
     }
 
     let session = auv_driver::open_local().map_err(|error| error.to_string())?;
-    let (result, artifact) = capture_selected_window_recorded_with_session(&session, window_selector(&input)).await?;
+    let (result, artifact) = capture_selected_window_recorded_with_session(&session, window_selector(&input, args.title.as_deref())).await?;
     let capture_overlay = Overlay::new().with_layer(
       CaptureFrame::new(result.window.frame).with_label(result.window.title.clone().unwrap_or_else(|| "selected window".to_string())),
     );
@@ -158,166 +170,150 @@ async fn capture_selected_window_recorded_with_session(
   Ok((WindowCapture { window, capture }, artifact))
 }
 
-#[invoke_command(
-  id = "window.captureAxTree",
-  group = "window",
-  description = "Capture an AX tree snapshot for a target macOS app window.",
-  args = WINDOW_ARGS,
-)]
-async fn capture_ax_tree(_input: InvokeCommandInput) -> InvokeCommandResult {
-  // TODO(invoke-window-ax-tree): promote ObservedAxTreeSnapshot into the
-  // platform-neutral driver contract before sharing it across frontends.
-  unimplemented!("window.captureAxTree")
+#[derive(Clone, Debug, Args, serde::Serialize, serde::Deserialize)]
+#[command(after_long_help = "Examples:\n  auv invoke window.findText \"Settings\" --title Preferences")]
+struct FindWindowTextArgs {
+  /// Text to locate in the selected window.
+  #[arg(value_name = "TEXT")]
+  query: String,
+  /// Window title text used to select the capture target.
+  #[arg(long, value_name = "TITLE")]
+  title: Option<String>,
 }
 
 #[invoke_command(
   id = "window.findText",
   group = "window",
   description = "Capture a resolved window and locate OCR text anchors in window pixel space.",
-  args = WINDOW_TEXT_ARGS,
+  input = FindWindowTextArgs,
 )]
-async fn find_window_text(input: InvokeCommandInput) -> InvokeCommandResult {
+async fn find_window_text(input: InvokeCommandInput, args: FindWindowTextArgs) -> InvokeCommandResult {
   #[cfg(target_os = "macos")]
   {
     if input.dry_run {
       return Ok(InvokeCommandOutput::completed());
     }
 
-    let query = input.required_input("query")?.to_string();
+    let query = args.query;
     let session = auv_driver::open_local().map_err(|error| error.to_string())?;
-    let result = recognize_window_text_with_session(&session, window_selector(&input), query, false).await?;
+    let result = recognize_window_text_with_session(&session, window_selector(&input, args.title.as_deref()), query, false).await?;
     let overlay = super::overlay::show_overlay(&input, &session, window_text_overlay(&result.matches, None), show_options(120, 420))?;
     window_text_matches_output(&input.command_id, &result, overlay)
   }
   #[cfg(not(target_os = "macos"))]
   {
-    let _ = input;
+    let _ = (input, args);
     Err("window text OCR is only available on macOS".to_string())
   }
+}
+
+#[derive(Clone, Debug, Args, serde::Serialize, serde::Deserialize)]
+#[command(after_long_help = "Examples:\n  auv invoke window.waitForText \"Ready\" --title Import")]
+struct WaitForWindowTextArgs {
+  /// Text to wait for in the selected window.
+  #[arg(value_name = "TEXT")]
+  query: String,
+  /// Window title text used to select the capture target.
+  #[arg(long, value_name = "TITLE")]
+  title: Option<String>,
 }
 
 #[invoke_command(
   id = "window.waitForText",
   group = "window",
   description = "Poll resolved-window OCR until a text anchor appears or the timeout expires.",
-  args = WINDOW_TEXT_ARGS,
+  input = WaitForWindowTextArgs,
 )]
-async fn wait_for_window_text(input: InvokeCommandInput) -> InvokeCommandResult {
+async fn wait_for_window_text(input: InvokeCommandInput, args: WaitForWindowTextArgs) -> InvokeCommandResult {
   #[cfg(target_os = "macos")]
   {
     if input.dry_run {
       return Ok(InvokeCommandOutput::completed());
     }
 
-    let query = input.required_input("query")?.to_string();
+    let query = args.query;
     let session = auv_driver::open_local().map_err(|error| error.to_string())?;
-    let result = recognize_window_text_with_session(&session, window_selector(&input), query, true).await?;
+    let result = recognize_window_text_with_session(&session, window_selector(&input, args.title.as_deref()), query, true).await?;
     let overlay = super::overlay::show_overlay(&input, &session, window_text_overlay(&result.matches, None), show_options(120, 420))?;
     window_text_matches_output(&input.command_id, &result, overlay)
   }
   #[cfg(not(target_os = "macos"))]
   {
-    let _ = input;
+    let _ = (input, args);
     Err("window text OCR is only available on macOS".to_string())
   }
 }
 
-#[invoke_command(
-  id = "window.findRows",
-  group = "window",
-  description = "Detect visible OCR row bands inside a resolved window.",
-  args = WINDOW_ARGS,
-)]
-async fn find_window_rows(_input: InvokeCommandInput) -> InvokeCommandResult {
-  // TODO(invoke-window-rows): implement after VisionApi owns typed row-band
-  // detection for a resolved window.
-  unimplemented!("window.findRows")
+#[derive(Clone, Debug, Args, serde::Serialize, serde::Deserialize)]
+#[command(after_long_help = "Examples:\n  auv invoke window.clickText \"Continue\" --title Setup")]
+struct ClickWindowTextArgs {
+  /// Text anchor to click in the selected window.
+  #[arg(value_name = "TEXT")]
+  query: String,
+  /// Window title text used to select the capture target.
+  #[arg(long, value_name = "TITLE")]
+  title: Option<String>,
+  /// Driver policy used to deliver the click.
+  #[arg(long, value_enum)]
+  #[serde(rename = "input-policy")]
+  input_policy: Option<WindowClickPolicyArg>,
+  /// Number of clicks to deliver.
+  #[arg(long, value_parser = clap::value_parser!(u8).range(1..))]
+  #[serde(
+    rename = "click-count",
+    deserialize_with = "crate::command::deserialize_optional_nonzero_u8",
+    default
+  )]
+  click_count: Option<u8>,
+  /// Delay between repeated clicks.
+  #[arg(long)]
+  #[serde(rename = "click-interval-ms")]
+  click_interval_ms: Option<u64>,
 }
 
-#[invoke_command(
-  id = "window.waitForRows",
-  group = "window",
-  description = "Poll resolved-window row detection until enough rows appear or the timeout expires.",
-  args = WINDOW_ARGS,
-)]
-async fn wait_for_window_rows(_input: InvokeCommandInput) -> InvokeCommandResult {
-  // TODO(invoke-window-rows): see `find_window_rows`; waiting additionally
-  // needs an owned polling and timeout policy.
-  unimplemented!("window.waitForRows")
+#[derive(Clone, Copy, Debug, ValueEnum, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum WindowClickPolicyArg {
+  BackgroundOnly,
+  BackgroundPreferred,
+  ForegroundPreferred,
 }
 
-#[invoke_command(
-  id = "window.observeRegion",
-  group = "window",
-  description = "Observe OCR row-like content inside a resolved macOS window region without scrolling.",
-  args = WINDOW_ARGS,
-)]
-async fn observe_window_region(_input: InvokeCommandInput) -> InvokeCommandResult {
-  // TODO(invoke-window-observe-region): add region arguments and a typed
-  // observation result before implementing this command.
-  unimplemented!("window.observeRegion")
-}
-
-#[invoke_command(
-  id = "window.findIconMatch",
-  group = "window",
-  description = "Match a template image against a resolved macOS window screenshot using NCC and emit a RecognitionResult artifact.",
-  args = WINDOW_ARGS,
-)]
-async fn find_icon_match(_input: InvokeCommandInput) -> InvokeCommandResult {
-  // TODO(invoke-window-icon-match): add template artifact and threshold
-  // arguments before routing through a typed VisionApi operation.
-  unimplemented!("window.findIconMatch")
-}
-
-#[invoke_command(
-  id = "window.scrollRegion",
-  group = "window",
-  description = "Scroll at the center of a resolved macOS window region and record scroll evidence.",
-  args = WINDOW_ARGS,
-)]
-async fn scroll_window_region(_input: InvokeCommandInput) -> InvokeCommandResult {
-  // TODO(invoke-window-scroll-region): add point and delta arguments before
-  // routing through WindowApi::scroll.
-  unimplemented!("window.scrollRegion")
-}
-
-#[invoke_command(
-  id = "window.verifyText",
-  group = "window",
-  description = "Verify that a text-bearing AX node exists in the observed tree without relying on screenshot OCR.",
-  args = WINDOW_VERIFY_TEXT_ARGS,
-)]
-async fn verify_ax_text(_input: InvokeCommandInput) -> InvokeCommandResult {
-  // TODO(invoke-window-verify-ax-text): add an AX role argument and an
-  // app/window selector contract before calling AccessibilityApi::verify_text.
-  unimplemented!("window.verifyText")
+impl WindowClickPolicyArg {
+  fn driver_policy(self) -> auv_driver::InputPolicy {
+    match self {
+      Self::BackgroundOnly => auv_driver::InputPolicy::BackgroundOnly,
+      Self::BackgroundPreferred => auv_driver::InputPolicy::BackgroundPreferred,
+      Self::ForegroundPreferred => auv_driver::InputPolicy::ForegroundPreferred,
+    }
+  }
 }
 
 #[invoke_command(
   id = "window.clickText",
   group = "window",
   description = "Capture a resolved window, resolve an OCR text anchor, and click its projected logical point.",
-  args = WINDOW_CLICK_TEXT_ARGS,
+  input = ClickWindowTextArgs,
 )]
-async fn click_window_text(input: InvokeCommandInput) -> InvokeCommandResult {
+async fn click_window_text(input: InvokeCommandInput, args: ClickWindowTextArgs) -> InvokeCommandResult {
   #[cfg(target_os = "macos")]
   {
-    let query = input.required_input("query")?.to_string();
-    let options = super::input::window_click_options(&input)?;
+    let options =
+      super::input::click_options(args.input_policy.map(WindowClickPolicyArg::driver_policy), args.click_count, args.click_interval_ms);
     if input.dry_run {
       return Ok(super::input::validation_only_output());
     }
 
     let session = auv_driver::open_local().map_err(|error| error.to_string())?;
-    let result = click_recognized_window_text_with_session(&session, window_selector(&input), query, options).await?;
+    let result =
+      click_recognized_window_text_with_session(&session, window_selector(&input, args.title.as_deref()), args.query, options).await?;
     let overlay = super::overlay::show_overlay(&input, &session, window_text_overlay(&result.matches, Some(0)), show_options(120, 240))?;
 
     window_text_click_output(&result, overlay)
   }
   #[cfg(not(target_os = "macos"))]
   {
-    let _ = input;
+    let _ = (input, args);
     Err("window.clickText is only available on macOS".to_string())
   }
 }
@@ -392,18 +388,6 @@ async fn click_recognized_window_text_with_session(
     options,
     action,
   })
-}
-
-#[invoke_command(
-  id = "window.clickRow",
-  group = "window",
-  description = "Capture a resolved window, detect visible rows, and click a row-derived projected logical point.",
-  args = WINDOW_ARGS,
-)]
-async fn click_window_row(_input: InvokeCommandInput) -> InvokeCommandResult {
-  // TODO(invoke-window-rows): implement after typed row detection and
-  // row-to-point policy can feed WindowApi and return InputActionResult.
-  unimplemented!("window.clickRow")
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -504,7 +488,7 @@ fn show_options(motion_ms: u64, auto_removal_ms: u64) -> auv_driver::overlay::Sh
 }
 
 #[cfg(target_os = "macos")]
-fn window_selector(input: &InvokeCommandInput) -> auv_driver::WindowSelector {
+fn window_selector(input: &InvokeCommandInput, title: Option<&str>) -> auv_driver::WindowSelector {
   use auv_driver::{App, TextMatcher, WindowSelector};
 
   let mut selector = WindowSelector {
@@ -514,8 +498,8 @@ fn window_selector(input: &InvokeCommandInput) -> auv_driver::WindowSelector {
   if let Some(target) = input.target_or_input_target() {
     selector.app = Some(App::bundle_id(target));
   }
-  if let Some(title) = input.inputs.get("title").filter(|value| !value.trim().is_empty()) {
-    selector.title = Some(TextMatcher::Contains(title.clone()));
+  if let Some(title) = title.filter(|value| !value.trim().is_empty()) {
+    selector.title = Some(TextMatcher::Contains(title.to_string()));
   }
   selector
 }
@@ -538,57 +522,61 @@ fn window_report_fields(window: &auv_driver::Window) -> Vec<InvokeReportField> {
   fields
 }
 
+#[derive(TableRow)]
+struct WindowRow {
+  #[table(header = "REF")]
+  reference: String,
+  app: String,
+  title: String,
+  frame: String,
+  #[table(wide)]
+  bundle: String,
+  #[table(wide, header = "PID")]
+  process_id: String,
+  #[table(wide)]
+  flags: String,
+}
+
 fn window_list_report(windows: &[auv_driver::Window]) -> InvokeReport {
+  let rows = windows
+    .iter()
+    .map(|window| {
+      let mut flags = Vec::new();
+      if window.is_main {
+        flags.push("main");
+      }
+      flags.push(if window.is_visible {
+        "visible"
+      } else {
+        "hidden"
+      });
+      WindowRow {
+        reference: window.reference.id.clone(),
+        app: window.app_name.as_deref().report_or("unknown").to_string(),
+        title: window.title.as_deref().report_or("untitled").to_string(),
+        frame: window.frame.report_value(),
+        bundle: window.app_bundle_id.as_deref().report_or("unknown").to_string(),
+        process_id: window.process_id.map(|pid| pid.to_string()).unwrap_or_else(|| "unknown".to_string()),
+        flags: flags.join(","),
+      }
+    })
+    .collect::<Vec<_>>();
   InvokeReport {
     fields: vec![InvokeReportField::new(
       "Result",
       format!("{} window(s)", windows.len()),
     )],
-    tables: vec![
-      InvokeReportTable::new(
-        &["REF", "APP", "TITLE", "FRAME"],
-        windows
-          .iter()
-          .map(|window| {
-            InvokeReportTableRow::new([
-              window.reference.id.clone(),
-              window.app_name.as_deref().report_or("unknown").to_string(),
-              window.title.as_deref().report_or("untitled").to_string(),
-              window.frame.report_value(),
-            ])
-          })
-          .collect(),
-      )
-      .with_display_max_chars(vec![None, Some(18), Some(40), None]),
-    ],
+    tables: vec![InvokeReportTable::from_rows(&rows, TableOptions::default()).with_display_max_chars(vec![None, Some(18), Some(40), None])],
     wide_tables: vec![
-      InvokeReportTable::new(
-        &["REF", "APP", "TITLE", "FRAME", "BUNDLE", "PID", "FLAGS"],
-        windows
-          .iter()
-          .map(|window| {
-            let mut flags = Vec::new();
-            if window.is_main {
-              flags.push("main");
-            }
-            flags.push(if window.is_visible {
-              "visible"
-            } else {
-              "hidden"
-            });
-            InvokeReportTableRow::new([
-              window.reference.id.clone(),
-              window.app_name.as_deref().report_or("unknown").to_string(),
-              window.title.as_deref().report_or("untitled").to_string(),
-              window.frame.report_value(),
-              window.app_bundle_id.as_deref().report_or("unknown").to_string(),
-              window.process_id.map(|pid| pid.to_string()).unwrap_or_else(|| "unknown".to_string()),
-              flags.join(","),
-            ])
-          })
-          .collect(),
-      )
-      .with_display_max_chars(vec![None, Some(18), Some(40), None, Some(32), None, None]),
+      InvokeReportTable::from_rows(&rows, TableOptions::default().wide(true)).with_display_max_chars(vec![
+        None,
+        Some(18),
+        Some(40),
+        None,
+        Some(32),
+        None,
+        None,
+      ]),
     ],
     sections: Vec::new(),
   }

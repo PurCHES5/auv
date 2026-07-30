@@ -70,7 +70,7 @@ fn root_auv_runtime_package_dependencies_exclude_game_and_godot_crates() {
   assert!(
     offenders.is_empty(),
     "auv-runtime package [dependencies]/[dev-dependencies]/[target.*.dependencies] must not list game/godot crates; found {offenders:?}. \
-     Keep supported-product dependencies outside the core runtime package. Companion falsifier: rg 'auv_game_' src/"
+     Keep supported app/game dependencies outside the core runtime package. Companion falsifier: rg 'auv_game_' src/"
   );
 }
 
@@ -81,7 +81,12 @@ fn auv_cli_package_dependencies_exclude_supported_apps_and_games() {
 
   for table in package_dependency_table_bodies(cargo_toml) {
     for key in dependency_keys(&table) {
-      if key.starts_with("auv-game-") || matches!(key.as_str(), "auv-godot" | "auv-apple-textedit") {
+      if key.starts_with("auv-game-")
+        || matches!(
+          key.as_str(),
+          "auv-godot" | "auv-apple-music" | "auv-apple-notes" | "auv-apple-textedit" | "auv-netease-music" | "auv-qqmusic" | "auv-steam"
+        )
+      {
         offenders.push(key);
       }
     }

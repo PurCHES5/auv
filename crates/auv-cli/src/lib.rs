@@ -5,8 +5,7 @@
 
 pub mod cli;
 pub mod cli_frontend;
+pub mod commands;
 pub mod mcp;
-pub mod registry;
+pub mod plugin;
 pub mod xtask;
-
-pub use registry::product_registry;

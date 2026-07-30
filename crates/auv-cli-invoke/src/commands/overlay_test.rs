@@ -19,6 +19,7 @@ fn every_overlay_primitive_and_component_is_registered_and_dry_run_visualizable(
       command_id: command_id.to_string(),
       target_application_id: None,
       inputs,
+      typed_args: None,
       dry_run: true,
       cancellation: crate::InvokeCancellation::new(),
     }))
@@ -31,16 +32,8 @@ fn every_overlay_primitive_and_component_is_registered_and_dry_run_visualizable(
 
 #[test]
 fn style_arguments_refine_presets_deterministically() {
-  let input = input(
-    "overlay.outline",
-    [
-      ("padding", "4"),
-      ("border-color", "#7fd030cc"),
-      ("border-width", "5"),
-      ("corner-radius", "12"),
-    ],
-  );
-  let style = outline_style(&input, OutlineStyle::selected(), "padding", "corner-radius").expect("style should parse");
+  let style = outline_style("overlay.outline", OutlineStyle::selected(), Some(4.0), Some("#7fd030cc"), Some(5.0), Some(12.0))
+    .expect("style should parse");
 
   assert_eq!(style.padding, Insets::all(4.0));
   assert_eq!(style.stroke.width, 5.0);
@@ -78,16 +71,6 @@ fn click_target_inputs() -> BTreeMap<String, String> {
     ("cursor-label-visible", "false"),
     ("status", "click target"),
   ])
-}
-
-fn input<const N: usize>(command_id: &str, values: [(&str, &str); N]) -> InvokeCommandInput {
-  InvokeCommandInput {
-    command_id: command_id.to_string(),
-    target_application_id: None,
-    inputs: pairs(values),
-    dry_run: true,
-    cancellation: crate::InvokeCancellation::new(),
-  }
 }
 
 fn pairs<const N: usize>(values: [(&str, &str); N]) -> BTreeMap<String, String> {

@@ -1,8 +1,11 @@
 use auv_media_macos::output::{MediaControlOutcome, NowPlayingOutput};
 
-use crate::{
-  CommandGroup, InvokeCommandInput, InvokeCommandOutput, InvokeCommandResult, InvokeReport, InvokeReportField, arg::NO_ARGS, invoke_command,
-};
+use crate::{CommandGroup, InvokeCommandInput, InvokeCommandOutput, InvokeCommandResult, InvokeReport, InvokeReportField, invoke_command};
+use clap::Args;
+
+#[derive(Clone, Debug, Args, serde::Serialize, serde::Deserialize)]
+#[command(after_long_help = "Examples:\n  auv invoke mediaControl.nowPlaying")]
+struct NowPlayingArgs {}
 
 pub fn group() -> CommandGroup {
   CommandGroup::new("mediaControl", "MEDIA CONTROL")
@@ -18,9 +21,9 @@ pub fn group() -> CommandGroup {
   id = "mediaControl.nowPlaying",
   group = "mediaControl",
   description = "Read structured now-playing media state from the desktop backend.",
-  args = NO_ARGS,
+  input = NowPlayingArgs,
 )]
-async fn media_control_now_playing(_input: InvokeCommandInput) -> InvokeCommandResult {
+async fn media_control_now_playing(_input: InvokeCommandInput, _args: NowPlayingArgs) -> InvokeCommandResult {
   let result = read_now_playing().await?;
   Ok(InvokeCommandOutput::from_result(&result)?.with_report(now_playing_report(&result)))
 }
@@ -30,53 +33,73 @@ pub async fn read_now_playing() -> Result<auv_media_macos::output::NowPlayingOut
   Ok(auv_media_macos::output::build_now_playing_output(&state))
 }
 
+#[derive(Clone, Debug, Args, serde::Serialize, serde::Deserialize)]
+#[command(after_long_help = "Examples:\n  auv invoke mediaControl.play")]
+struct PlayArgs {}
+
 #[invoke_command(
   id = "mediaControl.play",
   group = "mediaControl",
   description = "Send a generic system media play command and read now-playing state for verification.",
-  args = NO_ARGS,
+  input = PlayArgs,
 )]
-async fn media_control_play(_input: InvokeCommandInput) -> InvokeCommandResult {
+async fn media_control_play(_input: InvokeCommandInput, _args: PlayArgs) -> InvokeCommandResult {
   media_control_output(&control_media(auv_media_macos::MediaCommand::Play).await?)
 }
+
+#[derive(Clone, Debug, Args, serde::Serialize, serde::Deserialize)]
+#[command(after_long_help = "Examples:\n  auv invoke mediaControl.pause")]
+struct PauseArgs {}
 
 #[invoke_command(
   id = "mediaControl.pause",
   group = "mediaControl",
   description = "Send a generic system media pause command and read now-playing state for verification.",
-  args = NO_ARGS,
+  input = PauseArgs,
 )]
-async fn media_control_pause(_input: InvokeCommandInput) -> InvokeCommandResult {
+async fn media_control_pause(_input: InvokeCommandInput, _args: PauseArgs) -> InvokeCommandResult {
   media_control_output(&control_media(auv_media_macos::MediaCommand::Pause).await?)
 }
+
+#[derive(Clone, Debug, Args, serde::Serialize, serde::Deserialize)]
+#[command(after_long_help = "Examples:\n  auv invoke mediaControl.togglePlayPause")]
+struct TogglePlayPauseArgs {}
 
 #[invoke_command(
   id = "mediaControl.togglePlayPause",
   group = "mediaControl",
   description = "Send a generic system media play/pause toggle command and compare now-playing state before and after.",
-  args = NO_ARGS,
+  input = TogglePlayPauseArgs,
 )]
-async fn media_control_toggle_play_pause(_input: InvokeCommandInput) -> InvokeCommandResult {
+async fn media_control_toggle_play_pause(_input: InvokeCommandInput, _args: TogglePlayPauseArgs) -> InvokeCommandResult {
   media_control_output(&control_media(auv_media_macos::MediaCommand::TogglePlayPause).await?)
 }
+
+#[derive(Clone, Debug, Args, serde::Serialize, serde::Deserialize)]
+#[command(after_long_help = "Examples:\n  auv invoke mediaControl.next")]
+struct NextArgs {}
 
 #[invoke_command(
   id = "mediaControl.next",
   group = "mediaControl",
   description = "Send a generic system media next-track command and compare now-playing identity before and after.",
-  args = NO_ARGS,
+  input = NextArgs,
 )]
-async fn media_control_next(_input: InvokeCommandInput) -> InvokeCommandResult {
+async fn media_control_next(_input: InvokeCommandInput, _args: NextArgs) -> InvokeCommandResult {
   media_control_output(&control_media(auv_media_macos::MediaCommand::NextTrack).await?)
 }
+
+#[derive(Clone, Debug, Args, serde::Serialize, serde::Deserialize)]
+#[command(after_long_help = "Examples:\n  auv invoke mediaControl.previous")]
+struct PreviousArgs {}
 
 #[invoke_command(
   id = "mediaControl.previous",
   group = "mediaControl",
   description = "Send a generic system media previous-track command and compare now-playing identity before and after.",
-  args = NO_ARGS,
+  input = PreviousArgs,
 )]
-async fn media_control_previous(_input: InvokeCommandInput) -> InvokeCommandResult {
+async fn media_control_previous(_input: InvokeCommandInput, _args: PreviousArgs) -> InvokeCommandResult {
   media_control_output(&control_media(auv_media_macos::MediaCommand::PreviousTrack).await?)
 }
 

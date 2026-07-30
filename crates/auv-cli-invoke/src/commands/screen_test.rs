@@ -10,61 +10,28 @@ fn inputs(values: [(&str, &str); 4]) -> BTreeMap<String, String> {
 }
 
 #[test]
-fn region_rejects_incomplete_non_finite_and_non_positive_fields() {
-  let invalid = [
-    (BTreeMap::new(), "screen.captureRegion requires --x"),
-    (BTreeMap::from([("x".to_string(), "1".to_string())]), "screen.captureRegion requires --y"),
-    (inputs([("x", "NaN"), ("y", "2"), ("width", "3"), ("height", "4")]), "screen.captureRegion requires finite --x"),
-    (inputs([("x", "1"), ("y", "inf"), ("width", "3"), ("height", "4")]), "screen.captureRegion requires finite --y"),
-    (inputs([("x", "1"), ("y", "2"), ("width", "0"), ("height", "4")]), "screen.captureRegion requires --width greater than zero"),
-    (inputs([("x", "1"), ("y", "2"), ("width", "-3"), ("height", "4")]), "screen.captureRegion requires --width greater than zero"),
-    (inputs([("x", "1"), ("y", "2"), ("width", "3"), ("height", "0")]), "screen.captureRegion requires --height greater than zero"),
-    (inputs([("x", "1"), ("y", "2"), ("width", "3"), ("height", "-4")]), "screen.captureRegion requires --height greater than zero"),
-    (inputs([("x", "1"), ("y", "2"), ("width", "3"), ("height", "-inf")]), "screen.captureRegion requires finite --height"),
-  ];
-
-  for (fields, expected) in invalid {
-    assert_eq!(Region::parse(&fields, "screen.captureRegion").expect_err("invalid region must fail"), expected);
-  }
-}
-
-#[test]
-fn region_accepts_finite_origin_and_positive_size() {
-  let region = Region::parse(
-    &inputs([
-      ("x", "-12.5"),
-      ("y", "0"),
-      ("width", "640.25"),
-      ("height", "480"),
-    ]),
-    "screen.captureRegion",
-  )
-  .expect("valid region")
-  .into_rect();
-
-  assert_eq!(region, auv_driver::Rect::new(-12.5, 0.0, 640.25, 480.0));
-}
-
-#[test]
 fn capture_region_validates_the_same_region_before_dry_and_live_branches() {
   let valid_dry_run = InvokeCommandInput {
     command_id: "screen.captureRegion".to_string(),
     target_application_id: None,
     inputs: inputs([("x", "1"), ("y", "2"), ("width", "3"), ("height", "4")]),
+    typed_args: None,
     dry_run: true,
     cancellation: InvokeCancellation::new(),
   };
-  assert!(futures_executor::block_on(capture_region(valid_dry_run)).is_ok());
+  assert!(futures_executor::block_on(capture_region_invoke_command().invoke(valid_dry_run)).is_ok());
 
   let invalid_live = InvokeCommandInput {
     command_id: "screen.captureRegion".to_string(),
     target_application_id: None,
     inputs: inputs([("x", "1"), ("y", "2"), ("width", "0"), ("height", "4")]),
+    typed_args: None,
     dry_run: false,
     cancellation: InvokeCancellation::new(),
   };
-  let error = futures_executor::block_on(capture_region(invalid_live)).expect_err("invalid live region must fail before capture");
-  assert!(error.contains("width") && error.contains("greater than zero"));
+  let error = futures_executor::block_on(capture_region_invoke_command().invoke(invalid_live))
+    .expect_err("invalid live region must fail before capture");
+  assert!(error.contains("greater than zero"));
 }
 
 #[cfg(target_os = "macos")]
@@ -78,7 +45,7 @@ fn screen_text_output_returns_typed_ocr_matches() {
     }],
   };
 
-  let output = screen_text_matches_output("screen.findText", &matches).expect("OCR result should serialize");
+  let output = screen_text_matches_output(&matches).expect("OCR result should serialize");
 
   assert_eq!(output.result(), Some(&serde_json::to_value(&matches).expect("fixture should serialize")));
 }

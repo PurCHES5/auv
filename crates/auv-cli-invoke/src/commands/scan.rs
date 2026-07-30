@@ -2,12 +2,12 @@ use std::path::PathBuf;
 
 use crate::{
   CommandGroup, InvokeCommandInput, InvokeCommandOutput, InvokeCommandResult, InvokeReport, InvokeReportField, InvokeReportValue,
-  arg::{SCAN_COVERAGE_ARGS, SCAN_FRAME_ARGS},
   artifact::{emit_bytes_with_receipt, emit_prepared_with_receipt},
   invoke_command,
 };
 use auv_scan::{build_coverage_fixture, load_frame_fixture};
 use auv_tracing::{ArtifactUri, Attributes, ByteLength, EmitBytesOptions, NewArtifact};
+use clap::Args;
 use futures_util::io::Cursor as AsyncCursor;
 use serde::Serialize;
 
@@ -18,19 +18,30 @@ pub fn group() -> CommandGroup {
   CommandGroup::new("scan", "SCAN").command(frame_invoke_command()).command(coverage_invoke_command())
 }
 
+#[derive(Clone, Debug, Args, Serialize, serde::Deserialize)]
+#[command(after_long_help = "Examples:\n  auv invoke scan.frame --fixture-dir fixtures/frame --label baseline")]
+struct ScanFrameArgs {
+  /// Directory containing a single-frame scan fixture.
+  #[arg(long, value_name = "PATH")]
+  #[serde(rename = "fixture-dir")]
+  fixture_dir: PathBuf,
+  /// Human-readable label for this scan fixture invocation.
+  #[arg(long)]
+  label: Option<String>,
+}
+
 #[invoke_command(
   id = "scan.frame",
   group = "scan",
   description = "Produce a single scan-frame-v0 artifact bundle from a hermetic fixture directory and stage it into the run.",
-  args = SCAN_FRAME_ARGS,
+  input = ScanFrameArgs,
 )]
-async fn frame(input: InvokeCommandInput) -> InvokeCommandResult {
+async fn frame(input: InvokeCommandInput, args: ScanFrameArgs) -> InvokeCommandResult {
   if input.dry_run {
     return Ok(InvokeCommandOutput::completed());
   }
 
-  let fixture_dir = input.required_input("fixture-dir")?.to_string();
-  let (frame, artifacts) = produce_scan_frame_recorded(PathBuf::from(&fixture_dir)).await?;
+  let (frame, artifacts) = produce_scan_frame_recorded(args.fixture_dir).await?;
   let mut fields = vec![
     InvokeReportField::new("Frame ID", &frame.frame_id),
     InvokeReportField::new("Sequence", frame.sequence_index.to_string()),
@@ -103,19 +114,27 @@ fn scan_frame_artifact(frame: &auv_scan::ScanFrame, image_uri: &ArtifactUri) -> 
   .map_err(|error| format!("failed to construct auv.scan.frame artifact: {error}"))
 }
 
+#[derive(Clone, Debug, Args, Serialize, serde::Deserialize)]
+#[command(after_long_help = "Examples:\n  auv invoke scan.coverage --fixture-dir fixtures/coverage --json")]
+struct ScanCoverageArgs {
+  /// Directory containing a coverage scenario manifest; frame PNGs are resolved through its frame_fixture cross-reference.
+  #[arg(long, value_name = "PATH")]
+  #[serde(rename = "fixture-dir")]
+  fixture_dir: PathBuf,
+}
+
 #[invoke_command(
   id = "scan.coverage",
   group = "scan",
   description = "Evaluate typed scan coverage from a fixture and record it in the active run.",
-  args = SCAN_COVERAGE_ARGS,
+  input = ScanCoverageArgs,
 )]
-async fn coverage(input: InvokeCommandInput) -> InvokeCommandResult {
+async fn coverage(input: InvokeCommandInput, args: ScanCoverageArgs) -> InvokeCommandResult {
   if input.dry_run {
     return Ok(InvokeCommandOutput::completed());
   }
 
-  let fixture_dir = input.required_input("fixture-dir")?.to_string();
-  let (coverage, artifact) = produce_scan_coverage_recorded(PathBuf::from(&fixture_dir)).await?;
+  let (coverage, artifact) = produce_scan_coverage_recorded(args.fixture_dir).await?;
   let completeness = match coverage.status() {
     auv_scan::CoverageStatus::Complete => "complete".to_string(),
     auv_scan::CoverageStatus::Incomplete { reason, .. } => format!("incomplete: {reason}"),

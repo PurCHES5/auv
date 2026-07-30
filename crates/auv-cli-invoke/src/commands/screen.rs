@@ -1,50 +1,9 @@
-use crate::{
-  CommandGroup, InvokeCommandInput, InvokeCommandOutput, InvokeCommandResult, InvokeReport, InvokeReportField,
-  arg::{IMAGE_TEXT_ARGS, REGION_ARGS, SCREEN_TEXT_ARGS, TARGET_ARGS},
-  invoke_command,
-};
+use crate::{CommandGroup, InvokeCommandInput, InvokeCommandOutput, InvokeCommandResult, InvokeReport, InvokeReportField, invoke_command};
 use auv_tracing::ArtifactMetadata;
+use clap::Args;
 
 #[cfg(target_os = "macos")]
 use crate::artifact::{emit_png, emit_png_with_receipt};
-
-/// A complete, finite capture region with a strictly positive size.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Region(auv_driver::Rect);
-
-impl Region {
-  pub fn parse(inputs: &std::collections::BTreeMap<String, String>, command_id: &str) -> Result<Self, String> {
-    fn field(inputs: &std::collections::BTreeMap<String, String>, command_id: &str, name: &str) -> Result<f64, String> {
-      let value = inputs
-        .get(name)
-        .map(String::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| format!("{command_id} requires --{name}"))?
-        .parse::<f64>()
-        .map_err(|error| format!("{command_id} received invalid --{name}: {error}"))?;
-      if !value.is_finite() {
-        return Err(format!("{command_id} requires finite --{name}"));
-      }
-      Ok(value)
-    }
-
-    let x = field(inputs, command_id, "x")?;
-    let y = field(inputs, command_id, "y")?;
-    let width = field(inputs, command_id, "width")?;
-    let height = field(inputs, command_id, "height")?;
-    if width <= 0.0 {
-      return Err(format!("{command_id} requires --width greater than zero"));
-    }
-    if height <= 0.0 {
-      return Err(format!("{command_id} requires --height greater than zero"));
-    }
-    Ok(Self(auv_driver::Rect::new(x, y, width, height)))
-  }
-
-  pub fn into_rect(self) -> auv_driver::Rect {
-    self.0
-  }
-}
 
 pub fn group() -> CommandGroup {
   // TODO(invoke-screen-stubs): row and image commands stay intentionally
@@ -56,15 +15,41 @@ pub fn group() -> CommandGroup {
     .command(click_screen_text_invoke_command())
 }
 
+#[derive(Clone, Debug, Args, serde::Serialize, serde::Deserialize)]
+#[command(after_long_help = "Examples:\n  auv invoke screen.captureRegion --x 0 --y 0 --width 800 --height 600")]
+struct CaptureRegionArgs {
+  /// Region left coordinate in logical display space.
+  #[arg(long)]
+  x: f64,
+  /// Region top coordinate in logical display space.
+  #[arg(long)]
+  y: f64,
+  /// Region width; must be greater than zero.
+  #[arg(long)]
+  width: f64,
+  /// Region height; must be greater than zero.
+  #[arg(long)]
+  height: f64,
+  /// Human-readable capture label.
+  #[arg(long)]
+  label: Option<String>,
+}
+
 #[invoke_command(
   id = "screen.captureRegion",
   group = "screen",
-  description = "Capture one display-contained region and emit a coordinate contract. If activate_target_before_capture is true, the target app is foregrounded first.",
-  args = REGION_ARGS,
+  description = "Capture one display-contained region and emit its coordinate contract.",
+  input = CaptureRegionArgs,
 )]
-async fn capture_region(input: InvokeCommandInput) -> InvokeCommandResult {
+async fn capture_region(input: InvokeCommandInput, args: CaptureRegionArgs) -> InvokeCommandResult {
   reject_target_activation(&input, "screen.captureRegion")?;
-  let region = Region::parse(&input.inputs, &input.command_id)?.into_rect();
+  if !args.x.is_finite() || !args.y.is_finite() {
+    return Err("screen.captureRegion requires finite --x and --y".to_string());
+  }
+  if !args.width.is_finite() || !args.height.is_finite() || args.width <= 0.0 || args.height <= 0.0 {
+    return Err("screen.captureRegion requires --width and --height greater than zero".to_string());
+  }
+  let region = auv_driver::Rect::new(args.x, args.y, args.width, args.height);
   input.cancellation.check().map_err(|error| error.to_string())?;
   if input.dry_run {
     return Ok(InvokeCommandOutput::completed());
@@ -119,13 +104,31 @@ fn region_capture_output(capture: &auv_driver::RegionCapture, artifact: Option<A
   Ok(output.with_artifacts(artifact))
 }
 
+#[derive(Clone, Debug, Args, serde::Serialize, serde::Deserialize)]
+#[command(
+  after_long_help = "Examples:\n  # Find text on the current screen\n  auv invoke screen.findText \"Settings\"\n\n  # Emit OCR matches as JSON\n  auv invoke screen.findText \"Settings\" --json"
+)]
+struct FindScreenTextArgs {
+  /// Text to locate in the captured image.
+  #[arg(value_name = "TEXT")]
+  query: String,
+}
+
+#[derive(Clone, Debug, Args, serde::Serialize, serde::Deserialize)]
+#[command(after_long_help = "Examples:\n  auv invoke screen.waitForText \"Ready\"")]
+struct WaitForScreenTextArgs {
+  /// Text to wait for in the captured image.
+  #[arg(value_name = "TEXT")]
+  query: String,
+}
+
 #[invoke_command(
   id = "screen.findText",
   group = "screen",
-  description = "Capture a screenshot and locate OCR text anchors in screenshot pixel space. If activate_target_before_capture is true, the target app is foregrounded first.",
-  args = SCREEN_TEXT_ARGS,
+  description = "Capture a screenshot and locate OCR text anchors in screenshot pixel space. Target activation is not yet available for this command.",
+  input = FindScreenTextArgs,
 )]
-async fn find_screen_text(input: InvokeCommandInput) -> InvokeCommandResult {
+async fn find_screen_text(input: InvokeCommandInput, args: FindScreenTextArgs) -> InvokeCommandResult {
   #[cfg(target_os = "macos")]
   {
     reject_target_activation(&input, "screen.findText")?;
@@ -133,13 +136,12 @@ async fn find_screen_text(input: InvokeCommandInput) -> InvokeCommandResult {
       return Ok(InvokeCommandOutput::completed());
     }
 
-    let query = input.required_input("query")?.to_string();
-    let matches = recognize_screen_text(query, false).await?;
-    screen_text_matches_output(&input.command_id, &matches)
+    let matches = recognize_screen_text(args.query, false).await?;
+    screen_text_matches_output(&matches)
   }
   #[cfg(not(target_os = "macos"))]
   {
-    let _ = input;
+    let _ = (input, args);
     Err("screen text OCR is only available on macOS".to_string())
   }
 }
@@ -147,10 +149,10 @@ async fn find_screen_text(input: InvokeCommandInput) -> InvokeCommandResult {
 #[invoke_command(
   id = "screen.waitForText",
   group = "screen",
-  description = "Poll live-desktop OCR until a target text anchor appears or the timeout expires. If activate_target_before_capture is true, the target app is foregrounded before each capture attempt.",
-  args = SCREEN_TEXT_ARGS,
+  description = "Poll live-desktop OCR until a target text anchor appears or the timeout expires. Target activation is not yet available for this command.",
+  input = WaitForScreenTextArgs,
 )]
-async fn wait_for_screen_text(input: InvokeCommandInput) -> InvokeCommandResult {
+async fn wait_for_screen_text(input: InvokeCommandInput, args: WaitForScreenTextArgs) -> InvokeCommandResult {
   #[cfg(target_os = "macos")]
   {
     reject_target_activation(&input, "screen.waitForText")?;
@@ -158,13 +160,12 @@ async fn wait_for_screen_text(input: InvokeCommandInput) -> InvokeCommandResult 
       return Ok(InvokeCommandOutput::completed());
     }
 
-    let query = input.required_input("query")?.to_string();
-    let matches = recognize_screen_text(query, true).await?;
-    screen_text_matches_output(&input.command_id, &matches)
+    let matches = recognize_screen_text(args.query, true).await?;
+    screen_text_matches_output(&matches)
   }
   #[cfg(not(target_os = "macos"))]
   {
-    let _ = input;
+    let _ = (input, args);
     Err("screen text OCR is only available on macOS".to_string())
   }
 }
@@ -204,61 +205,31 @@ pub async fn recognize_screen_text(_query: String, _wait: bool) -> Result<auv_dr
 }
 
 #[cfg(target_os = "macos")]
-fn screen_text_matches_output(_command_id: &str, matches: &auv_driver::OcrMatches) -> InvokeCommandResult {
+fn screen_text_matches_output(matches: &auv_driver::OcrMatches) -> InvokeCommandResult {
   let mut output = InvokeCommandOutput::from_result(matches)?;
   output.report = Some(crate::commands::ocr::match_report(&matches.matches, None));
   Ok(output)
 }
 
-#[invoke_command(
-  id = "screen.findRows",
-  group = "screen",
-  description = "Detect visible OCR row bands inside a constrained screen region without depending on one exact anchor string. If activate_target_before_capture is true, the target app is foregrounded first.",
-  args = TARGET_ARGS,
-)]
-async fn find_screen_rows(_input: InvokeCommandInput) -> InvokeCommandResult {
-  // TODO(invoke-screen-rows): implement after VisionApi exposes typed row
-  // detection and the command schema can express its region and thresholds.
-  unimplemented!("screen.findRows")
-}
-
-#[invoke_command(
-  id = "screen.waitForRows",
-  group = "screen",
-  description = "Poll live-desktop OCR row detection until at least a target number of visible rows appears or the timeout expires. If activate_target_before_capture is true, the target app is foregrounded before each capture attempt.",
-  args = TARGET_ARGS,
-)]
-async fn wait_for_screen_rows(_input: InvokeCommandInput) -> InvokeCommandResult {
-  // TODO(invoke-screen-rows): see `find_screen_rows`; waiting additionally
-  // needs an owned polling and timeout policy.
-  unimplemented!("screen.waitForRows")
-}
-
-#[invoke_command(
-  id = "screen.findImageText",
-  group = "screen",
-  description = "Locate OCR text anchors inside an existing image artifact without touching the live desktop.",
-  args = IMAGE_TEXT_ARGS,
-)]
-async fn find_image_text(_input: InvokeCommandInput) -> InvokeCommandResult {
-  // TODO(invoke-image-ocr): implement after VisionApi accepts a typed image
-  // artifact input instead of a frontend-local path.
-  unimplemented!("screen.findImageText")
+#[derive(Clone, Debug, Args, serde::Serialize, serde::Deserialize)]
+#[command(after_long_help = "Examples:\n  auv invoke screen.clickText \"Continue\"")]
+struct ClickScreenTextArgs {
+  /// Text anchor to click.
+  #[arg(value_name = "TEXT")]
+  query: String,
 }
 
 #[invoke_command(
   id = "screen.clickText",
   group = "screen",
-  description = "Capture a screenshot, resolve an OCR text anchor, and click its projected logical point. If activate_target_before_capture is true, the target app is foregrounded before capture.",
-  args = SCREEN_TEXT_ARGS,
+  description = "Capture a screenshot, resolve an OCR text anchor, and click its projected logical point. Target activation is not yet available for this command.",
+  input = ClickScreenTextArgs,
 )]
-async fn click_screen_text(input: InvokeCommandInput) -> InvokeCommandResult {
+async fn click_screen_text(input: InvokeCommandInput, args: ClickScreenTextArgs) -> InvokeCommandResult {
   #[cfg(target_os = "macos")]
   {
-    use auv_driver::{CaptureOptions, Click, RatioRect};
-
     reject_target_activation(&input, "screen.clickText")?;
-    let query = input.required_input("query")?.to_string();
+    let query = args.query;
     if input.dry_run {
       return Ok(super::input::validation_only_output());
     }
@@ -268,7 +239,7 @@ async fn click_screen_text(input: InvokeCommandInput) -> InvokeCommandResult {
   }
   #[cfg(not(target_os = "macos"))]
   {
-    let _ = input;
+    let _ = (input, args);
     Err("screen.clickText is only available on macOS".to_string())
   }
 }
@@ -315,18 +286,6 @@ pub async fn click_recognized_screen_text(query: String) -> Result<ScreenTextCli
     let _ = query;
     Err("screen.clickText is only available on macOS".to_string())
   }
-}
-
-#[invoke_command(
-  id = "screen.clickRow",
-  group = "screen",
-  description = "Detect visible OCR row bands inside a constrained screen region and click a chosen row-derived point. If activate_target_before_capture is true, the target app is foregrounded before capture.",
-  args = TARGET_ARGS,
-)]
-async fn click_screen_row(_input: InvokeCommandInput) -> InvokeCommandResult {
-  // TODO(invoke-screen-rows): implement after typed row detection and
-  // row-to-point policy can feed InputApi and return InputActionResult.
-  unimplemented!("screen.clickRow")
 }
 
 fn reject_target_activation(input: &InvokeCommandInput, command_id: &str) -> Result<(), String> {

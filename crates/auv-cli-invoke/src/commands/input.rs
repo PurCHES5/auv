@@ -1,14 +1,7 @@
-use crate::{
-  CommandGroup, InvokeCommandInput, InvokeCommandOutput, InvokeCommandResult,
-  arg::{
-    KEY_ARGS, QUERY_ARGS, QUERY_OR_CANDIDATE_ARGS, QUERY_OR_CANDIDATE_OVERLAY_ARGS, QUERY_OVERLAY_ARGS, TARGET_ARGS, TEXT_ARGS, WINDOW_ARGS,
-    WINDOW_CLICK_POINT_ARGS, WINDOW_QUERY_OVERLAY_ARGS,
-  },
-  artifact::emit_prepared,
-  invoke_command,
-};
+use crate::{CommandGroup, InvokeCommandInput, InvokeCommandOutput, InvokeCommandResult, artifact::emit_prepared, invoke_command};
 use crate::{InvokeReport, InvokeReportField};
 use auv_tracing::{Attributes, ByteLength, NewArtifact};
+use clap::{Args, ValueEnum};
 use futures_util::io::Cursor as AsyncCursor;
 
 use auv_driver::overlay::{Overlay, components::ClickTarget};
@@ -27,13 +20,21 @@ pub fn group() -> CommandGroup {
     .command(click_window_point_invoke_command())
 }
 
+#[derive(Clone, Debug, Args, serde::Serialize, serde::Deserialize)]
+#[command(after_long_help = "Examples:\n  auv invoke input.focusText \"Search\" --target com.apple.TextEdit")]
+struct FocusTextArgs {
+  /// Text identifying the input to focus.
+  #[arg(value_name = "TEXT")]
+  query: String,
+}
+
 #[invoke_command(
   id = "input.focusText",
   group = "input",
-  description = "Focus a target macOS text input through AX, either by --query text or by a promoted --candidate JSON payload.",
-  args = QUERY_OR_CANDIDATE_ARGS,
+  description = "Focus a target macOS text input through AX using its visible text.",
+  input = FocusTextArgs,
 )]
-async fn focus_text_input(input: InvokeCommandInput) -> InvokeCommandResult {
+async fn focus_text_input(input: InvokeCommandInput, _args: FocusTextArgs) -> InvokeCommandResult {
   if input.dry_run {
     return Ok(InvokeCommandOutput::completed());
   }
@@ -57,36 +58,21 @@ pub async fn focus_text(app: String, query: String, candidate: String) -> Result
   }
 }
 
-#[invoke_command(
-  id = "input.pressButton",
-  group = "input",
-  description = "Press a known macOS button-like control by query through AX.",
-  args = QUERY_ARGS,
-)]
-async fn press_button(_input: InvokeCommandInput) -> InvokeCommandResult {
-  // TODO(invoke-input-ax-press): implement after AccessibilityApi owns a
-  // query-to-press operation returning InputActionResult.
-  unimplemented!("input.pressButton")
-}
-
-#[invoke_command(
-  id = "input.axPressButton",
-  group = "input",
-  description = "Press a control by query via AXUIElementPerformAction without moving the real cursor. Pass --overlay true to draw a visual AUV cursor over the target. Falls back with an error when the AX target has no matching action; use input.pressButton for non-AX-pressable targets.",
-  args = QUERY_OVERLAY_ARGS,
-)]
-async fn ax_press_button(_input: InvokeCommandInput) -> InvokeCommandResult {
-  // TODO(invoke-input-ax-press): see `press_button`.
-  unimplemented!("input.axPressButton")
+#[derive(Clone, Debug, Args, serde::Serialize, serde::Deserialize)]
+#[command(after_long_help = "Examples:\n  auv invoke input.axFocusText \"Search\" --target com.apple.TextEdit")]
+struct AxFocusTextArgs {
+  /// Text identifying the input to focus.
+  #[arg(value_name = "TEXT")]
+  query: String,
 }
 
 #[invoke_command(
   id = "input.axFocusText",
   group = "input",
-  description = "Focus a text input by query or promoted --candidate JSON via AXUIElementSetAttributeValue(kAXFocusedAttribute) without moving the real cursor. Pass --overlay true for the dual-cursor visual. Errors when the target does not accept programmatic focus; use input.focusText if pointer movement is acceptable.",
-  args = QUERY_OR_CANDIDATE_OVERLAY_ARGS,
+  description = "Focus a text input by visible text via AXUIElementSetAttributeValue(kAXFocusedAttribute) without moving the real cursor. Errors when the target does not accept programmatic focus; use input.focusText if pointer movement is acceptable.",
+  input = AxFocusTextArgs,
 )]
-async fn ax_focus_text_input(input: InvokeCommandInput) -> InvokeCommandResult {
+async fn ax_focus_text_input(input: InvokeCommandInput, _args: AxFocusTextArgs) -> InvokeCommandResult {
   if input.dry_run {
     return Ok(InvokeCommandOutput::completed());
   }
@@ -97,41 +83,25 @@ async fn ax_focus_text_input(input: InvokeCommandInput) -> InvokeCommandResult {
   focus_text_output(&result, &candidate)
 }
 
-#[invoke_command(
-  id = "input.axClickWindowText",
-  group = "input",
-  description = "Find visible text in a window via Vision OCR, resolve the AX node at that point, then press it via AXUIElementPerformAction without moving the real cursor. Pass --overlay true for the dual-cursor visual. Errors with a hint to window.clickText when the OCR anchor maps to a canvas-rendered or non-AX-pressable region.",
-  args = WINDOW_QUERY_OVERLAY_ARGS,
-)]
-async fn ax_click_window_text(_input: InvokeCommandInput) -> InvokeCommandResult {
-  // TODO(invoke-input-ax-click-window-text): implement after the driver owns
-  // OCR-to-AX resolution and returns InputActionResult evidence.
-  unimplemented!("input.axClickWindowText")
-}
-
-#[invoke_command(
-  id = "input.smartPress",
-  group = "input",
-  description = "ActionResolver v0 diagnostic press: try OCR-to-AX press first; if it fails and pointer fallback is allowed, fall back to pointer click.",
-  args = WINDOW_QUERY_OVERLAY_ARGS,
-)]
-async fn smart_press(_input: InvokeCommandInput) -> InvokeCommandResult {
-  // TODO(invoke-input-smart-press): implement only after an owner-approved
-  // resolver consumes current typed recognition and input results.
-  unimplemented!("input.smartPress")
+#[derive(Clone, Debug, Args, serde::Serialize, serde::Deserialize)]
+#[command(after_long_help = "Examples:\n  auv invoke input.typeText \"hello from AUV\"")]
+struct TypeTextArgs {
+  /// Text to type into the active control.
+  #[arg(value_name = "TEXT")]
+  text: String,
 }
 
 #[invoke_command(
   id = "input.typeText",
   group = "input",
   description = "Type text into the active macOS control through System Events.",
-  args = TEXT_ARGS,
+  input = TypeTextArgs,
 )]
-async fn type_text(input: InvokeCommandInput) -> InvokeCommandResult {
+async fn type_text(input: InvokeCommandInput, args: TypeTextArgs) -> InvokeCommandResult {
   #[cfg(target_os = "macos")]
   {
     reject_target_activation(&input, "input.typeText")?;
-    let text = input.required_input("text")?.to_string();
+    let text = args.text;
     if input.dry_run {
       return Ok(validation_only_output());
     }
@@ -141,7 +111,7 @@ async fn type_text(input: InvokeCommandInput) -> InvokeCommandResult {
   }
   #[cfg(not(target_os = "macos"))]
   {
-    let _ = input;
+    let _ = (input, args);
     Err("input.typeText is only available on macOS".to_string())
   }
 }
@@ -161,17 +131,25 @@ pub async fn type_text_into_active_control(text: String) -> Result<auv_driver::I
   }
 }
 
+#[derive(Clone, Debug, Args, serde::Serialize, serde::Deserialize)]
+#[command(after_long_help = "Examples:\n  auv invoke input.pasteText \"hello from AUV\"")]
+struct PasteTextArgs {
+  /// Text to paste into the active control.
+  #[arg(value_name = "TEXT")]
+  text: String,
+}
+
 #[invoke_command(
   id = "input.pasteText",
   group = "input",
   description = "Paste text into the active macOS control through the clipboard, then restore the prior clipboard snapshot.",
-  args = TEXT_ARGS,
+  input = PasteTextArgs,
 )]
-async fn paste_text_preserve_clipboard(input: InvokeCommandInput) -> InvokeCommandResult {
+async fn paste_text_preserve_clipboard(input: InvokeCommandInput, args: PasteTextArgs) -> InvokeCommandResult {
   #[cfg(target_os = "macos")]
   {
     reject_target_activation(&input, "input.pasteText")?;
-    let text = input.required_input("text")?.to_string();
+    let text = args.text;
     if input.dry_run {
       return Ok(validation_only_output());
     }
@@ -181,7 +159,7 @@ async fn paste_text_preserve_clipboard(input: InvokeCommandInput) -> InvokeComma
   }
   #[cfg(not(target_os = "macos"))]
   {
-    let _ = input;
+    let _ = (input, args);
     Err("input.pasteText is only available on macOS".to_string())
   }
 }
@@ -207,17 +185,25 @@ pub async fn paste_text_into_active_control(text: String) -> Result<auv_driver::
   }
 }
 
+#[derive(Clone, Debug, Args, serde::Serialize, serde::Deserialize)]
+#[command(after_long_help = "Examples:\n  auv invoke input.key cmd+f")]
+struct PressKeyArgs {
+  /// Keyboard key or shortcut to press.
+  #[arg(value_name = "KEY")]
+  key: String,
+}
+
 #[invoke_command(
   id = "input.key",
   group = "input",
   description = "Press a keyboard key or shortcut in the active macOS app through System Events.",
-  args = KEY_ARGS,
+  input = PressKeyArgs,
 )]
-async fn press_key(input: InvokeCommandInput) -> InvokeCommandResult {
+async fn press_key(input: InvokeCommandInput, args: PressKeyArgs) -> InvokeCommandResult {
   #[cfg(target_os = "macos")]
   {
     reject_target_activation(&input, "input.key")?;
-    let key = input.required_input("key")?.to_string();
+    let key = args.key;
     if input.dry_run {
       return Ok(validation_only_output());
     }
@@ -231,7 +217,7 @@ async fn press_key(input: InvokeCommandInput) -> InvokeCommandResult {
   }
   #[cfg(not(target_os = "macos"))]
   {
-    let _ = input;
+    let _ = (input, args);
     Err("input.key is only available on macOS".to_string())
   }
 }
@@ -257,30 +243,98 @@ pub async fn press_key_in_active_app(key: String) -> Result<auv_driver::InputAct
   }
 }
 
-#[invoke_command(
-  id = "input.clickPoint",
-  group = "input",
-  description = "Click a macOS global logical point through Quartz.",
-  args = TARGET_ARGS,
-)]
-async fn click_point(_input: InvokeCommandInput) -> InvokeCommandResult {
-  // TODO(invoke-input-click-point): add global x/y arguments before calling
-  // InputApi::click_at; the current command schema cannot express a point.
-  unimplemented!("input.clickPoint")
+#[derive(Clone, Debug, Args, serde::Serialize, serde::Deserialize)]
+#[command(after_long_help = "Examples:\n  auv invoke input.clickWindowPoint --target com.apple.TextEdit --relative-x 0.5 --relative-y 0.5")]
+struct ClickWindowPointArgs {
+  /// Window title text used to select the target.
+  #[arg(long, value_name = "TEXT")]
+  title: Option<String>,
+  /// Absolute window-pixel X coordinate.
+  #[arg(long, requires = "offset_y", conflicts_with = "relative_x")]
+  #[serde(rename = "offset-x", default)]
+  offset_x: Option<f64>,
+  /// Absolute window-pixel Y coordinate.
+  #[arg(long, requires = "offset_x", conflicts_with = "relative_y")]
+  #[serde(rename = "offset-y", default)]
+  offset_y: Option<f64>,
+  /// Relative window X coordinate in 0..1.
+  #[arg(long, requires = "relative_y")]
+  #[serde(rename = "relative-x", default)]
+  relative_x: Option<f64>,
+  /// Relative window Y coordinate in 0..1.
+  #[arg(long, requires = "relative_x")]
+  #[serde(rename = "relative-y", default)]
+  relative_y: Option<f64>,
+  /// Window input delivery policy.
+  #[arg(long, value_enum)]
+  #[serde(rename = "input-policy")]
+  input_policy: Option<InputPolicyArg>,
+  /// Number of consecutive clicks.
+  #[arg(long, value_parser = clap::value_parser!(u8).range(1..))]
+  #[serde(
+    rename = "click-count",
+    deserialize_with = "crate::command::deserialize_optional_nonzero_u8",
+    default
+  )]
+  click_count: Option<u8>,
+  /// Delay between clicks in milliseconds.
+  #[arg(long)]
+  #[serde(rename = "click-interval-ms")]
+  click_interval_ms: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum InputPolicyArg {
+  BackgroundOnly,
+  BackgroundPreferred,
+  ForegroundPreferred,
+}
+
+impl ClickWindowPointArgs {
+  fn point(&self, command_id: &str) -> Result<WindowPointInput, String> {
+    match (self.offset_x, self.offset_y, self.relative_x, self.relative_y) {
+      (Some(x), Some(y), None, None) if x.is_finite() && y.is_finite() && x >= 0.0 && y >= 0.0 => {
+        Ok(WindowPointInput(WindowPointKind::Offset(auv_driver::geometry::WindowPoint::new(x, y))))
+      }
+      (None, None, Some(x), Some(y)) if x.is_finite() && y.is_finite() && (0.0..=1.0).contains(&x) && (0.0..=1.0).contains(&y) => {
+        Ok(WindowPointInput(WindowPointKind::Relative(RelativeWindowPoint { x, y })))
+      }
+      (Some(_), Some(_), None, None) => Err(format!("{command_id} requires finite non-negative window offsets")),
+      (None, None, Some(_), Some(_)) => Err(format!("{command_id} requires relative coordinates within 0..=1")),
+      _ => Err(format!("{command_id} requires --offset-x/--offset-y or --relative-x/--relative-y")),
+    }
+  }
+
+  fn click_options(&self) -> auv_driver::ClickOptions {
+    click_options(self.input_policy.map(InputPolicyArg::driver_policy), self.click_count, self.click_interval_ms)
+  }
+}
+
+impl InputPolicyArg {
+  fn driver_policy(self) -> auv_driver::InputPolicy {
+    match self {
+      Self::BackgroundOnly => auv_driver::InputPolicy::BackgroundOnly,
+      Self::BackgroundPreferred => auv_driver::InputPolicy::BackgroundPreferred,
+      Self::ForegroundPreferred => auv_driver::InputPolicy::ForegroundPreferred,
+    }
+  }
 }
 
 #[invoke_command(
   id = "input.clickWindowPoint",
   group = "input",
-  description = "Click a point relative to a target macOS window, either from --relative_x/--relative_y inputs or from a promoted --candidate JSON payload.",
-  args = WINDOW_CLICK_POINT_ARGS,
+  description = "Click a point relative to a target macOS window using either --offset-x/--offset-y or --relative-x/--relative-y coordinates.",
+  input = ClickWindowPointArgs,
 )]
-async fn click_window_point(input: InvokeCommandInput) -> InvokeCommandResult {
+async fn click_window_point(input: InvokeCommandInput, args: ClickWindowPointArgs) -> InvokeCommandResult {
   #[cfg(target_os = "macos")]
   {
     let presentation_input = input.clone();
+    let point = args.point(&input.command_id)?;
+    let options = args.click_options();
     let capability = LocalWindowPointCapability::open()?;
-    let outcome = click_window_point_with_capability(input, &capability).await?;
+    let outcome = click_resolved_point_with_capability(input, args.title.as_deref(), point, options, &capability).await?;
     let result = outcome.into_result();
     let point = result.point.point();
     let screen_point = ScreenPoint::new(result.window.frame.origin.x + point.x, result.window.frame.origin.y + point.y);
@@ -295,21 +349,6 @@ async fn click_window_point(input: InvokeCommandInput) -> InvokeCommandResult {
         .with_auto_removal_after(std::time::Duration::from_millis(140)),
     )?;
     window_point_click_output(result, overlay)
-  }
-  #[cfg(not(target_os = "macos"))]
-  {
-    let _ = input;
-    Err("input.clickWindowPoint is only available on macOS".to_string())
-  }
-}
-
-/// Resolves and optionally delivers `input.clickWindowPoint`, returning the
-/// typed domain value used independently by CLI and MCP adapters.
-pub async fn click_window_point_domain(input: InvokeCommandInput) -> Result<WindowPointClickOutcome, String> {
-  #[cfg(target_os = "macos")]
-  {
-    let capability = LocalWindowPointCapability::open()?;
-    click_window_point_with_capability(input, &capability).await
   }
   #[cfg(not(target_os = "macos"))]
   {
@@ -358,17 +397,20 @@ impl WindowPointCapability for LocalWindowPointCapability {
   }
 }
 
-async fn click_window_point_with_capability<C>(input: InvokeCommandInput, capability: &C) -> Result<WindowPointClickOutcome, String>
+async fn click_resolved_point_with_capability<C>(
+  input: InvokeCommandInput,
+  title: Option<&str>,
+  point: WindowPointInput,
+  options: auv_driver::ClickOptions,
+  capability: &C,
+) -> Result<WindowPointClickOutcome, String>
 where
   C: WindowPointCapability + Sync + ?Sized,
 {
-  // TODO(invoke-input-click-window-point-candidate): --candidate JSON promotion
-  // path is documented on the command summary but intentionally deferred; MC-19
-  // D4 uses direct offset/relative point inputs only.
-  let point = WindowPointInput::parse(&input.inputs, &input.command_id)?;
-  let window = capability.resolve(click_window_selector(&input)).map_err(|error| error.to_string())?;
+  // TODO(invoke-input-click-window-point-candidate): candidate promotion is
+  // intentionally deferred until an owner-approved typed candidate input exists.
+  let window = capability.resolve(click_window_selector(&input, title)).map_err(|error| error.to_string())?;
   let point = point.resolve(&window, &input.command_id)?;
-  let options = window_click_options(&input)?;
   input.cancellation.check().map_err(|error| error.to_string())?;
   if input.dry_run {
     return Ok(WindowPointClickOutcome::Validated { window, point });
@@ -379,7 +421,7 @@ where
 }
 
 #[derive(Clone, Debug)]
-pub struct WindowPointInput(WindowPointKind);
+struct WindowPointInput(WindowPointKind);
 
 #[derive(Clone, Debug)]
 enum WindowPointKind {
@@ -394,35 +436,6 @@ struct RelativeWindowPoint {
 }
 
 impl WindowPointInput {
-  pub fn parse(inputs: &std::collections::BTreeMap<String, String>, command_id: &str) -> Result<Self, String> {
-    let has_offset_x = inputs.contains_key("offset_x");
-    let has_offset_y = inputs.contains_key("offset_y");
-    let has_relative_x = inputs.contains_key("relative_x");
-    let has_relative_y = inputs.contains_key("relative_y");
-
-    if (has_offset_x || has_offset_y) && (has_relative_x || has_relative_y) {
-      return Err(format!("{command_id} accepts either --offset_x/--offset_y or --relative_x/--relative_y, not both"));
-    }
-    if has_offset_x || has_offset_y {
-      if !has_offset_x || !has_offset_y {
-        return Err(format!("{command_id} requires both --offset_x and --offset_y when using absolute window points"));
-      }
-      let x = required_offset_number(inputs, "offset_x", command_id)?;
-      let y = required_offset_number(inputs, "offset_y", command_id)?;
-      return Ok(Self(WindowPointKind::Offset(auv_driver::geometry::WindowPoint::new(x, y))));
-    }
-    if has_relative_x || has_relative_y {
-      if !has_relative_x || !has_relative_y {
-        return Err(format!("{command_id} requires both --relative_x and --relative_y when using relative window points"));
-      }
-      let x = required_relative_number(inputs, "relative_x", command_id)?;
-      let y = required_relative_number(inputs, "relative_y", command_id)?;
-      return Ok(Self(WindowPointKind::Relative(RelativeWindowPoint { x, y })));
-    }
-
-    Err(format!("{command_id} requires --offset_x/--offset_y or --relative_x/--relative_y"))
-  }
-
   fn resolve(&self, window: &auv_driver::Window, command_id: &str) -> Result<auv_driver::geometry::WindowPoint, String> {
     let point = match self.0 {
       WindowPointKind::Offset(point) => point,
@@ -518,21 +531,6 @@ fn window_point_click_output(result: WindowPointClickResult, overlay: super::ove
   }
 }
 
-pub async fn click_point_in_window(selector: auv_driver::WindowSelector, point: WindowPointInput) -> Result<WindowPointClick, String> {
-  #[cfg(target_os = "macos")]
-  {
-    let capability = LocalWindowPointCapability::open()?;
-    let window = capability.resolve(selector).map_err(|error| error.to_string())?;
-    let point = point.resolve(&window, "input.clickWindowPoint")?;
-    click_resolved_window_point(&capability, window, point, auv_driver::ClickOptions::default()).await
-  }
-  #[cfg(not(target_os = "macos"))]
-  {
-    let _ = (selector, point);
-    Err("input.clickWindowPoint is only available on macOS".to_string())
-  }
-}
-
 async fn click_resolved_window_point<C>(
   capability: &C,
   window: auv_driver::Window,
@@ -551,94 +549,30 @@ where
   })
 }
 
-pub(crate) fn window_click_options(input: &InvokeCommandInput) -> Result<auv_driver::ClickOptions, String> {
-  let mut options = auv_driver::ClickOptions::default();
-  if let Some(policy) = input.inputs.get("input-policy") {
-    options.policy = match policy.as_str() {
-      "background-only" | "background_only" => auv_driver::InputPolicy::BackgroundOnly,
-      "background-preferred" | "background_preferred" => auv_driver::InputPolicy::BackgroundPreferred,
-      "foreground-preferred" | "foreground_preferred" => auv_driver::InputPolicy::ForegroundPreferred,
-      _ => {
-        return Err(format!(
-          "{} received invalid --input-policy {policy:?}; expected background-only, background-preferred, or foreground-preferred",
-          input.command_id
-        ));
-      }
-    };
-  }
-
-  let count = input.inputs.get("click-count").map_or(Ok(1_u8), |value| {
-    value.parse::<u8>().map_err(|error| format!("{} received invalid --click-count {value:?}: {error}", input.command_id))
-  })?;
-  if count == 0 {
-    return Err(format!("{} requires --click-count to be between 1 and 255", input.command_id));
-  }
-  let interval_ms = input.inputs.get("click-interval-ms").map_or(Ok(75_u64), |value| {
-    value.parse::<u64>().map_err(|error| format!("{} received invalid --click-interval-ms {value:?}: {error}", input.command_id))
-  })?;
-  options.click = match count {
-    1 => auv_driver::Click::Single,
-    2 => auv_driver::Click::Double {
-      interval: std::time::Duration::from_millis(interval_ms),
+pub(crate) fn click_options(
+  policy: Option<auv_driver::InputPolicy>,
+  count: Option<u8>,
+  interval_ms: Option<u64>,
+) -> auv_driver::ClickOptions {
+  let count = count.unwrap_or(1);
+  let interval_ms = interval_ms.unwrap_or(75);
+  auv_driver::ClickOptions {
+    policy: policy.unwrap_or_default(),
+    click: match count {
+      1 => auv_driver::Click::Single,
+      2 => auv_driver::Click::Double {
+        interval: std::time::Duration::from_millis(interval_ms),
+      },
+      count => auv_driver::Click::Repeated {
+        count,
+        interval: std::time::Duration::from_millis(interval_ms),
+      },
     },
-    count => auv_driver::Click::Repeated {
-      count,
-      interval: std::time::Duration::from_millis(interval_ms),
-    },
-  };
-  Ok(options)
-}
-
-#[invoke_command(
-  id = "input.teachClick",
-  group = "input",
-  description = "Capture a target window before and after a human-taught click, recording global and window-local click coordinates for automation debugging.",
-  args = WINDOW_ARGS,
-)]
-async fn teach_click(_input: InvokeCommandInput) -> InvokeCommandResult {
-  // TODO(invoke-input-teach-click): implement after an owning module exposes
-  // a typed interactive workflow result shared by frontends.
-  unimplemented!("input.teachClick")
-}
-
-#[invoke_command(
-  id = "input.scrollPoint",
-  group = "input",
-  description = "Scroll at a macOS global logical point through Quartz.",
-  args = TARGET_ARGS,
-)]
-async fn scroll_point(_input: InvokeCommandInput) -> InvokeCommandResult {
-  // TODO(invoke-input-scroll-point): add point and delta arguments before
-  // calling InputApi::scroll_global_hid.
-  unimplemented!("input.scrollPoint")
-}
-
-fn required_number(inputs: &std::collections::BTreeMap<String, String>, name: &str, command_id: &str) -> Result<f64, String> {
-  let raw = inputs.get(name).ok_or_else(|| format!("{command_id} requires --{name}"))?;
-  let value = raw.parse::<f64>().map_err(|error| format!("{command_id} received invalid --{name}: {error}"))?;
-  if !value.is_finite() {
-    return Err(format!("{command_id} requires --{name} to be finite"));
+    ..Default::default()
   }
-  Ok(value)
 }
 
-fn required_offset_number(inputs: &std::collections::BTreeMap<String, String>, name: &str, command_id: &str) -> Result<f64, String> {
-  let value = required_number(inputs, name, command_id)?;
-  if value < 0.0 {
-    return Err(format!("{command_id} requires --{name} to be non-negative"));
-  }
-  Ok(value)
-}
-
-fn required_relative_number(inputs: &std::collections::BTreeMap<String, String>, name: &str, command_id: &str) -> Result<f64, String> {
-  let value = required_number(inputs, name, command_id)?;
-  if !(0.0..=1.0).contains(&value) {
-    return Err(format!("{command_id} requires --{name} to be within 0..=1"));
-  }
-  Ok(value)
-}
-
-fn click_window_selector(input: &InvokeCommandInput) -> auv_driver::WindowSelector {
+fn click_window_selector(input: &InvokeCommandInput, title: Option<&str>) -> auv_driver::WindowSelector {
   use auv_driver::{App, TextMatcher, WindowSelector};
 
   let mut selector = WindowSelector {
@@ -648,8 +582,8 @@ fn click_window_selector(input: &InvokeCommandInput) -> auv_driver::WindowSelect
   if let Some(target) = input.target_or_input_target() {
     selector.app = Some(App::bundle_id(target));
   }
-  if let Some(title) = input.inputs.get("title").filter(|value| !value.trim().is_empty()) {
-    selector.title = Some(TextMatcher::Contains(title.clone()));
+  if let Some(title) = title.filter(|value| !value.trim().is_empty()) {
+    selector.title = Some(TextMatcher::Contains(title.to_string()));
   }
   selector
 }

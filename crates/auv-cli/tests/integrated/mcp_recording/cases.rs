@@ -33,6 +33,7 @@ async fn mcp_invoke_returns_the_direct_result_and_writes_trace_records() -> Resu
         serde_json::json!({
           "command_id": "scan.coverage",
           "dry_run": true,
+          "inputs": { "fixture-dir": "unused" },
           "store_root": store.path().display().to_string()
         })
         .as_object()

@@ -7,6 +7,8 @@ fn invoke_dry_run_writes_append_only_trace_records() {
     .args([
       "invoke",
       "scan.coverage",
+      "--fixture-dir",
+      "unused",
       "--dry-run",
       "--json",
       "--store-root",

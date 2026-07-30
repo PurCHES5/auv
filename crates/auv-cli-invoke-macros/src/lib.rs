@@ -1,156 +1,120 @@
-use std::collections::BTreeMap;
-
-use proc_macro::{TokenStream, TokenTree};
-
-const ALLOWED_ATTR_KEYS: &[&str] = &["id", "group", "description", "args"];
+use proc_macro::TokenStream;
+use quote::{format_ident, quote};
+use syn::parse::{Parse, ParseStream};
+use syn::{Ident, ItemFn, LitStr, Result, Token, Type, parse_macro_input};
 
 #[proc_macro_attribute]
 pub fn invoke_command(attr: TokenStream, item: TokenStream) -> TokenStream {
-  let function_name = match find_function_name(item.clone()) {
-    Some(name) => name,
-    None => return compile_error("invoke_command must annotate a function"),
-  };
-  let values = match parse_attrs(attr) {
-    Ok(values) => values,
-    Err(error) => return compile_error(&error),
-  };
-  for key in ALLOWED_ATTR_KEYS {
-    if !values.contains_key(*key) {
-      return compile_error(&format!("invoke_command missing required `{key}` attribute"));
-    }
-  }
-
-  let id = &values["id"];
-  let group = &values["group"];
-  let namespace = match namespace_for_group_literal(group) {
-    Ok(namespace) => namespace,
-    Err(error) => return compile_error(&error),
-  };
-  let description = &values["description"];
-  let args = &values["args"];
-  let export_name = format!("{function_name}_invoke_command");
-  let handler_name = format!("__{function_name}_invoke_handler");
-
-  let generated = format!(
-    "fn {handler_name}(
-      input: ::auv_cli_invoke::InvokeCommandInput,
-    ) -> ::auv_cli_invoke::InvokeCommandFuture {{
-      Box::pin({function_name}(input))
-    }}
-
-    pub fn {export_name}() -> ::auv_cli_invoke::InvokeCommand {{
-      ::auv_cli_invoke::command::spec(
-        {id},
-        ::auv_cli_invoke::InvokeNamespace::{namespace},
-        {description},
-        {args},
-        {handler_name},
-      )
-    }}"
-  );
-
-  let mut output = item.to_string();
-  output.push('\n');
-  output.push_str(&generated);
-  output.parse().unwrap_or_else(|_| compile_error("invoke_command generated invalid Rust"))
+  let attributes = parse_macro_input!(attr as InvokeCommandAttributes);
+  let function = parse_macro_input!(item as ItemFn);
+  expand(attributes, function).unwrap_or_else(syn::Error::into_compile_error).into()
 }
 
-fn find_function_name(item: TokenStream) -> Option<String> {
-  let mut saw_fn = false;
-  for token in item {
-    match token {
-      TokenTree::Ident(ident) if saw_fn => return Some(ident.to_string()),
-      TokenTree::Ident(ident) if ident.to_string() == "fn" => saw_fn = true,
-      _ => {}
-    }
-  }
-  None
+struct InvokeCommandAttributes {
+  id: LitStr,
+  group: LitStr,
+  description: LitStr,
+  input: Type,
 }
 
-fn parse_attrs(attr: TokenStream) -> Result<BTreeMap<String, String>, String> {
-  let mut values = BTreeMap::new();
-  for entry in split_top_level_commas(attr) {
-    if entry.is_empty() {
-      continue;
-    }
-    let (key, value) = parse_key_value(entry)?;
-    validate_attr_key(&key)?;
-    if values.insert(key.clone(), value).is_some() {
-      return Err(format!("invoke_command duplicate `{key}` attribute"));
-    }
-  }
-  Ok(values)
-}
+impl Parse for InvokeCommandAttributes {
+  fn parse(input: ParseStream<'_>) -> Result<Self> {
+    let mut id = None;
+    let mut group = None;
+    let mut description = None;
+    let mut input_type = None;
 
-fn split_top_level_commas(tokens: TokenStream) -> Vec<Vec<TokenTree>> {
-  let mut entries = Vec::new();
-  let mut current = Vec::new();
-  for token in tokens {
-    match &token {
-      TokenTree::Punct(punct) if punct.as_char() == ',' => {
-        entries.push(current);
-        current = Vec::new();
+    while !input.is_empty() {
+      let key = input.parse::<Ident>()?;
+      input.parse::<Token![=]>()?;
+      match key.to_string().as_str() {
+        "id" => set_once(&mut id, input.parse::<LitStr>()?, &key)?,
+        "group" => set_once(&mut group, input.parse::<LitStr>()?, &key)?,
+        "description" => set_once(&mut description, input.parse::<LitStr>()?, &key)?,
+        "input" => set_once(&mut input_type, input.parse::<Type>()?, &key)?,
+        _ => {
+          return Err(syn::Error::new(key.span(), "invoke_command unknown attribute; expected only: id, group, description, input"));
+        }
       }
-      _ => current.push(token),
+      if !input.is_empty() {
+        input.parse::<Token![,]>()?;
+      }
     }
+
+    Ok(Self {
+      id: required(id, "id", input)?,
+      group: required(group, "group", input)?,
+      description: required(description, "description", input)?,
+      input: required(input_type, "input", input)?,
+    })
   }
-  if !current.is_empty() {
-    entries.push(current);
-  }
-  entries
 }
 
-fn parse_key_value(tokens: Vec<TokenTree>) -> Result<(String, String), String> {
-  let mut iter = tokens.into_iter();
-  let key = match iter.next() {
-    Some(TokenTree::Ident(ident)) => ident.to_string(),
-    _ => return Err("invoke_command attributes must start with an identifier key".to_string()),
+fn set_once<T>(slot: &mut Option<T>, value: T, key: &Ident) -> Result<()> {
+  if slot.replace(value).is_some() {
+    return Err(syn::Error::new(key.span(), format!("invoke_command duplicate `{key}` attribute")));
+  }
+  Ok(())
+}
+
+fn required<T>(value: Option<T>, name: &str, input: ParseStream<'_>) -> Result<T> {
+  value.ok_or_else(|| input.error(format!("invoke_command missing required `{name}` attribute")))
+}
+
+fn expand(attributes: InvokeCommandAttributes, function: ItemFn) -> Result<proc_macro2::TokenStream> {
+  let InvokeCommandAttributes {
+    id,
+    group,
+    description,
+    input,
+  } = attributes;
+  let namespace = namespace(&group)?;
+  let function_name = &function.sig.ident;
+  let export_name = format_ident!("{function_name}_invoke_command");
+  let handler_name = format_ident!("__{function_name}_invoke_handler");
+
+  Ok(quote! {
+    #function
+
+    fn #handler_name(mut input: ::auv_cli_invoke::InvokeCommandInput) -> ::auv_cli_invoke::InvokeCommandFuture {
+      Box::pin(async move {
+        let args = ::auv_cli_invoke::command::decode_args::<#input>(&input)?;
+        if input.typed_args.is_none() {
+          input.inputs.extend(::auv_cli_invoke::command::encode_args(&args)?);
+        }
+        #function_name(input, args).await
+      })
+    }
+
+    pub fn #export_name() -> ::auv_cli_invoke::InvokeCommand {
+      ::auv_cli_invoke::command::typed_spec::<#input>(
+        #id,
+        ::auv_cli_invoke::InvokeNamespace::#namespace,
+        #description,
+        #handler_name,
+      )
+    }
+  })
+}
+
+fn namespace(group: &LitStr) -> Result<Ident> {
+  let name = match group.value().as_str() {
+    "display" => "Display",
+    "screen" => "Screen",
+    "window" => "Window",
+    "input" => "Input",
+    "app" => "App",
+    "game" => "Game",
+    "overlay" => "Overlay",
+    "mediaControl" => "MediaControl",
+    "fixture" => "Fixture",
+    "scan" => "Scan",
+    _ => {
+      return Err(syn::Error::new(
+        group.span(),
+        "invoke_command unknown group; expected one of: display, screen, window, input, app, game, overlay, mediaControl, fixture, scan",
+      ));
+    }
   };
-  match iter.next() {
-    Some(TokenTree::Punct(punct)) if punct.as_char() == '=' => {}
-    _ => return Err(format!("invoke_command `{key}` must use `=`")),
-  }
-  let value_tokens: Vec<_> = iter.collect();
-  if value_tokens.is_empty() {
-    return Err(format!("invoke_command `{key}` must have a value"));
-  }
-  Ok((key, tokens_to_string(value_tokens)))
+  Ok(Ident::new(name, group.span()))
 }
-
-fn validate_attr_key(key: &str) -> Result<(), String> {
-  if ALLOWED_ATTR_KEYS.contains(&key) {
-    Ok(())
-  } else {
-    Err(format!("invoke_command unknown attribute `{key}`; expected only: id, group, description, args"))
-  }
-}
-
-fn tokens_to_string(tokens: Vec<TokenTree>) -> String {
-  tokens.into_iter().collect::<TokenStream>().to_string()
-}
-
-fn namespace_for_group_literal(group: &str) -> Result<&'static str, String> {
-  match group {
-    "\"display\"" => Ok("Display"),
-    "\"screen\"" => Ok("Screen"),
-    "\"window\"" => Ok("Window"),
-    "\"input\"" => Ok("Input"),
-    "\"app\"" => Ok("App"),
-    "\"game\"" => Ok("Game"),
-    "\"overlay\"" => Ok("Overlay"),
-    "\"mediaControl\"" => Ok("MediaControl"),
-    "\"fixture\"" => Ok("Fixture"),
-    "\"scan\"" => Ok("Scan"),
-    _ => Err(format!(
-      "invoke_command unknown group {group}; expected one of: display, screen, window, input, app, game, overlay, mediaControl, fixture, scan"
-    )),
-  }
-}
-
-fn compile_error(message: &str) -> TokenStream {
-  format!("compile_error!({message:?});").parse().expect("compile_error expansion should parse")
-}
-
-#[cfg(test)]
-#[path = "lib_test.rs"]
-mod tests;

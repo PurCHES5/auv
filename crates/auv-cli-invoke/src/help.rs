@@ -1,8 +1,8 @@
-use crate::{ArgSpec, CommandGroup, CommandNode, InvokeCommand, InvokeRegistry};
+use crate::{CommandGroup, CommandNode, InvokeCommand, InvokeRegistry};
 
 pub fn render_help_index(registry: &InvokeRegistry) -> String {
   let mut help = String::from(
-    "USAGE\n  auv invoke <command> [options]\n\nOPTIONS\n  --no-overlay  Disable live visual overlay presentation\n  --json        Render machine-readable JSON output\n  --detail      Include diagnostic detail in human output\n  --wide        Include extra columns in human table output\n\nUse auv invoke <command> --help for command-specific options.\n",
+    "USAGE\n  auv invoke <command> [options]\n\nOPTIONS\n  --target <APP>       Select the operation target application\n  --dry-run            Validate without performing the operation\n  --store-root <PATH>  Persist the recorded run under this directory\n  --no-overlay         Disable live visual overlay presentation\n  --json               Render machine-readable JSON output\n  --detail             Include diagnostic detail in human output\n  --wide               Include extra columns in human table output\n\nUse auv invoke <command> --help for command-specific options.\n",
   );
 
   for group in registry.groups() {
@@ -52,49 +52,6 @@ fn has_commands(group: &CommandGroup) -> bool {
 }
 
 pub fn render_command_help(command: &InvokeCommand) -> String {
-  let mut help = format!(
-    "COMMAND\n  {}\n\nUSAGE\n  auv invoke {}{}\n\nDESCRIPTION\n  {}\n",
-    command.id,
-    command.id,
-    render_usage_args(command.args),
-    command.description
-  );
-
-  help.push_str("\nOPTIONS\n");
-  for arg in command.args {
-    help.push_str("  ");
-    help.push_str(arg.flag);
-    help.push(' ');
-    help.push_str(arg.value_name);
-    if arg.required {
-      help.push_str("  required  ");
-    } else {
-      help.push_str("  optional  ");
-    }
-    help.push_str(arg.help);
-    help.push('\n');
-  }
-  help.push_str("  --no-overlay  Disable live visual overlay presentation\n");
-  help.push_str("  --json        Render machine-readable JSON output\n");
-  help.push_str("  --detail      Include diagnostic detail in human output\n");
-  help.push_str("  --wide        Include extra columns in human table output\n");
-
-  help
-}
-
-fn render_usage_args(args: &[ArgSpec]) -> String {
-  let mut usage = String::new();
-  for arg in args {
-    usage.push(' ');
-    if !arg.required {
-      usage.push('[');
-    }
-    usage.push_str(arg.flag);
-    usage.push(' ');
-    usage.push_str(arg.value_name);
-    if !arg.required {
-      usage.push(']');
-    }
-  }
-  usage
+  let mut clap_command = crate::command::with_invoke_context(command.clap_command());
+  clap_command.render_long_help().to_string()
 }

@@ -2,25 +2,22 @@
 
 use std::env;
 use std::path::{Path, PathBuf};
-use std::process::{self, ExitCode};
+use std::process;
 use std::sync::Arc;
 
-use crate::cli::{CliCommand, TracingOptions, help_text, parse_cli, version_text};
+use crate::cli::{CliCommand, TracingOptions, parse_cli_os, version_text};
 
 pub async fn run_root() -> Result<i32, String> {
-  let arguments = env::args().skip(1).collect::<Vec<_>>();
-  let command = parse_cli(&arguments)?;
+  let command = parse_cli_os(env::args_os().skip(1))?;
   dispatch(command).await
 }
 
-pub fn exit_status(result: Result<i32, String>) -> ExitCode {
+pub fn exit_status(result: Result<i32, String>) -> i32 {
   match result {
-    Ok(0) => ExitCode::SUCCESS,
-    Ok(exit_code @ 1..=255) => ExitCode::from(exit_code as u8),
-    Ok(_) => ExitCode::FAILURE,
+    Ok(exit_code) => exit_code,
     Err(error) => {
       eprintln!("error: {error}");
-      ExitCode::FAILURE
+      1
     }
   }
 }
@@ -69,19 +66,16 @@ pub(crate) async fn dispatch(command: CliCommand) -> Result<i32, String> {
 
   let mut exit_code = 0;
   match command {
-    CliCommand::Help => {
-      print!("{}", help_text());
+    CliCommand::Help(help) => {
+      print!("{help}");
     }
     CliCommand::Version => unreachable!("version is handled before runtime setup"),
     CliCommand::PermissionCheck { .. } => {
       unreachable!("permission check is handled before runtime setup")
     }
     CliCommand::XtaskGenerateSwiftBridge => unreachable!("xtask is handled before runtime setup"),
-    CliCommand::ListCommandsTombstone => {
-      return Err("`list-commands` has been removed; use `auv invoke --help` instead".to_string());
-    }
     CliCommand::InvokeHelp { command_id } => {
-      let registry = crate::product_registry();
+      let registry = auv_cli_invoke::default_registry();
       if let Some(command_id) = command_id {
         let command = registry
           .resolve(&command_id)
@@ -93,17 +87,19 @@ pub(crate) async fn dispatch(command: CliCommand) -> Result<i32, String> {
     }
     CliCommand::Invoke {
       request,
+      typed_args,
       tracing,
       output,
     } => {
       let authority = build_cli_tracing(&project_root, &tracing)?;
-      let registry = crate::product_registry();
+      let registry = auv_cli_invoke::default_registry();
       let command =
         registry.resolve(&request.command_id).cloned().ok_or_else(|| format!("unknown invoke command: {}", request.command_id))?;
       let input = auv_cli_invoke::InvokeCommandInput {
         command_id: request.command_id,
         target_application_id: request.target.application_id,
         inputs: request.inputs,
+        typed_args: Some(typed_args),
         dry_run: request.dry_run,
         cancellation: auv_cli_invoke::InvokeCancellation::new(),
       };
@@ -134,6 +130,15 @@ pub(crate) async fn dispatch(command: CliCommand) -> Result<i32, String> {
     }
     CliCommand::SessionServe { .. } => {
       unreachable!("session serve is handled before runtime setup")
+    }
+    CliCommand::PluginList => {
+      exit_code = crate::plugin::list()?;
+    }
+    CliCommand::External {
+      command_name,
+      arguments,
+    } => {
+      exit_code = crate::plugin::execute(&command_name, &arguments)?;
     }
   }
 
@@ -233,8 +238,8 @@ fn permission_status_line(status: &str) -> String {
   }
 }
 
-fn resolve_store_root(project_root: &Path, explicit: Option<&String>) -> PathBuf {
-  explicit.map(PathBuf::from).unwrap_or_else(|| auv_runtime::default_project_store_root(project_root.to_path_buf()))
+fn resolve_store_root(project_root: &Path, explicit: Option<&PathBuf>) -> PathBuf {
+  explicit.cloned().unwrap_or_else(|| auv_runtime::default_project_store_root(project_root.to_path_buf()))
 }
 
 #[derive(Clone)]

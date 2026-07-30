@@ -1,10 +1,6 @@
 use std::time::Duration;
 
-use crate::{
-  CommandGroup, InvokeCommandInput, InvokeCommandOutput, InvokeCommandResult, InvokeReport, InvokeReportField,
-  arg::{OVERLAY_CLICK_TARGET_ARGS, OVERLAY_CURSOR_ARGS, OVERLAY_OUTLINE_ARGS, OVERLAY_STATUS_ARGS},
-  invoke_command,
-};
+use crate::{CommandGroup, InvokeCommandInput, InvokeCommandOutput, InvokeCommandResult, InvokeReport, InvokeReportField, invoke_command};
 use auv_driver::overlay::{
   Easing, Overlay, ShowOptions,
   components::{CaptureFrame, ClickTarget},
@@ -12,6 +8,7 @@ use auv_driver::overlay::{
   style::{Color, CursorStyle, Insets, OutlineStyle, StatusStyle, Stroke},
 };
 use auv_driver::{Rect, ScreenPoint};
+use clap::Args;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum OverlayStatus {
@@ -49,12 +46,12 @@ pub(crate) fn show_overlay(
   #[cfg(all(target_os = "macos", feature = "overlay"))]
   {
     let layers = overlay.layers().len();
-    return Ok(match session.overlay().show(&overlay, options) {
+    Ok(match session.overlay().show(&overlay, options) {
       Ok(()) => OverlayStatus::Shown { layers },
       Err(error) => OverlayStatus::Unavailable {
         reason: error.to_string(),
       },
-    });
+    })
   }
 
   #[cfg(not(all(target_os = "macos", feature = "overlay")))]
@@ -75,117 +72,341 @@ pub fn group() -> CommandGroup {
     .command(show_click_target_invoke_command())
 }
 
+#[derive(Clone, Debug, Args, serde::Serialize, serde::Deserialize)]
+#[command(after_long_help = "Examples:\n  auv invoke overlay.outline --x 20 --y 20 --width 400 --height 240 --label Selection")]
+struct OutlineArgs {
+  #[arg(long)]
+  x: f64,
+  #[arg(long)]
+  y: f64,
+  #[arg(long)]
+  width: f64,
+  #[arg(long)]
+  height: f64,
+  #[arg(long)]
+  label: Option<String>,
+  #[arg(long)]
+  #[serde(rename = "label-visible")]
+  label_visible: Option<bool>,
+  #[arg(long)]
+  padding: Option<f64>,
+  #[arg(long)]
+  #[serde(rename = "border-color")]
+  border_color: Option<String>,
+  #[arg(long)]
+  #[serde(rename = "border-width")]
+  border_width: Option<f64>,
+  #[arg(long)]
+  #[serde(rename = "corner-radius")]
+  corner_radius: Option<f64>,
+  #[arg(long)]
+  #[serde(rename = "motion-duration-ms")]
+  motion_duration_ms: Option<u64>,
+  #[arg(long)]
+  #[serde(rename = "hold-duration-ms")]
+  hold_duration_ms: Option<u64>,
+}
+
 #[invoke_command(
   id = "overlay.outline",
   group = "overlay",
   description = "Present one configurable outline layer for visual style inspection.",
-  args = OVERLAY_OUTLINE_ARGS,
+  input = OutlineArgs,
 )]
-async fn show_outline(input: InvokeCommandInput) -> InvokeCommandResult {
-  let rect = rect_input(&input)?;
-  let mut outline = Outline::new(rect).with_style(outline_style(&input, OutlineStyle::new(), "padding", "corner-radius")?);
-  if let Some(label) = input.inputs.get("label") {
-    outline = outline.with_label(label.clone());
+async fn show_outline(input: InvokeCommandInput, args: OutlineArgs) -> InvokeCommandResult {
+  let rect = rect_input(&input.command_id, args.x, args.y, args.width, args.height)?;
+  let style = outline_style(
+    &input.command_id,
+    OutlineStyle::new(),
+    args.padding,
+    args.border_color.as_deref(),
+    args.border_width,
+    args.corner_radius,
+  )?;
+  let mut outline = Outline::new(rect).with_style(style);
+  if let Some(label) = args.label {
+    outline = outline.with_label(label);
   }
-  if optional_bool(&input, "label-visible", false)? {
+  if args.label_visible.unwrap_or(false) {
     outline = outline.with_label_visible();
   }
-  debug_output(&input, "Outline", Overlay::new().with_layer(outline))
+  let options = show_options(args.motion_duration_ms, args.hold_duration_ms);
+  debug_output(&input, "Outline", Overlay::new().with_layer(outline), options)
+}
+
+#[derive(Clone, Debug, Args, serde::Serialize, serde::Deserialize)]
+#[command(after_long_help = "Examples:\n  auv invoke overlay.cursor --x 320 --y 240 --label AUV")]
+struct CursorArgs {
+  #[arg(long)]
+  x: f64,
+  #[arg(long)]
+  y: f64,
+  #[arg(long)]
+  label: Option<String>,
+  #[arg(long)]
+  #[serde(rename = "label-visible")]
+  label_visible: Option<bool>,
+  #[arg(long)]
+  svg: Option<String>,
+  #[arg(long)]
+  padding: Option<f64>,
+  #[arg(long)]
+  #[serde(rename = "foreground-color")]
+  foreground_color: Option<String>,
+  #[arg(long)]
+  #[serde(rename = "background-color")]
+  background_color: Option<String>,
+  #[arg(long)]
+  #[serde(rename = "corner-radius")]
+  corner_radius: Option<f64>,
+  #[arg(long)]
+  #[serde(rename = "sprite-size")]
+  sprite_size: Option<f64>,
+  #[arg(long)]
+  #[serde(rename = "motion-duration-ms")]
+  motion_duration_ms: Option<u64>,
+  #[arg(long)]
+  #[serde(rename = "hold-duration-ms")]
+  hold_duration_ms: Option<u64>,
 }
 
 #[invoke_command(
   id = "overlay.cursor",
   group = "overlay",
   description = "Present one configurable cursor layer, optionally using runtime SVG source.",
-  args = OVERLAY_CURSOR_ARGS,
+  input = CursorArgs,
 )]
-async fn show_cursor(input: InvokeCommandInput) -> InvokeCommandResult {
-  let mut cursor = Cursor::new(point_input(&input)?).with_style(cursor_style(&input)?);
-  if let Some(label) = input.inputs.get("label") {
-    cursor = cursor.with_label(label.clone());
+async fn show_cursor(input: InvokeCommandInput, args: CursorArgs) -> InvokeCommandResult {
+  let style = cursor_style(
+    &input.command_id,
+    args.padding,
+    args.foreground_color.as_deref(),
+    args.background_color.as_deref(),
+    args.corner_radius,
+    args.sprite_size,
+  )?;
+  let mut cursor = Cursor::new(point_input(&input.command_id, args.x, args.y)?).with_style(style);
+  if let Some(label) = args.label {
+    cursor = cursor.with_label(label);
   }
-  if optional_bool(&input, "label-visible", false)? {
+  if args.label_visible.unwrap_or(false) {
     cursor = cursor.with_label_visible();
   }
-  if let Some(svg) = input.inputs.get("svg") {
-    cursor = cursor.with_image(CursorImage::svg(svg.clone()));
+  if let Some(svg) = args.svg {
+    cursor = cursor.with_image(CursorImage::svg(svg));
   }
-  debug_output(&input, "Cursor", Overlay::new().with_layer(cursor))
+  let options = show_options(args.motion_duration_ms, args.hold_duration_ms);
+  debug_output(&input, "Cursor", Overlay::new().with_layer(cursor), options)
+}
+
+#[derive(Clone, Debug, Args, serde::Serialize, serde::Deserialize)]
+#[command(after_long_help = "Examples:\n  auv invoke overlay.status \"Click delivered\" --x 320 --y 240")]
+struct StatusArgs {
+  #[arg(long)]
+  x: f64,
+  #[arg(long)]
+  y: f64,
+  /// Status text to present.
+  #[arg(value_name = "TEXT")]
+  text: String,
+  #[arg(long)]
+  padding: Option<f64>,
+  #[arg(long)]
+  #[serde(rename = "foreground-color")]
+  foreground_color: Option<String>,
+  #[arg(long)]
+  #[serde(rename = "background-color")]
+  background_color: Option<String>,
+  #[arg(long)]
+  #[serde(rename = "corner-radius")]
+  corner_radius: Option<f64>,
+  #[arg(long)]
+  #[serde(rename = "motion-duration-ms")]
+  motion_duration_ms: Option<u64>,
+  #[arg(long)]
+  #[serde(rename = "hold-duration-ms")]
+  hold_duration_ms: Option<u64>,
 }
 
 #[invoke_command(
   id = "overlay.status",
   group = "overlay",
   description = "Present one configurable status layer for visual style inspection.",
-  args = OVERLAY_STATUS_ARGS,
+  input = StatusArgs,
 )]
-async fn show_status(input: InvokeCommandInput) -> InvokeCommandResult {
-  let status = Status::new(point_input(&input)?, input.required_input("text")?).with_style(status_style(
-    &input,
-    "padding",
-    "foreground-color",
-    "background-color",
-    "corner-radius",
-  )?);
-  debug_output(&input, "Status", Overlay::new().with_layer(status))
+async fn show_status(input: InvokeCommandInput, args: StatusArgs) -> InvokeCommandResult {
+  let style =
+    status_style(&input.command_id, args.padding, args.foreground_color.as_deref(), args.background_color.as_deref(), args.corner_radius)?;
+  let status = Status::new(point_input(&input.command_id, args.x, args.y)?, args.text).with_style(style);
+  let options = show_options(args.motion_duration_ms, args.hold_duration_ms);
+  debug_output(&input, "Status", Overlay::new().with_layer(status), options)
+}
+
+#[derive(Clone, Debug, Args, serde::Serialize, serde::Deserialize)]
+#[command(after_long_help = "Examples:\n  auv invoke overlay.captureFrame --x 20 --y 20 --width 800 --height 600")]
+struct CaptureFrameArgs {
+  #[arg(long)]
+  x: f64,
+  #[arg(long)]
+  y: f64,
+  #[arg(long)]
+  width: f64,
+  #[arg(long)]
+  height: f64,
+  #[arg(long)]
+  label: Option<String>,
+  #[arg(long)]
+  #[serde(rename = "label-visible")]
+  label_visible: Option<bool>,
+  #[arg(long)]
+  padding: Option<f64>,
+  #[arg(long)]
+  #[serde(rename = "border-color")]
+  border_color: Option<String>,
+  #[arg(long)]
+  #[serde(rename = "border-width")]
+  border_width: Option<f64>,
+  #[arg(long)]
+  #[serde(rename = "corner-radius")]
+  corner_radius: Option<f64>,
+  #[arg(long)]
+  #[serde(rename = "motion-duration-ms")]
+  motion_duration_ms: Option<u64>,
+  #[arg(long)]
+  #[serde(rename = "hold-duration-ms")]
+  hold_duration_ms: Option<u64>,
 }
 
 #[invoke_command(
   id = "overlay.captureFrame",
   group = "overlay",
   description = "Present the reusable capture-frame component around a screen rectangle.",
-  args = OVERLAY_OUTLINE_ARGS,
+  input = CaptureFrameArgs,
 )]
-async fn show_capture_frame(input: InvokeCommandInput) -> InvokeCommandResult {
-  let mut frame =
-    CaptureFrame::new(rect_input(&input)?).with_style(outline_style(&input, OutlineStyle::capture(), "padding", "corner-radius")?);
-  if let Some(label) = input.inputs.get("label") {
-    frame = frame.with_label(label.clone());
+async fn show_capture_frame(input: InvokeCommandInput, args: CaptureFrameArgs) -> InvokeCommandResult {
+  let rect = rect_input(&input.command_id, args.x, args.y, args.width, args.height)?;
+  let style = outline_style(
+    &input.command_id,
+    OutlineStyle::capture(),
+    args.padding,
+    args.border_color.as_deref(),
+    args.border_width,
+    args.corner_radius,
+  )?;
+  let mut frame = CaptureFrame::new(rect).with_style(style);
+  if let Some(label) = args.label {
+    frame = frame.with_label(label);
   }
-  if optional_bool(&input, "label-visible", false)? {
+  if args.label_visible.unwrap_or(false) {
     frame = frame.with_label_visible();
   }
-  debug_output(&input, "CaptureFrame", Overlay::new().with_layer(frame))
+  let options = show_options(args.motion_duration_ms, args.hold_duration_ms);
+  debug_output(&input, "CaptureFrame", Overlay::new().with_layer(frame), options)
+}
+
+#[derive(Clone, Debug, Args, serde::Serialize, serde::Deserialize)]
+#[command(after_long_help = "Examples:\n  auv invoke overlay.clickTarget --x 20 --y 20 --width 200 --height 80 --status Ready")]
+struct ClickTargetArgs {
+  #[arg(long)]
+  x: f64,
+  #[arg(long)]
+  y: f64,
+  #[arg(long)]
+  width: f64,
+  #[arg(long)]
+  height: f64,
+  #[arg(long)]
+  #[serde(rename = "outline-label")]
+  outline_label: Option<String>,
+  #[arg(long)]
+  #[serde(rename = "outline-label-visible")]
+  outline_label_visible: Option<bool>,
+  #[arg(long)]
+  #[serde(rename = "cursor-label")]
+  cursor_label: Option<String>,
+  #[arg(long)]
+  #[serde(rename = "cursor-label-visible")]
+  cursor_label_visible: Option<bool>,
+  #[arg(long)]
+  status: Option<String>,
+  #[arg(long)]
+  #[serde(rename = "outline-padding")]
+  outline_padding: Option<f64>,
+  #[arg(long)]
+  #[serde(rename = "border-color")]
+  border_color: Option<String>,
+  #[arg(long)]
+  #[serde(rename = "border-width")]
+  border_width: Option<f64>,
+  #[arg(long)]
+  #[serde(rename = "outline-corner-radius")]
+  outline_corner_radius: Option<f64>,
+  #[arg(long)]
+  #[serde(rename = "status-padding")]
+  status_padding: Option<f64>,
+  #[arg(long)]
+  #[serde(rename = "status-foreground-color")]
+  status_foreground_color: Option<String>,
+  #[arg(long)]
+  #[serde(rename = "status-background-color")]
+  status_background_color: Option<String>,
+  #[arg(long)]
+  #[serde(rename = "status-corner-radius")]
+  status_corner_radius: Option<f64>,
+  #[arg(long)]
+  #[serde(rename = "motion-duration-ms")]
+  motion_duration_ms: Option<u64>,
+  #[arg(long)]
+  #[serde(rename = "hold-duration-ms")]
+  hold_duration_ms: Option<u64>,
 }
 
 #[invoke_command(
   id = "overlay.clickTarget",
   group = "overlay",
   description = "Present the reusable click-target component with outline, cursor, and status layers.",
-  args = OVERLAY_CLICK_TARGET_ARGS,
+  input = ClickTargetArgs,
 )]
-async fn show_click_target(input: InvokeCommandInput) -> InvokeCommandResult {
-  let rect = rect_input(&input)?;
+async fn show_click_target(input: InvokeCommandInput, args: ClickTargetArgs) -> InvokeCommandResult {
+  let rect = rect_input(&input.command_id, args.x, args.y, args.width, args.height)?;
   let point = ScreenPoint::new(rect.origin.x + rect.size.width / 2.0, rect.origin.y + rect.size.height / 2.0);
+  let outline_style = outline_style(
+    &input.command_id,
+    OutlineStyle::selected(),
+    args.outline_padding,
+    args.border_color.as_deref(),
+    args.border_width,
+    args.outline_corner_radius,
+  )?;
   let mut target = ClickTarget::new(point)
     .with_outline(rect)
-    .with_outline_style(outline_style(&input, OutlineStyle::selected(), "outline-padding", "outline-corner-radius")?)
-    .with_status(input.inputs.get("status").map(String::as_str).unwrap_or("click target"));
-  if let Some(label) = input.inputs.get("outline-label") {
-    target = target.with_outline_label(label.clone());
+    .with_outline_style(outline_style)
+    .with_status(args.status.as_deref().unwrap_or("click target"));
+  if let Some(label) = args.outline_label {
+    target = target.with_outline_label(label);
   }
-  if optional_bool(&input, "outline-label-visible", false)? {
+  if args.outline_label_visible.unwrap_or(false) {
     target = target.with_outline_label_visible();
   }
-  if let Some(label) = input.inputs.get("cursor-label") {
-    target = target.with_cursor_label(label.clone());
+  if let Some(label) = args.cursor_label {
+    target = target.with_cursor_label(label);
   }
-  if optional_bool(&input, "cursor-label-visible", false)? {
+  if args.cursor_label_visible.unwrap_or(false) {
     target = target.with_cursor_label_visible();
   }
   target = target.with_status_style(status_style(
-    &input,
-    "status-padding",
-    "status-foreground-color",
-    "status-background-color",
-    "status-corner-radius",
+    &input.command_id,
+    args.status_padding,
+    args.status_foreground_color.as_deref(),
+    args.status_background_color.as_deref(),
+    args.status_corner_radius,
   )?);
-  debug_output(&input, "ClickTarget", Overlay::new().with_layer(target))
+  let options = show_options(args.motion_duration_ms, args.hold_duration_ms);
+  debug_output(&input, "ClickTarget", Overlay::new().with_layer(target), options)
 }
 
-fn debug_output(input: &InvokeCommandInput, component: &str, overlay: Overlay) -> InvokeCommandResult {
+fn debug_output(input: &InvokeCommandInput, component: &str, overlay: Overlay, options: ShowOptions) -> InvokeCommandResult {
   let layers = overlay.layers().len();
-  let options = show_options(input)?;
   let status = if input.dry_run || !input.overlay_enabled()? {
     OverlayStatus::Disabled
   } else {
@@ -214,80 +435,92 @@ fn debug_output(input: &InvokeCommandInput, component: &str, overlay: Overlay) -
       InvokeReportField::new("Component", component),
       InvokeReportField::new("Layers", layers.to_string()),
       InvokeReportField::new("Motion", format!("{} ms", options.motion().duration().as_millis())),
-      InvokeReportField::new("Hold", format!("{} ms", auto_removal_delay(options).as_millis())),
+      InvokeReportField::new(
+        "Hold",
+        format!(
+          "{} ms",
+          match options.lifecycle().removal() {
+            auv_driver::overlay::Removal::AutoAfter(duration) => duration,
+            auv_driver::overlay::Removal::Manual => Duration::ZERO,
+          }
+          .as_millis()
+        ),
+      ),
       status.report_field(),
     ],
     Vec::new(),
   )))
 }
 
-fn show_options(input: &InvokeCommandInput) -> Result<ShowOptions, String> {
-  Ok(
-    ShowOptions::new()
-      .with_motion_ease(Duration::from_millis(optional_u64(input, "motion-duration-ms", 320)?), Easing::EaseInOutExpo)
-      .with_auto_removal_after(Duration::from_millis(optional_u64(input, "hold-duration-ms", 2_000)?)),
-  )
+fn show_options(motion_duration_ms: Option<u64>, hold_duration_ms: Option<u64>) -> ShowOptions {
+  ShowOptions::new()
+    .with_motion_ease(Duration::from_millis(motion_duration_ms.unwrap_or(320)), Easing::EaseInOutExpo)
+    .with_auto_removal_after(Duration::from_millis(hold_duration_ms.unwrap_or(2_000)))
 }
 
-fn auto_removal_delay(options: ShowOptions) -> Duration {
-  match options.lifecycle().removal() {
-    auv_driver::overlay::Removal::AutoAfter(duration) => duration,
-    auv_driver::overlay::Removal::Manual => Duration::ZERO,
+fn rect_input(command_id: &str, x: f64, y: f64, width: f64, height: f64) -> Result<Rect, String> {
+  if !x.is_finite() || !y.is_finite() {
+    return Err(format!("{command_id} requires finite --x and --y"));
   }
-}
-
-fn rect_input(input: &InvokeCommandInput) -> Result<Rect, String> {
-  let x = required_f64(input, "x")?;
-  let y = required_f64(input, "y")?;
-  let width = required_non_negative_f64(input, "width")?;
-  let height = required_non_negative_f64(input, "height")?;
-  if width == 0.0 || height == 0.0 {
-    return Err(format!("{} requires positive --width and --height", input.command_id));
+  if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
+    return Err(format!("{command_id} requires positive finite --width and --height"));
   }
   Ok(Rect::new(x, y, width, height))
 }
 
-fn point_input(input: &InvokeCommandInput) -> Result<ScreenPoint, String> {
-  Ok(ScreenPoint::new(required_f64(input, "x")?, required_f64(input, "y")?))
+fn point_input(command_id: &str, x: f64, y: f64) -> Result<ScreenPoint, String> {
+  if !x.is_finite() || !y.is_finite() {
+    return Err(format!("{command_id} requires finite --x and --y"));
+  }
+  Ok(ScreenPoint::new(x, y))
 }
 
 fn outline_style(
-  input: &InvokeCommandInput,
+  command_id: &str,
   mut style: OutlineStyle,
-  padding_name: &str,
-  corner_radius_name: &str,
+  padding: Option<f64>,
+  border_color: Option<&str>,
+  border_width: Option<f64>,
+  corner_radius: Option<f64>,
 ) -> Result<OutlineStyle, String> {
-  if let Some(value) = optional_non_negative_f64(input, padding_name)? {
+  if let Some(value) = optional_non_negative(command_id, "padding", padding)? {
     style = style.with_padding(Insets::all(value));
   }
-  if input.inputs.contains_key("border-color") || input.inputs.contains_key("border-width") {
-    let color = optional_color(input, "border-color")?.unwrap_or(style.stroke.color);
-    let width = optional_non_negative_f64(input, "border-width")?.unwrap_or(style.stroke.width);
+  if border_color.is_some() || border_width.is_some() {
+    let color = border_color.map(|raw| parse_color(command_id, "border-color", raw)).transpose()?.unwrap_or(style.stroke.color);
+    let width = optional_non_negative(command_id, "border-width", border_width)?.unwrap_or(style.stroke.width);
     style = style.with_stroke(Stroke::new(color, width));
   }
-  if let Some(value) = optional_non_negative_f64(input, corner_radius_name)? {
+  if let Some(value) = optional_non_negative(command_id, "corner-radius", corner_radius)? {
     style = style.with_corner_radius(value);
   }
   Ok(style)
 }
 
-fn cursor_style(input: &InvokeCommandInput) -> Result<CursorStyle, String> {
+fn cursor_style(
+  command_id: &str,
+  padding: Option<f64>,
+  foreground_color: Option<&str>,
+  background_color: Option<&str>,
+  corner_radius: Option<f64>,
+  sprite_size: Option<f64>,
+) -> Result<CursorStyle, String> {
   let mut style = CursorStyle::auv();
-  if let Some(value) = optional_non_negative_f64(input, "padding")? {
+  if let Some(value) = optional_non_negative(command_id, "padding", padding)? {
     style = style.with_label_padding(Insets::all(value));
   }
-  if let Some(color) = optional_color(input, "foreground-color")? {
-    style = style.with_label_foreground(color);
+  if let Some(raw) = foreground_color {
+    style = style.with_label_foreground(parse_color(command_id, "foreground-color", raw)?);
   }
-  if let Some(color) = optional_color(input, "background-color")? {
-    style = style.with_label_background(color);
+  if let Some(raw) = background_color {
+    style = style.with_label_background(parse_color(command_id, "background-color", raw)?);
   }
-  if let Some(value) = optional_non_negative_f64(input, "corner-radius")? {
+  if let Some(value) = optional_non_negative(command_id, "corner-radius", corner_radius)? {
     style = style.with_label_corner_radius(value);
   }
-  if let Some(value) = optional_non_negative_f64(input, "sprite-size")? {
+  if let Some(value) = optional_non_negative(command_id, "sprite-size", sprite_size)? {
     if value == 0.0 {
-      return Err(format!("{} requires --sprite-size greater than zero", input.command_id));
+      return Err(format!("{command_id} requires --sprite-size greater than zero"));
     }
     style = style.with_sprite_size(value);
   }
@@ -295,71 +528,38 @@ fn cursor_style(input: &InvokeCommandInput) -> Result<CursorStyle, String> {
 }
 
 fn status_style(
-  input: &InvokeCommandInput,
-  padding_name: &str,
-  foreground_name: &str,
-  background_name: &str,
-  corner_radius_name: &str,
+  command_id: &str,
+  padding: Option<f64>,
+  foreground_color: Option<&str>,
+  background_color: Option<&str>,
+  corner_radius: Option<f64>,
 ) -> Result<StatusStyle, String> {
   let mut style = StatusStyle::action();
-  if let Some(value) = optional_non_negative_f64(input, padding_name)? {
+  if let Some(value) = optional_non_negative(command_id, "padding", padding)? {
     style = style.with_padding(Insets::all(value));
   }
-  if let Some(color) = optional_color(input, foreground_name)? {
-    style = style.with_foreground(color);
+  if let Some(raw) = foreground_color {
+    style = style.with_foreground(parse_color(command_id, "foreground-color", raw)?);
   }
-  if let Some(color) = optional_color(input, background_name)? {
-    style = style.with_background(color);
+  if let Some(raw) = background_color {
+    style = style.with_background(parse_color(command_id, "background-color", raw)?);
   }
-  if let Some(value) = optional_non_negative_f64(input, corner_radius_name)? {
+  if let Some(value) = optional_non_negative(command_id, "corner-radius", corner_radius)? {
     style = style.with_corner_radius(value);
   }
   Ok(style)
 }
 
-fn required_f64(input: &InvokeCommandInput, name: &str) -> Result<f64, String> {
-  parse_f64(input, name, input.required_input(name)?)
-}
-
-fn required_non_negative_f64(input: &InvokeCommandInput, name: &str) -> Result<f64, String> {
-  let value = required_f64(input, name)?;
-  ensure_non_negative(input, name, value)
-}
-
-fn optional_non_negative_f64(input: &InvokeCommandInput, name: &str) -> Result<Option<f64>, String> {
-  input.inputs.get(name).map(|raw| parse_f64(input, name, raw).and_then(|value| ensure_non_negative(input, name, value))).transpose()
-}
-
-fn parse_f64(input: &InvokeCommandInput, name: &str, raw: &str) -> Result<f64, String> {
-  let value = raw.parse::<f64>().map_err(|error| format!("{} received invalid --{name} value {raw:?}: {error}", input.command_id))?;
-  if !value.is_finite() {
-    return Err(format!("{} requires finite --{name}", input.command_id));
-  }
-  Ok(value)
-}
-
-fn ensure_non_negative(input: &InvokeCommandInput, name: &str, value: f64) -> Result<f64, String> {
-  if value < 0.0 {
-    Err(format!("{} requires non-negative --{name}", input.command_id))
-  } else {
-    Ok(value)
-  }
-}
-
-fn optional_u64(input: &InvokeCommandInput, name: &str, default: u64) -> Result<u64, String> {
-  input.inputs.get(name).map_or(Ok(default), |raw| {
-    raw.parse::<u64>().map_err(|error| format!("{} received invalid --{name} value {raw:?}: {error}", input.command_id))
-  })
-}
-
-fn optional_bool(input: &InvokeCommandInput, name: &str, default: bool) -> Result<bool, String> {
-  input.inputs.get(name).map_or(Ok(default), |raw| {
-    raw.parse::<bool>().map_err(|error| format!("{} received invalid --{name} value {raw:?}: {error}", input.command_id))
-  })
-}
-
-fn optional_color(input: &InvokeCommandInput, name: &str) -> Result<Option<Color>, String> {
-  input.inputs.get(name).map(|raw| parse_color(&input.command_id, name, raw)).transpose()
+fn optional_non_negative(command_id: &str, name: &str, value: Option<f64>) -> Result<Option<f64>, String> {
+  value
+    .map(|value| {
+      if value.is_finite() && value >= 0.0 {
+        Ok(value)
+      } else {
+        Err(format!("{command_id} requires finite non-negative --{name}"))
+      }
+    })
+    .transpose()
 }
 
 fn parse_color(command_id: &str, name: &str, raw: &str) -> Result<Color, String> {

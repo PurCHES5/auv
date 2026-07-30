@@ -1,9 +1,10 @@
-use crate::{
-  CommandGroup, InvokeCommandInput, InvokeCommandOutput, InvokeCommandResult,
-  arg::{NO_ARGS, TARGET_ARGS},
-  invoke_command,
-};
+use crate::{CommandGroup, InvokeCommandInput, InvokeCommandOutput, InvokeCommandResult, invoke_command};
 use crate::{InvokeReport, InvokeReportField, InvokeReportSection};
+use clap::Args;
+
+#[derive(Clone, Debug, Args, serde::Serialize, serde::Deserialize)]
+#[command(after_long_help = "Examples:\n  auv invoke app.probePermissions")]
+struct ProbePermissionsArgs {}
 
 pub fn group() -> CommandGroup {
   CommandGroup::new("app", "APP").command(probe_permissions_invoke_command()).command(activate_app_invoke_command())
@@ -13,9 +14,9 @@ pub fn group() -> CommandGroup {
   id = "app.probePermissions",
   group = "app",
   description = "Probe macOS screen recording, accessibility, and automation permissions.",
-  args = NO_ARGS,
+  input = ProbePermissionsArgs,
 )]
-async fn probe_permissions(input: InvokeCommandInput) -> InvokeCommandResult {
+async fn probe_permissions(input: InvokeCommandInput, _args: ProbePermissionsArgs) -> InvokeCommandResult {
   if input.dry_run {
     return Ok(InvokeCommandOutput::completed());
   }
@@ -35,13 +36,17 @@ pub async fn read_permissions() -> Result<auv_driver::PermissionProbe, String> {
   }
 }
 
+#[derive(Clone, Debug, Args, serde::Serialize, serde::Deserialize)]
+#[command(after_long_help = "Examples:\n  auv invoke app.activate --target com.apple.TextEdit")]
+struct ActivateAppArgs {}
+
 #[invoke_command(
   id = "app.activate",
   group = "app",
   description = "Bring a target macOS app to the foreground before a foreground-dependent step.",
-  args = TARGET_ARGS,
+  input = ActivateAppArgs,
 )]
-async fn activate_app(input: InvokeCommandInput) -> InvokeCommandResult {
+async fn activate_app(input: InvokeCommandInput, _args: ActivateAppArgs) -> InvokeCommandResult {
   let result = activate_application(input.target_application_id).await?;
   let mut fields = vec![
     InvokeReportField::new("Requested target", &result.requested_bundle_id),

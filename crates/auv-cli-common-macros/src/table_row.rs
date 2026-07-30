@@ -15,7 +15,7 @@ pub(crate) fn expand(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
   let mut cells = Vec::new();
   for field in fields {
     let ident = field.ident.expect("named fields have identifiers");
-    let mut header = inferred_header(&ident.to_string());
+    let mut header = ident.to_string().replace('_', " ").to_ascii_uppercase();
     let mut hidden = false;
     let mut wide = false;
     let mut display_with: Option<Expr> = None;
@@ -105,11 +105,3 @@ pub(crate) fn expand(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream
     }
   })
 }
-
-fn inferred_header(field_name: &str) -> String {
-  field_name.replace('_', " ").to_ascii_uppercase()
-}
-
-#[cfg(test)]
-#[path = "table_row_test.rs"]
-mod tests;

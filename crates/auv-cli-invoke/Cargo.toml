@@ -17,6 +17,7 @@ default = ["overlay"]
 overlay = ["auv-driver/overlay"]
 
 [dependencies]
+auv-cli-common = { path = "../auv-cli-common" }
 auv-cli-invoke-macros = { path = "../auv-cli-invoke-macros" }
 auv-driver = { path = "../auv-driver" }
 auv-media-macos = { path = "../auv-media-macos" }

@@ -43,7 +43,7 @@ async fn session_invoke_returns_the_direct_result_and_writes_trace_records() {
     .invoke(proto::InvokeRequest {
       session: Some(session),
       command_id: "scan.coverage".to_string(),
-      json_payload: br#"{"dry_run":true}"#.to_vec(),
+      json_payload: br#"{"inputs":{"fixture-dir":"unused"},"dry_run":true}"#.to_vec(),
     })
     .await
     .expect("invoke session command")

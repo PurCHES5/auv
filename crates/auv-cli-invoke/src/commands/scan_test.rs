@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use super::{ROOT_STRUCTURED_ARTIFACT_JSON_BYTE_LIMIT, coverage, frame, scan_coverage_artifact};
+use super::{ROOT_STRUCTURED_ARTIFACT_JSON_BYTE_LIMIT, coverage_invoke_command, frame_invoke_command, scan_coverage_artifact};
 use auv_tracing::{Context, MemoryTracingStore, RunId, configure, dispatcher};
 
 fn scan_fixture(relative: &str) -> PathBuf {
@@ -23,10 +23,11 @@ fn scan_coverage_artifact_enforces_four_mibibyte_bound() {
 
 #[test]
 fn scan_frame_requires_fixture_dir() {
-  let err = futures_executor::block_on(frame(crate::InvokeCommandInput {
+  let err = futures_executor::block_on(frame_invoke_command().invoke(crate::InvokeCommandInput {
     command_id: "scan.frame".to_string(),
     target_application_id: None,
     inputs: BTreeMap::new(),
+    typed_args: None,
     dry_run: false,
     cancellation: crate::InvokeCancellation::new(),
   }))
@@ -37,10 +38,11 @@ fn scan_frame_requires_fixture_dir() {
 
 #[test]
 fn scan_coverage_requires_fixture_dir() {
-  let err = futures_executor::block_on(coverage(crate::InvokeCommandInput {
+  let err = futures_executor::block_on(coverage_invoke_command().invoke(crate::InvokeCommandInput {
     command_id: "scan.coverage".to_string(),
     target_application_id: None,
     inputs: BTreeMap::new(),
+    typed_args: None,
     dry_run: false,
     cancellation: crate::InvokeCancellation::new(),
   }))
@@ -51,10 +53,11 @@ fn scan_coverage_requires_fixture_dir() {
 
 #[test]
 fn scan_frame_dry_run_produces_no_artifacts() {
-  let output = futures_executor::block_on(frame(crate::InvokeCommandInput {
+  let output = futures_executor::block_on(frame_invoke_command().invoke(crate::InvokeCommandInput {
     command_id: "scan.frame".to_string(),
     target_application_id: None,
     inputs: BTreeMap::from([("fixture-dir".to_string(), "unused".to_string())]),
+    typed_args: None,
     dry_run: true,
     cancellation: crate::InvokeCancellation::new(),
   }))
@@ -65,10 +68,11 @@ fn scan_frame_dry_run_produces_no_artifacts() {
 
 #[test]
 fn scan_coverage_dry_run_produces_no_artifacts() {
-  let output = futures_executor::block_on(coverage(crate::InvokeCommandInput {
+  let output = futures_executor::block_on(coverage_invoke_command().invoke(crate::InvokeCommandInput {
     command_id: "scan.coverage".to_string(),
     target_application_id: None,
     inputs: BTreeMap::from([("fixture-dir".to_string(), "unused".to_string())]),
+    typed_args: None,
     dry_run: true,
     cancellation: crate::InvokeCancellation::new(),
   }))
@@ -86,11 +90,12 @@ async fn scan_frame_returns_both_primary_artifact_receipts() {
     command_id: "scan.frame".to_string(),
     target_application_id: None,
     inputs: BTreeMap::from([("fixture-dir".to_string(), scan_fixture("temporal/single_frame_v0").display().to_string())]),
+    typed_args: None,
     dry_run: false,
     cancellation: crate::InvokeCancellation::new(),
   };
 
-  let output = root.instrument(root.in_scope(|| frame(input))).await.expect("scan frame");
+  let output = root.instrument(root.in_scope(|| frame_invoke_command().invoke(input))).await.expect("scan frame");
 
   assert_eq!(output.artifacts().len(), 2);
   assert_eq!(output.artifacts()[0].purpose().as_str(), "auv.scan.frame_image");
@@ -106,11 +111,12 @@ async fn scan_coverage_returns_its_primary_artifact_receipt() {
     command_id: "scan.coverage".to_string(),
     target_application_id: None,
     inputs: BTreeMap::from([("fixture-dir".to_string(), scan_fixture("coverage/coverage_stable_v0").display().to_string())]),
+    typed_args: None,
     dry_run: false,
     cancellation: crate::InvokeCancellation::new(),
   };
 
-  let output = root.instrument(root.in_scope(|| coverage(input))).await.expect("scan coverage");
+  let output = root.instrument(root.in_scope(|| coverage_invoke_command().invoke(input))).await.expect("scan coverage");
 
   assert_eq!(output.artifacts().len(), 1);
   assert_eq!(output.artifacts()[0].purpose().as_str(), "auv.runtime.scan_coverage");

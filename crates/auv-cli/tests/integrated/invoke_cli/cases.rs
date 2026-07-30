@@ -17,6 +17,8 @@ fn invoke_store_root_configures_tracing_without_becoming_command_input() {
   let command = parse_cli(&arguments(&[
     "invoke",
     "scan.frame",
+    "--fixture-dir",
+    "unused",
     "--store-root",
     "trace-output",
     "--label",
@@ -29,14 +31,57 @@ fn invoke_store_root_configures_tracing_without_becoming_command_input() {
   else {
     panic!("expected invoke command");
   };
-  assert_eq!(tracing.store_root.as_deref(), Some("trace-output"));
+  assert_eq!(tracing.store_root.as_deref(), Some(std::path::Path::new("trace-output")));
   assert_eq!(request.inputs.get("label").map(String::as_str), Some("fixture"));
   assert!(!request.inputs.contains_key("store-root"));
 }
 
 #[test]
-fn inspect_command_reports_the_explicit_retirement_boundary() {
-  let error = parse_cli(&arguments(&["inspect", "019f8b1e-4b2d-7a00-8f00-0000000000aa"])).expect_err("inspect is retired");
-  assert!(error.contains("has been retired"));
-  assert!(error.contains("inspector read-side"));
+fn screen_find_text_accepts_a_typed_positional_query() {
+  let command = parse_cli(&arguments(&[
+    "invoke",
+    "screen.findText",
+    "Settings",
+    "--target",
+    "com.apple.TextEdit",
+    "--dry-run",
+  ]))
+  .expect("typed invoke command should parse");
+  let CliCommand::Invoke { request, .. } = command else {
+    panic!("expected invoke command");
+  };
+
+  assert_eq!(request.inputs.get("query").map(String::as_str), Some("Settings"));
+  assert_eq!(request.target.application_id.as_deref(), Some("com.apple.TextEdit"));
+  assert!(request.dry_run);
+}
+
+#[test]
+fn invoke_context_uses_clap_equals_and_end_of_options_semantics() {
+  let command = parse_cli(&arguments(&[
+    "invoke",
+    "screen.findText",
+    "Settings",
+    "--target=com.apple.TextEdit",
+    "--dry-run",
+  ]))
+  .expect("equals syntax should parse");
+  let CliCommand::Invoke { request, .. } = command else {
+    panic!("expected invoke command");
+  };
+  assert_eq!(request.target.application_id.as_deref(), Some("com.apple.TextEdit"));
+  assert!(request.dry_run);
+
+  let command = parse_cli(&arguments(&["invoke", "input.typeText", "--", "--dry-run"])).expect("literal flag text should parse");
+  let CliCommand::Invoke { request, .. } = command else {
+    panic!("expected invoke command");
+  };
+  assert_eq!(request.inputs.get("text").map(String::as_str), Some("--dry-run"));
+  assert!(!request.dry_run);
+}
+
+#[test]
+fn unknown_top_level_names_are_reserved_for_external_plugins() {
+  let command = parse_cli(&arguments(&["inspect", "019f8b1e-4b2d-7a00-8f00-0000000000aa"])).expect("external command should parse");
+  assert!(matches!(command, CliCommand::External { .. }));
 }

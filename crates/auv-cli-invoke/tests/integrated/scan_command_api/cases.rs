@@ -39,6 +39,7 @@ fn scan_commands_return_direct_values_and_record_owned_artifacts() {
           command_id: command_id.to_string(),
           target_application_id: None,
           inputs: BTreeMap::from([("fixture-dir".to_string(), fixture_dir.to_string_lossy().into_owned())]),
+          typed_args: None,
           dry_run: false,
           cancellation: InvokeCancellation::new(),
         })

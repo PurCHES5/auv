@@ -1,9 +1,9 @@
 use crate::{
   CommandGroup, InvokeCommandInput, InvokeCommandOutput, InvokeCommandResult, InvokeReport, InvokeReportField, InvokeReportTable,
-  InvokeReportTableRow, InvokeReportValue,
-  arg::{NO_ARGS, TARGET_ARGS},
-  invoke_command,
+  InvokeReportValue, invoke_command,
 };
+use auv_cli_common::{TableRow, outputs::formats::table::TableOptions};
+use clap::Args;
 
 use auv_driver::overlay::{Overlay, components::CaptureFrame};
 use auv_tracing::ArtifactMetadata;
@@ -18,13 +18,17 @@ pub fn group() -> CommandGroup {
   CommandGroup::new("display", "DISPLAY").command(capture_display_invoke_command()).command(list_displays_invoke_command())
 }
 
+#[derive(Clone, Debug, Args, serde::Serialize, serde::Deserialize)]
+#[command(after_long_help = "Examples:\n  auv invoke display.capture")]
+struct CaptureDisplayArgs {}
+
 #[invoke_command(
   id = "display.capture",
   group = "display",
-  description = "Capture one display screenshot with a coordinate contract through xcap. If activate_target_before_capture is true, the target app is foregrounded first.",
-  args = TARGET_ARGS,
+  description = "Capture the primary display with its screenshot-to-logical coordinate contract.",
+  input = CaptureDisplayArgs,
 )]
-async fn capture_display(input: InvokeCommandInput) -> InvokeCommandResult {
+async fn capture_display(input: InvokeCommandInput, _args: CaptureDisplayArgs) -> InvokeCommandResult {
   if input.dry_run {
     return Ok(InvokeCommandOutput::completed());
   }
@@ -80,13 +84,17 @@ async fn capture_primary_display_recorded_with_session(
   Ok((result, artifact))
 }
 
+#[derive(Clone, Debug, Args, serde::Serialize, serde::Deserialize)]
+#[command(after_long_help = "Examples:\n  auv invoke display.list --json")]
+struct ListDisplaysArgs {}
+
 #[invoke_command(
   id = "display.list",
   group = "display",
   description = "List connected displays using the normalized AUV coordinate contract.",
-  args = NO_ARGS,
+  input = ListDisplaysArgs,
 )]
-async fn list_displays(input: InvokeCommandInput) -> InvokeCommandResult {
+async fn list_displays(input: InvokeCommandInput, _args: ListDisplaysArgs) -> InvokeCommandResult {
   if input.dry_run {
     return Ok(InvokeCommandOutput::completed());
   }
@@ -106,33 +114,9 @@ pub async fn observe_displays() -> Result<auv_driver::ObservedDisplays, String> 
   }
 }
 
-#[invoke_command(
-  id = "display.projectScreenshotPoint",
-  group = "display",
-  description = "Project main-display screenshot pixels back into AUV global logical coordinates.",
-  args = NO_ARGS,
-)]
-async fn project_screenshot_point(_input: InvokeCommandInput) -> InvokeCommandResult {
-  // TODO(invoke-display-point): add screenshot x/y arguments and expose the
-  // projection through DisplayApi before implementing this command.
-  unimplemented!("display.projectScreenshotPoint")
-}
-
-#[invoke_command(
-  id = "display.identifyPoint",
-  group = "display",
-  description = "Resolve a logical desktop point against the current macOS display layout.",
-  args = NO_ARGS,
-)]
-async fn identify_point(_input: InvokeCommandInput) -> InvokeCommandResult {
-  // TODO(invoke-display-point): add logical x/y arguments and expose display
-  // point resolution through DisplayApi before implementing this command.
-  unimplemented!("display.identifyPoint")
-}
-
 fn display_capture_report(result: &auv_driver::DisplayCapture) -> InvokeReport {
   let mut fields = vec![
-    InvokeReportField::new("Display", display_label(&result.display)),
+    InvokeReportField::new("Display", result.display.name.clone().unwrap_or_else(|| format!("display {}", result.display.id))),
     InvokeReportField::new("Display ID", result.display.id.clone()),
     InvokeReportField::new("Display frame", result.display.frame.report_value()),
     InvokeReportField::new("Capture bounds", result.capture.bounds.report_value()),
@@ -145,61 +129,48 @@ fn display_capture_report(result: &auv_driver::DisplayCapture) -> InvokeReport {
   InvokeReport::new(fields, Vec::new())
 }
 
-fn display_label(display: &auv_driver::Display) -> String {
-  display.name.clone().unwrap_or_else(|| format!("display {}", display.id))
+#[derive(TableRow)]
+struct DisplayRow {
+  #[table(header = "REF")]
+  reference: String,
+  role: &'static str,
+  name: String,
+  frame: String,
+  #[table(display_with = |scale: &f64| format!("{scale:.3}"))]
+  scale: f64,
+  #[table(wide)]
+  kind: &'static str,
 }
 
 fn display_list_report(displays: &[auv_driver::Display]) -> InvokeReport {
+  let rows = displays
+    .iter()
+    .map(|display| DisplayRow {
+      reference: display.id.clone(),
+      role: if display.is_primary {
+        "primary"
+      } else {
+        "secondary"
+      },
+      name: display.name.clone().unwrap_or_else(|| format!("display {}", display.id)),
+      frame: display.frame.report_value(),
+      scale: display.scale_factor,
+      kind: match display.is_builtin {
+        Some(true) => "built-in",
+        Some(false) => "external",
+        None => "unknown",
+      },
+    })
+    .collect::<Vec<_>>();
   InvokeReport {
     fields: vec![InvokeReportField::new(
       "Result",
       format!("{} display(s)", displays.len()),
     )],
-    tables: vec![InvokeReportTable::new(
-      &["REF", "ROLE", "NAME", "FRAME", "SCALE"],
-      displays
-        .iter()
-        .map(|display| {
-          InvokeReportTableRow::new([
-            display.id.clone(),
-            if display.is_primary {
-              "primary"
-            } else {
-              "secondary"
-            }
-            .to_string(),
-            display_label(display),
-            display.frame.report_value(),
-            format!("{:.3}", display.scale_factor),
-          ])
-        })
-        .collect(),
-    )],
-    wide_tables: vec![InvokeReportTable::new(
-      &["REF", "ROLE", "NAME", "FRAME", "SCALE", "KIND"],
-      displays
-        .iter()
-        .map(|display| {
-          InvokeReportTableRow::new([
-            display.id.clone(),
-            if display.is_primary {
-              "primary"
-            } else {
-              "secondary"
-            }
-            .to_string(),
-            display_label(display),
-            display.frame.report_value(),
-            format!("{:.3}", display.scale_factor),
-            match display.is_builtin {
-              Some(true) => "built-in",
-              Some(false) => "external",
-              None => "unknown",
-            }
-            .to_string(),
-          ])
-        })
-        .collect(),
+    tables: vec![InvokeReportTable::from_rows(&rows, TableOptions::default())],
+    wide_tables: vec![InvokeReportTable::from_rows(
+      &rows,
+      TableOptions::default().wide(true),
     )],
     sections: Vec::new(),
   }

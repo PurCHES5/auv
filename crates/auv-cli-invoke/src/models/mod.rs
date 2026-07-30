@@ -20,19 +20,9 @@ pub struct InvokeRequest {
   pub dry_run: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct InvokeOutputOptions {
   pub json: bool,
   pub detail: bool,
   pub wide: bool,
-}
-
-impl Default for InvokeOutputOptions {
-  fn default() -> Self {
-    Self {
-      json: false,
-      detail: false,
-      wide: false,
-    }
-  }
 }

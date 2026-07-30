@@ -378,12 +378,12 @@ version = "0.0.1"
 dependencies = [
  "auv-api-proto",
  "auv-cli-invoke",
- "auv-cli-invoke-macros",
  "auv-driver",
  "auv-driver-macos",
  "auv-runtime",
  "auv-tracing",
  "axum",
+ "clap",
  "objc2-core-foundation",
  "objc2-core-graphics",
  "rmcp",
@@ -422,6 +422,7 @@ version = "0.0.1"
 dependencies = [
  "anstream",
  "anstyle",
+ "auv-cli-common",
  "auv-cli-invoke-macros",
  "auv-driver",
  "auv-driver-macos",
@@ -443,6 +444,11 @@ dependencies = [
 [[package]]
 name = "auv-cli-invoke-macros"
 version = "0.0.1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
 
 [[package]]
 name = "auv-driver"

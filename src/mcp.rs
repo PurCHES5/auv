@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -17,7 +16,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
 
-use auv_cli_invoke::{ArgSpec, InvokeCancellation, InvokeCommand, InvokeCommandInput, InvokeRegistry, default_registry};
+use auv_cli_invoke::{InvokeCancellation, InvokeCommand, InvokeCommandInput, InvokeRegistry, default_registry};
 
 tokio::task_local! {
   static MCP_REQUEST_CANCELLATION: InvokeCancellation;
@@ -32,17 +31,6 @@ pub struct McpInvokeInput {
   pub inputs: BTreeMap<String, String>,
   pub dry_run: bool,
   pub cancellation: InvokeCancellation,
-}
-
-impl McpInvokeInput {
-  fn required_input(&self, command_id: &str, name: &str) -> Result<&str, String> {
-    self
-      .inputs
-      .get(name)
-      .map(String::as_str)
-      .filter(|value| !value.trim().is_empty())
-      .ok_or_else(|| format!("{command_id} requires --{name}"))
-  }
 }
 
 #[derive(Clone)]
@@ -219,277 +207,39 @@ impl auv_tracing::EventPayload for McpFrontendCancellation {
   const VERSION: u32 = 1;
 }
 
-fn completed(result: Value) -> McpInvokeSuccess {
-  McpInvokeSuccess::from_value(result)
-}
-
-fn reject_target_activation(input: &McpInvokeInput, command_id: &str) -> Result<(), String> {
-  if input.target_application_id.is_some() {
-    return Err(format!("{command_id} cannot use --target until typed input target activation is available"));
-  }
-  Ok(())
-}
-
-fn window_selector(input: &McpInvokeInput) -> auv_driver::WindowSelector {
-  let mut selector = auv_driver::WindowSelector {
-    main_visible: true,
-    ..auv_driver::WindowSelector::default()
-  };
-  if let Some(target) = input
-    .target_application_id
-    .as_deref()
-    .or_else(|| input.inputs.get("target").map(String::as_str))
-    .filter(|value| !value.trim().is_empty())
-  {
-    selector.app = Some(auv_driver::App::bundle_id(target));
-  }
-  if let Some(title) = input.inputs.get("title").filter(|value| !value.trim().is_empty()) {
-    selector.title = Some(auv_driver::TextMatcher::Contains(title.clone()));
-  }
-  selector
-}
-
-fn click_window_point_adapter() -> McpInvokeAdapter {
-  click_window_point_adapter_with(auv_cli_invoke::commands::input::click_window_point_domain)
-}
-
-fn overlay_adapter(command: InvokeCommand) -> McpInvokeAdapter {
+fn command_adapter(command: InvokeCommand) -> McpInvokeAdapter {
   let command_id = command.id;
   McpInvokeAdapter::new(command_id, move |input| {
     let command = command.clone();
     async move {
-      // Overlay debug commands have presentation as their observable effect;
-      // reuse their typed handler so CLI and MCP share parsing and composition.
-      command
+      let inputs = mcp_command_inputs(command.namespace, input.inputs);
+      let output = command
         .invoke(InvokeCommandInput {
           command_id: command_id.to_string(),
           target_application_id: input.target_application_id,
-          inputs: input.inputs,
+          inputs,
+          typed_args: None,
           dry_run: input.dry_run,
           cancellation: input.cancellation,
         })
         .await?;
-      Ok(McpInvokeSuccess::empty())
+      Ok(McpInvokeSuccess::from_value(output.result().cloned().unwrap_or(Value::Null)))
     }
   })
 }
 
-fn media_control_adapter(id: &'static str, command: auv_media_macos::MediaCommand) -> McpInvokeAdapter {
-  McpInvokeAdapter::new(id, move |_input| async move {
-    let result = auv_cli_invoke::commands::media_control::control_media(command).await?;
-    McpInvokeSuccess::from_result(&result)
-  })
-}
-
-fn focus_text_adapter(id: &'static str) -> McpInvokeAdapter {
-  McpInvokeAdapter::new(id, move |input| async move {
-    if input.dry_run {
-      return Ok(completed(Value::Null));
-    }
-    let app = input
-      .target_application_id
-      .as_deref()
-      .or_else(|| input.inputs.get("target").map(String::as_str))
-      .filter(|value| !value.trim().is_empty())
-      .ok_or_else(|| format!("{id} requires --target"))?
-      .to_string();
-    let query = input.inputs.get("query").cloned().unwrap_or_default();
-    let candidate = input.inputs.get("candidate").cloned().unwrap_or_default();
-    let result = auv_cli_invoke::commands::input::focus_text(app, query, candidate).await?;
-    McpInvokeSuccess::from_result(&result)
-  })
-}
-
-fn click_window_point_adapter_with<F, Fut>(execute: F) -> McpInvokeAdapter
-where
-  F: Fn(InvokeCommandInput) -> Fut + Clone + Send + Sync + 'static,
-  Fut: Future<Output = Result<auv_cli_invoke::commands::input::WindowPointClickOutcome, String>> + Send + 'static,
-{
-  McpInvokeAdapter::new("input.clickWindowPoint", move |input| {
-    let execute = execute.clone();
-    async move {
-      let dry_run = input.dry_run;
-      let outcome = execute(InvokeCommandInput {
-        command_id: "input.clickWindowPoint".to_string(),
-        target_application_id: input.target_application_id,
-        inputs: input.inputs,
-        dry_run,
-        cancellation: input.cancellation,
-      })
-      .await?;
-      McpInvokeSuccess::from_result(&outcome.into_result())
-    }
-  })
+fn mcp_command_inputs(namespace: auv_cli_invoke::InvokeNamespace, mut inputs: BTreeMap<String, String>) -> BTreeMap<String, String> {
+  // MCP consumes the shared direct operation result but does not opt into
+  // incidental CLI live presentation. Explicit overlay.* operations remain
+  // enabled because their visual effect is the operation itself.
+  if namespace != auv_cli_invoke::InvokeNamespace::Overlay {
+    inputs.insert("overlay".to_string(), "false".to_string());
+  }
+  inputs
 }
 
 pub fn core_invoke_adapters() -> Vec<McpInvokeAdapter> {
-  let mut adapters = vec![
-    McpInvokeAdapter::new("app.probePermissions", |input| async move {
-      if input.dry_run {
-        return Ok(completed(Value::Null));
-      }
-      let permissions = auv_cli_invoke::commands::app::read_permissions().await?;
-      McpInvokeSuccess::from_result(&permissions)
-    }),
-    McpInvokeAdapter::new("app.activate", |input| async move {
-      let result = auv_cli_invoke::commands::app::activate_application(input.target_application_id).await?;
-      McpInvokeSuccess::from_result(&result)
-    }),
-    McpInvokeAdapter::new("scan.frame", |input| async move {
-      if input.dry_run {
-        return Ok(completed(Value::Null));
-      }
-      let fixture_dir = input.required_input("scan.frame", "fixture-dir")?.to_string();
-      let frame = auv_cli_invoke::commands::scan::produce_scan_frame(PathBuf::from(&fixture_dir)).await?;
-      McpInvokeSuccess::from_result(&frame)
-    }),
-    McpInvokeAdapter::new("scan.coverage", |input| async move {
-      if input.dry_run {
-        return Ok(completed(Value::Null));
-      }
-      let fixture_dir = input.required_input("scan.coverage", "fixture-dir")?.to_string();
-      let coverage = auv_cli_invoke::commands::scan::produce_scan_coverage(PathBuf::from(&fixture_dir)).await?;
-      McpInvokeSuccess::from_result(&coverage)
-    }),
-    McpInvokeAdapter::new("display.capture", |input| async move {
-      if input.dry_run {
-        return Ok(completed(Value::Null));
-      }
-      let result = auv_cli_invoke::commands::display::capture_primary_display().await?;
-      McpInvokeSuccess::from_result(&auv_cli_invoke::commands::display_capture_result(&result.display, &result.capture))
-    }),
-    McpInvokeAdapter::new("display.list", |input| async move {
-      if input.dry_run {
-        return Ok(completed(Value::Null));
-      }
-      let displays = auv_cli_invoke::commands::display::observe_displays().await?;
-      McpInvokeSuccess::from_result(&displays)
-    }),
-    McpInvokeAdapter::new("input.typeText", |input| async move {
-      reject_target_activation(&input, "input.typeText")?;
-      if input.dry_run {
-        return Ok(completed(Value::Null));
-      }
-      let text = input.required_input("input.typeText", "text")?.to_string();
-      let result = auv_cli_invoke::commands::input::type_text_into_active_control(text).await?;
-      McpInvokeSuccess::from_result(&result)
-    }),
-    McpInvokeAdapter::new("input.pasteText", |input| async move {
-      reject_target_activation(&input, "input.pasteText")?;
-      if input.dry_run {
-        return Ok(completed(Value::Null));
-      }
-      let text = input.required_input("input.pasteText", "text")?.to_string();
-      let result = auv_cli_invoke::commands::input::paste_text_into_active_control(text).await?;
-      McpInvokeSuccess::from_result(&result)
-    }),
-    McpInvokeAdapter::new("input.key", |input| async move {
-      reject_target_activation(&input, "input.key")?;
-      if input.dry_run {
-        return Ok(completed(Value::Null));
-      }
-      let key = input.required_input("input.key", "key")?.to_string();
-      let result = auv_cli_invoke::commands::input::press_key_in_active_app(key).await?;
-      McpInvokeSuccess::from_result(&result)
-    }),
-    click_window_point_adapter(),
-    McpInvokeAdapter::new("screen.captureRegion", |input| async move {
-      reject_target_activation(&input, "screen.captureRegion")?;
-      let region = auv_cli_invoke::commands::screen::Region::parse(&input.inputs, "screen.captureRegion")?.into_rect();
-      if input.dry_run {
-        return Ok(completed(Value::Null));
-      }
-      let result = auv_cli_invoke::commands::screen::capture_screen_region(region).await?;
-      McpInvokeSuccess::from_result(&auv_cli_invoke::commands::display_capture_result(&result.display, &result.capture))
-    }),
-    McpInvokeAdapter::new("screen.findText", |input| async move {
-      reject_target_activation(&input, "screen.findText")?;
-      if input.dry_run {
-        return Ok(completed(Value::Null));
-      }
-      let query = input.required_input("screen.findText", "query")?.to_string();
-      let matches = auv_cli_invoke::commands::screen::recognize_screen_text(query, false).await?;
-      McpInvokeSuccess::from_result(&matches)
-    }),
-    McpInvokeAdapter::new("screen.waitForText", |input| async move {
-      reject_target_activation(&input, "screen.waitForText")?;
-      if input.dry_run {
-        return Ok(completed(Value::Null));
-      }
-      let query = input.required_input("screen.waitForText", "query")?.to_string();
-      let matches = auv_cli_invoke::commands::screen::recognize_screen_text(query, true).await?;
-      McpInvokeSuccess::from_result(&matches)
-    }),
-    McpInvokeAdapter::new("screen.clickText", |input| async move {
-      reject_target_activation(&input, "screen.clickText")?;
-      if input.dry_run {
-        return Ok(completed(Value::Null));
-      }
-      let query = input.required_input("screen.clickText", "query")?.to_string();
-      let result = auv_cli_invoke::commands::screen::click_recognized_screen_text(query).await?;
-      McpInvokeSuccess::from_result(&result)
-    }),
-    McpInvokeAdapter::new("window.list", |input| async move {
-      if input.dry_run {
-        return Ok(completed(Value::Null));
-      }
-      let windows = auv_cli_invoke::commands::window::observe_windows().await?;
-      McpInvokeSuccess::from_result(&windows)
-    }),
-    McpInvokeAdapter::new("window.capture", |input| async move {
-      if input.dry_run {
-        return Ok(completed(Value::Null));
-      }
-      let result = auv_cli_invoke::commands::window::capture_selected_window(window_selector(&input)).await?;
-      McpInvokeSuccess::from_result(&auv_cli_invoke::commands::window::window_capture_result(&result))
-    }),
-    McpInvokeAdapter::new("window.findText", |input| async move {
-      if input.dry_run {
-        return Ok(completed(Value::Null));
-      }
-      let query = input.required_input("window.findText", "query")?.to_string();
-      let result = auv_cli_invoke::commands::window::recognize_window_text(window_selector(&input), query, false).await?;
-      McpInvokeSuccess::from_result(&result)
-    }),
-    McpInvokeAdapter::new("window.waitForText", |input| async move {
-      if input.dry_run {
-        return Ok(completed(Value::Null));
-      }
-      let query = input.required_input("window.waitForText", "query")?.to_string();
-      let result = auv_cli_invoke::commands::window::recognize_window_text(window_selector(&input), query, true).await?;
-      McpInvokeSuccess::from_result(&result)
-    }),
-    McpInvokeAdapter::new("window.clickText", |input| async move {
-      if input.dry_run {
-        return Ok(completed(Value::Null));
-      }
-      let query = input.required_input("window.clickText", "query")?.to_string();
-      let result = auv_cli_invoke::commands::window::click_recognized_window_text(window_selector(&input), query).await?;
-      McpInvokeSuccess::from_result(&result)
-    }),
-    overlay_adapter(auv_cli_invoke::commands::overlay::show_outline_invoke_command()),
-    overlay_adapter(auv_cli_invoke::commands::overlay::show_cursor_invoke_command()),
-    overlay_adapter(auv_cli_invoke::commands::overlay::show_status_invoke_command()),
-    overlay_adapter(auv_cli_invoke::commands::overlay::show_capture_frame_invoke_command()),
-    overlay_adapter(auv_cli_invoke::commands::overlay::show_click_target_invoke_command()),
-  ];
-
-  // TODO(invoke-mcp-stubs): adapters for intentionally unregistered invoke
-  // commands remain absent until owner-approved implementations have behavioral evidence.
-  adapters.extend([
-    focus_text_adapter("input.focusText"),
-    focus_text_adapter("input.axFocusText"),
-    McpInvokeAdapter::new("mediaControl.nowPlaying", |_input| async move {
-      let result = auv_cli_invoke::commands::media_control::read_now_playing().await?;
-      McpInvokeSuccess::from_result(&result)
-    }),
-    media_control_adapter("mediaControl.play", auv_media_macos::MediaCommand::Play),
-    media_control_adapter("mediaControl.pause", auv_media_macos::MediaCommand::Pause),
-    media_control_adapter("mediaControl.togglePlayPause", auv_media_macos::MediaCommand::TogglePlayPause),
-    media_control_adapter("mediaControl.next", auv_media_macos::MediaCommand::NextTrack),
-    media_control_adapter("mediaControl.previous", auv_media_macos::MediaCommand::PreviousTrack),
-  ]);
-  adapters
+  default_registry().all().iter().cloned().map(command_adapter).collect()
 }
 
 #[tool_router(router = tool_router)]
@@ -591,8 +341,7 @@ impl ServerHandler for McpServer {
   fn get_info(&self) -> ServerInfo {
     ServerInfo {
       instructions: Some(
-        "MCP exposes explicit AUV tools with catalog metadata and MCP-owned typed invoke adapters; no planner or NL parsing is present."
-          .into(),
+        "MCP exposes explicit AUV tools backed by the registered typed invoke commands; no planner or NL parsing is present.".into(),
       ),
       capabilities: ServerCapabilities::builder().enable_tools().build(),
       ..Default::default()
@@ -601,7 +350,7 @@ impl ServerHandler for McpServer {
 }
 
 fn invoke_tool_input_schema() -> Arc<JsonObject> {
-  // Static schema uses core registry; product servers rewrite via list_tools
+  // Static schema uses the core registry; injected registries rewrite via list_tools
   // with the explicitly injected registry.
   invoke_tool_input_schema_for_registry(&default_registry())
 }
@@ -628,33 +377,23 @@ fn invoke_tool_input_schema_for_registry(registry: &InvokeRegistry) -> Arc<JsonO
 }
 
 fn invoke_command_metadata(command: &InvokeCommand) -> Value {
+  let clap_command = command.clap_command();
   serde_json::json!({
     "id": command.id,
     "namespace": command.namespace.as_str(),
     "description": command.description,
-    "arguments": command
-      .args
-      .iter()
-      .map(invoke_arg_metadata)
+    "arguments": clap_command
+      .get_arguments()
+      .filter(|argument| argument.get_id() != "help")
+      .map(|argument| serde_json::json!({
+        "flag": argument.get_long().map(|long| format!("--{long}")),
+        "input_key": argument.get_long().unwrap_or_else(|| argument.get_id().as_str()),
+        "value_name": argument.get_value_names().and_then(|names| names.first()).map(|name| name.as_str()),
+        "required": argument.is_required_set(),
+        "help": argument.get_help().map(ToString::to_string),
+      }))
       .collect::<Vec<_>>(),
   })
-}
-
-fn invoke_arg_metadata(arg: &ArgSpec) -> Value {
-  serde_json::json!({
-    "flag": arg.flag,
-    "input_key": invoke_arg_input_key(arg.flag),
-    "value_name": arg.value_name,
-    "required": arg.required,
-    "help": arg.help,
-  })
-}
-
-fn invoke_arg_input_key(flag: &str) -> String {
-  match flag {
-    "--target" => "target.application_id".to_string(),
-    other => other.trim_start_matches("--").to_string(),
-  }
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -684,7 +423,7 @@ pub async fn serve_stdio(project_root: PathBuf) -> Result<(), String> {
   serve_stdio_with_registry(project_root, Arc::new(default_registry()), core_invoke_adapters()).await
 }
 
-/// Serve MCP stdio with explicit invoke metadata and MCP-owned command adapters.
+/// Serve MCP stdio with explicit invoke metadata and shared typed commands.
 pub async fn serve_stdio_with_registry(
   project_root: PathBuf,
   invoke_registry: Arc<InvokeRegistry>,
@@ -701,11 +440,20 @@ pub async fn serve_stdio_with_registry(
 mod tests {
   use std::collections::BTreeMap;
 
-  use super::{McpInvokeInput, McpServer, core_invoke_adapters};
+  use super::{McpInvokeInput, McpServer, core_invoke_adapters, mcp_command_inputs};
 
   #[test]
   fn default_mcp_server_accepts_its_invoke_registry_and_adapter_catalog() {
     McpServer::new(std::path::PathBuf::from(".")).expect("default MCP invoke catalogs should agree");
+  }
+
+  #[test]
+  fn mcp_disables_incidental_overlays_but_preserves_explicit_overlay_operations() {
+    let incidental = mcp_command_inputs(auv_cli_invoke::InvokeNamespace::Window, pairs(&[("overlay", "true")]));
+    assert_eq!(incidental.get("overlay").map(String::as_str), Some("false"));
+
+    let explicit = mcp_command_inputs(auv_cli_invoke::InvokeNamespace::Overlay, BTreeMap::new());
+    assert!(!explicit.contains_key("overlay"));
   }
 
   #[tokio::test]
@@ -732,6 +480,23 @@ mod tests {
         .await
         .unwrap_or_else(|error| panic!("{command_id} MCP dry run failed: {error}"));
     }
+  }
+
+  #[tokio::test]
+  async fn mcp_uses_the_same_typed_range_validation_as_cli() {
+    let adapters = core_invoke_adapters();
+    let adapter = adapters.iter().find(|adapter| adapter.command_id == "input.clickWindowPoint").expect("click-window-point adapter");
+    let error = adapter
+      .invoke(McpInvokeInput {
+        target_application_id: None,
+        inputs: pairs(&[("relative-x", "2"), ("relative-y", "0.5")]),
+        dry_run: true,
+        cancellation: Default::default(),
+      })
+      .await
+      .expect_err("out-of-range MCP input must fail typed decoding");
+
+    assert!(error.contains("within 0..=1"), "unexpected typed validation error: {error}");
   }
 
   fn pairs(values: &[(&str, &str)]) -> BTreeMap<String, String> {

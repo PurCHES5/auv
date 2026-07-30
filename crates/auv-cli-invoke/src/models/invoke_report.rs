@@ -26,7 +26,12 @@ impl InvokeReport {
   pub(crate) fn write_human<W: Write>(&self, writer: &mut W, options: InvokeOutputOptions, color: bool) -> Result<(), String> {
     write_field_rows(writer, &self.fields, color)?;
 
-    for table in self.human_tables(options) {
+    let tables = if options.wide && !self.wide_tables.is_empty() {
+      &self.wide_tables
+    } else {
+      &self.tables
+    };
+    for table in tables {
       writeln!(writer).map_err(write_error)?;
       table.write_human(writer)?;
     }
@@ -38,14 +43,6 @@ impl InvokeReport {
     }
 
     Ok(())
-  }
-
-  fn human_tables(&self, options: InvokeOutputOptions) -> &[InvokeReportTable] {
-    if options.wide && !self.wide_tables.is_empty() {
-      &self.wide_tables
-    } else {
-      &self.tables
-    }
   }
 }
 
@@ -94,7 +91,21 @@ impl InvokeReportTable {
     self
   }
 
+  pub(crate) fn from_rows<R>(rows: &[R], options: auv_cli_common::outputs::formats::table::TableOptions<'_>) -> Self
+  where
+    R: auv_cli_common::outputs::formats::table::TableRow,
+  {
+    Self {
+      columns: R::columns(options).into_iter().map(|column| column.header.to_string()).collect(),
+      rows: rows.iter().map(|row| InvokeReportTableRow::new(row.cells(options))).collect(),
+      display_max_chars: Vec::new(),
+    }
+  }
+
   pub(crate) fn write_human<W: Write>(&self, writer: &mut W) -> Result<(), String> {
+    // TODO(cli-output-renderer-v1): shared TableRow now owns schemas and cells,
+    // but invoke-specific indentation and column limits stay here until
+    // auv-cli-common exposes those rendering policies.
     let mut rendered = Table::new();
     rendered.load_preset(NOTHING);
     rendered.set_content_arrangement(ContentArrangement::Dynamic);

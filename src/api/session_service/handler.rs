@@ -67,6 +67,7 @@ impl SessionApiHandler {
       command_id: command_id.clone(),
       target_application_id: host_request.target.application_id,
       inputs: host_request.inputs,
+      typed_args: None,
       dry_run: host_request.dry_run,
       cancellation: InvokeCancellation::new(),
     };
