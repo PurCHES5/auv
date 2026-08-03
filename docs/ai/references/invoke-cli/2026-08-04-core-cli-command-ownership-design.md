@@ -253,6 +253,66 @@ valid resource IDs. Resource-specific `auv` operations resolve selectors into
 the corresponding typed IDs. A Device, Run, Runner, or RunnerClass ID cannot be
 substituted for another resource's identity by type accident.
 
+### Resource-specific typed errors
+
+Device, Run, Runner, and Pairing interfaces expose resource-specific typed
+errors for selector failures, ambiguity, invalid resource state, association
+conflicts, authorization, and rejected operations. Shared outer client and
+context errors represent transport, discovery, profile, and protocol failures.
+
+Public error variants do not expose `tonic::Status`, although implementations
+retain source chains for diagnostics. CLI and future MCP interfaces map the same
+typed errors into their own text, exit, or structured-tool behavior. The
+migration does not invent a global catch-all error enum, error-code registry,
+retry, or backoff policy without a concrete recovery requirement.
+
+### Explicit frontend projections
+
+`auv` returns typed domain results; those result layouts are not automatically
+the CLI JSON contract or a future MCP schema. Each command module explicitly
+projects domain results into its existing table, human text, and JSON output.
+A future MCP interface owns a separate explicit MCP projection.
+
+Domain types derive serialization only when the domain, storage, or another
+accepted interface requires it. Frontend convenience alone does not couple a
+domain struct's fields to a public CLI or MCP representation.
+
+### Final `auv-cli` source boundary
+
+The root source retains `cli.rs` for root parsing, diagnostics, one routing
+pass, and exit mapping; `commands/` for all user-command declarations,
+execution, and presentation; `runner/` for the internal process role dispatched
+before the Tokio runtime; and `xtask.rs` for repository-only development work.
+
+`cli_frontend.rs` is deleted. Top-level plugin execution moves into
+`commands/plugin` while reusable selection moves to `auv`. The existing MCP
+serve implementation moves into `commands/mcp`; creating `auv-cli-mcp` remains
+deferred. CLI-owned daemon hosting moves to `auv-daemon`, with serve argument
+adaptation in `commands/serve`. No equivalent top-level frontend helper replaces
+the deleted modules.
+
+### Acceptance evidence and delivery
+
+The coordinated migration may proceed in dependency order and keep progressive
+compile/test feedback, but its delivered state contains no temporary public
+compatibility layer. Required evidence covers:
+
+- typed Device, Run, Runner, Pairing, selector, identity, error, and configured
+  availability behavior through `auv`;
+- daemon state, pairing authority, Runner lifecycle, and server lifecycle
+  through `auv-daemon`;
+- domain/wire conversion, authentication, and RPC adapters across
+  `auv-api-client` and `auv-api-server`;
+- existing root subprocess, table/JSON, exit, selection-conflict,
+  daemon-unavailable, and invoke lifecycle behavior through `auv-cli`;
+- live enable, disable, unpair, and shared paired-Device administration across
+  listener types;
+- deletion of `cli_frontend`, core gRPC escape-hatch use, CLI pairing-store
+  access, duplicated selector logic, and raw core protobuf/tonic interfaces.
+
+The final workspace runs the repository validation commands. The implementation
+does not create Git commits unless the owner requests them separately.
+
 ### Live pairing administration
 
 The current `auv devices enable`, `disable`, and `unpair` implementations
