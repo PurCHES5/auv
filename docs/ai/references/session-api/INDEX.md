@@ -14,12 +14,13 @@ Connection, legacy VisionService, and `/v1/*:verb` routes were removed on
 Current implementation ownership still places daemon state and typed capability
 forwarding in `auv-api-server`, context/placement policy in `auv-api-client`,
 and serving composition in `auv-cli`. The accepted target introduces `auv` as
-the local/remote domain facade and `auv-daemon` as the long-lived control owner;
+the canonical local/remote operation interface and `auv-daemon` as the long-lived control owner;
 `auv-api-client` and `auv-api-server` become protocol boundaries. MCP remains in
 `auv-cli`.
 
-Count: **15**
+Count: **16**
 
+- [`2026-08-04-live-pairing-administration-decision.md`](2026-08-04-live-pairing-administration-decision.md) — accepted live administration and shared authenticated authority.
 - [`2026-08-03-auv-facade-daemon-runner-architecture.md`](2026-08-03-auv-facade-daemon-runner-architecture.md) — accepted facade, daemon, opaque routing, extension, and Runner target.
 - [`2026-07-31-device-run-runner-aggregated-api-design.md`](2026-07-31-device-run-runner-aggregated-api-design.md)
 - [`2026-07-31-daemon-session-api-architecture.md`](2026-07-31-daemon-session-api-architecture.md)

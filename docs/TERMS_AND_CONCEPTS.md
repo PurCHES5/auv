@@ -105,10 +105,24 @@ The core command frontend package (`auv-cli`, located at `crates/auv-cli`):
 
 - Owns the root `auv` binary, core CLI frontend, core invoke entrypoint,
   built-in MCP server, foreground serving frontend, and development xtasks.
+- Acts as the CLI and standard-I/O adapter: it parses operating-system
+  arguments, routes typed commands, renders human or machine output, and maps
+  operation failures to process exit behavior. Reusable Device, Run, Runner,
+  pairing, context, and capability semantics do not belong to this adapter.
+- Calls the `auv` operation interface for ordinary core operations. Core command and MCP
+  frontends do not construct protobuf requests, interpret `tonic::Status`, or
+  call `auv-api-client` directly to bypass that interface.
 - Depends directly on the command, driver, protocol, and tracing crates needed
   by those frontends. There is no `auv-runtime` package or root Cargo package.
 - Supported app/game packages own their command frontends and integration
   wiring; they must not depend on `auv-cli` to reach command or tracing types.
+
+## Root Selection
+
+Root Selection is the unresolved Device and optional Run selection expressed
+by global root CLI options. It records caller intent and is resolved by the
+owning operation or command through the AUV operation interface; it is not an `AuvContext`,
+a connected client, or proof that the selected resources exist.
 
 ## Runtime responsibility
 
@@ -118,9 +132,9 @@ create tracing contexts and flush recording. `auv-tracing` persists emitted
 events and artifacts without executing operations. AUV does not have or require
 an `auv-runtime` package that aggregates these responsibilities.
 
-## AUV facade / auv
+## AUV operation interface / auv
 
-The `auv` library crate owns the standard operation-facing facade used by
+The `auv` library crate owns the canonical operation interface used by
 application and extension business code, exposed as `auv::Client`. A caller
 uses the same typed capability operations regardless of whether their
 implementation is local or reached through a daemon. Backend selection is
@@ -128,10 +142,21 @@ composition and context: explicit or injected daemon context selects the API
 client transport, while a locally composed context uses in-process Driver,
 inference, media, and other capability providers.
 
-The facade's canonical request, result, and capability types are Rust domain
+The operation interface also owns reusable typed Device, Run, and Runner control operations
+used by CLI, library, MCP, and future UI callers. Resource-specific selection,
+ambiguity handling, association validation, and operation errors remain behind
+those interfaces; frontends do not reconstruct them from lists of protobuf
+resources.
+
+The same rule applies to pairing and other daemon-facing core operations. The
+operation interface exposes domain-facing request, result, and error signatures while
+`auv-api-client` implements their gRPC/protobuf transport. A core frontend does
+not treat the wire client as an alternative public operation interface.
+
+The operation interface's canonical request, result, and capability types are Rust domain
 contracts owned by the relevant Driver, inference, media, or operation crate.
 Protobuf messages are wire projections used by API adapters; they are not the
-facade's domain model and domain crates do not depend on them. A local backend
+operation interface's domain model and domain crates do not depend on them. A local backend
 passes domain values directly, while a remote backend converts domain values to
 and from protobuf at the `auv-api-client` boundary. Daemon built-in service
 adapters perform the inverse conversion before calling the same domain
@@ -141,35 +166,40 @@ represent an accepted provider-independent domain concept.
 The same ownership rule applies to errors. Capability-semantic failures use
 domain errors consistently for local and remote backends. A remote adapter maps
 domain errors to gRPC status/details at the server boundary and maps them back
-at the facade boundary; `tonic::Status` is not a business-facing SDK error.
+at the operation interface; `tonic::Status` is not a business-facing SDK error.
 Transport, protocol, and context/configuration failures remain distinct outer
-facade error layers rather than being misreported as capability failures. The
+operation-interface error layers rather than being misreported as capability failures. The
 concrete gRPC error-details schema is deferred to an implementation slice.
 
-The facade owns this local/remote selection and consistent developer
+The operation interface owns this local/remote selection and consistent developer
 experience; it does not own the underlying capability implementations or
 daemon lifecycle. `auv-api-client` remains the remote wire client and
 `auv-driver` remains the local Driver contract. Application code must not branch
 between separate local and remote operation APIs merely because an executable
 is running directly or as a daemon-managed Runner. The `auv` crate is a thin
-SDK/facade, not an aggregate runtime crate; it does not own daemon lifecycle,
+SDK/interface, not an aggregate runtime crate; it does not own daemon lifecycle,
 run persistence, tracing persistence, or platform implementations.
 
-The facade statically exposes AUV-owned typed capabilities and provides a gRPC
+The operation interface statically exposes AUV-owned typed capabilities and provides a gRPC
 transport bound to its endpoint, Device, optional Run, and RunnerClass routing
 context. An extension owns its generated clients and any extension-specific
-local/remote facade; community service types are not aggregated into
+local/remote operation interface; community service types are not aggregated into
 `auv::Client`. Rust extensions normally use their generated client over this
 routed transport. Reflection-based dynamic invocation is reserved for future
 scripting, developer tools, and generic clients rather than replacing an
 extension's typed Rust API.
+
+An extension-owned generated client may use an operation-interface-provided transport handle
+that has already resolved context, routing, and authentication. This is an
+extension protocol escape hatch, not a path for core Device, Run, Runner,
+pairing, or capability frontends to bypass canonical operations.
 
 Backend selection is sticky once resolved. With no daemon context or remote
 Device selection, a locally composed client uses its local backend. An explicit
 endpoint, inherited daemon context, or remote Device selects the remote backend;
 connection and capability failures are returned to the caller and never cause
 implicit local fallback. A higher-level operation may implement an explicit,
-domain-visible fallback policy, but the facade does not silently change the
+domain-visible fallback policy, but the operation interface does not silently change the
 Device on which an operation executes.
 
 The `auv` crate also owns process/client context resolution: `AuvContext`,
@@ -179,7 +209,7 @@ Runners, and library callers, so they are not owned by `auv-cli-common`.
 `auv-api-client` accepts an explicit resolved endpoint and routing parameters;
 it does not read environment variables, profiles, discovery files, or decide
 between local and remote execution. The daemon publishes its local discovery
-record, while the facade owns client-side discovery policy.
+record, while the operation interface owns client-side discovery policy.
 
 ## CLI plugin
 
@@ -202,6 +232,11 @@ that also provides remotely callable capabilities must be admitted separately
 as a RunnerClass/RunnerRuntime with an explicit protobuf/gRPC service contract.
 The CLI frontend and Runner implementation may share a package or executable,
 but neither role implies the other.
+
+The same rule applies to MCP exposure. A future MCP interface may expose typed
+extension operations that the extension deliberately makes available through
+the AUV operation interface. It does not convert an arbitrary `auv-<name>` PATH
+executable, argv sequence, or stdout stream into an MCP tool automatically.
 
 `Plugin` refers specifically to this CLI role. A remotely callable service
 bundle is an extension-provided RunnerClass, not a plugin, even when the same
@@ -284,6 +319,17 @@ paired Device identity and returns an opaque long-lived Device credential; the
 daemon persists only token and credential digests. Disabling/unpairing a Device
 or revoking its credential affects the next authorization lookup.
 
+Pairing administration is a live daemon operation. The daemon is the sole
+owner of pairing persistence; CLI, MCP, and other client interfaces administer
+trust through typed `auv` operations and never open or mutate the pairing store
+directly while the daemon is stopped.
+
+The local owner and every active paired Device bearer are equal pairing
+administrators. Any of them may create bootstrap tokens, enable or disable a
+paired Device, unpair a Device, or revoke credentials. Pairing has no separate
+administrator role; `PairDevice` is the only unauthenticated operation and
+requires a valid one-time bootstrap token.
+
 ## Daemon
 
 The AUV daemon is the long-lived process role that owns API listeners,
@@ -360,7 +406,7 @@ Each admitted RunnerClass registration has a stable Device-local key used for
 capability routing. The same implementation and service protocol may be registered
 under several keys when operator-approved arguments, profiles, or lifecycle
 configuration differ. Ordinary capability callers select this registration
-key, explicitly or through facade defaults; they do not select a live Runner
+key, explicitly or through operation-interface defaults; they do not select a live Runner
 ID. The daemon may start, reuse, or replace the backing Runner without changing
 the capability address.
 

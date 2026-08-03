@@ -2,8 +2,9 @@
 
 Invoke routing, CLI handlers, catalog, output contracts
 
-Count: **18**
+Count: **19**
 
+- [`2026-08-04-core-cli-command-ownership-design.md`](2026-08-04-core-cli-command-ownership-design.md)
 - [`2026-07-31-kubectl-plugin-context-research.md`](2026-07-31-kubectl-plugin-context-research.md)
 - [`2026-06-10-cli-invoke-catalog-removal.md`](2026-06-10-cli-invoke-catalog-removal.md)
 - [`2026-06-11-cli-invoke-driver-console-design.md`](2026-06-11-cli-invoke-driver-console-design.md)
