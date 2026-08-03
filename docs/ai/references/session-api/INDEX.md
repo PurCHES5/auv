@@ -1,11 +1,29 @@
-# session-api
+# Device / Run / Runner API
 
-Session API, proto, MCP frontend, operator guides
+Device/Run/Runner control API, protobuf, Runner aggregation, MCP frontend, and
+the tombstone for the retired SessionService prototype. The folder name is
+retained as a stable responsibility path; Session is not a public resource.
 
-Current ownership: MCP and the session server are built into `auv-cli`; see the
-[`auv-runtime` package retirement handoff](../runtime/2026-07-31-auv-runtime-package-retirement-handoff.md).
+Accepted target architecture:
+[`2026-08-03-auv-facade-daemon-runner-architecture.md`](2026-08-03-auv-facade-daemon-runner-architecture.md).
+The 2026-07-31 aggregated API is the current implementation baseline, not the
+accepted package and routing target. Public SessionService, session-scoped
+Connection, legacy VisionService, and `/v1/*:verb` routes were removed on
+2026-07-31.
 
-Count: **9**
+Current implementation ownership still places daemon state and typed capability
+forwarding in `auv-api-server`, context/placement policy in `auv-api-client`,
+and serving composition in `auv-cli`. The accepted target introduces `auv` as
+the local/remote domain facade and `auv-daemon` as the long-lived control owner;
+`auv-api-client` and `auv-api-server` become protocol boundaries. MCP remains in
+`auv-cli`.
+
+Count: **13**
+
+- [`2026-08-03-auv-facade-daemon-runner-architecture.md`](2026-08-03-auv-facade-daemon-runner-architecture.md) — accepted facade, daemon, opaque routing, extension, and Runner target.
+- [`2026-07-31-device-run-runner-aggregated-api-design.md`](2026-07-31-device-run-runner-aggregated-api-design.md)
+- [`2026-07-31-daemon-session-api-architecture.md`](2026-07-31-daemon-session-api-architecture.md)
+- [`2026-08-02-api-client-server-package-architecture-research.md`](2026-08-02-api-client-server-package-architecture-research.md) — primary-source comparison and a capability-scoped client/server alternative.
 
 - [`2026-06-10-stateful-session-daemon-js-repl-v0.md`](2026-06-10-stateful-session-daemon-js-repl-v0.md)
 - [`2026-06-11-mcp-frontend-surface-v0.md`](2026-06-11-mcp-frontend-surface-v0.md)
