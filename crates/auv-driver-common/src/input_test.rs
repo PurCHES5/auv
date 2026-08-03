@@ -1,4 +1,9 @@
-use super::*;
+use std::time::Duration;
+
+use super::{
+  Click, ClickOptions, DisturbanceLevel, InputActionResult, InputAttempt, InputDeliveryPath, InputPolicy, InputPreparationLease, Scroll,
+  ScrollDeliveryCandidate, ScrollDeliveryStrategy, ScrollOptions, WindowClickStrategy,
+};
 
 #[test]
 fn dispatched_input_is_explicitly_unverified_on_the_wire() {
