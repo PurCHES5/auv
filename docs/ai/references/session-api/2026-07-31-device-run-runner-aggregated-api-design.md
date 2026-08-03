@@ -45,7 +45,7 @@ The retired implementation established several useful mechanisms:
 
 - one service implementation can accept loopback TCP, Unix domain socket, and
   authenticated remote transports;
-- transport evidence can be projected into a stable principal before a handler
+- transport evidence can establish a stable caller before a handler
   executes;
 - daemon-owned resources can initialize lazily, drain active calls, and expire
   after an idle period;
@@ -263,20 +263,20 @@ The daemon may project capabilities into system labels such as
 cannot prove that a Runner implements a service. Scheduling and authorization
 must validate the registered descriptor/capability manifest.
 
-### Principal
+### Caller
 
-A Principal is the authenticated caller identity projected by the daemon's
-transport authority. A Device is the target execution/trust boundary; it does
+A Caller is the authenticated identity established by the daemon's transport
+authentication layer. A Device is the target execution/trust boundary; it does
 not replace caller identity.
 
 Authorization evaluates at least:
 
 ```text
-Principal + target Device + optional Run + Runner + protobuf service/method
+Caller + target Device + optional Run + Runner + protobuf service/method
 ```
 
 Runner processes trust only their parent daemon connection and do not repeat
-external authentication. The daemon may forward read-only principal/Run
+external authentication. The daemon may forward read-only caller/Run
 metadata for domain logging, but that metadata is not a credential.
 
 ## CLI contract
@@ -634,7 +634,7 @@ Unix and then loopback TCP. Remote endpoints are printed as bound endpoints
 but are not published as credential-free local discovery. A remote-only
 foreground command simply has no local descriptor to publish; it does not
 require an otherwise meaningless `--no-discovery` flag. Runs remain
-Principal-scoped even though all listeners share the canonical Device,
+Caller-scoped even though all listeners share the canonical Device,
 RunnerClass registry, and daemon-global resources.
 
 ### Daemon-managed Runner runtimes
@@ -706,7 +706,7 @@ enumerate every environment variable. A socketpair is private
 routing, not a sandbox: another process with the daemon's uid may still reach
 same-user resources, including a local daemon socket. Treating community code
 as untrusted requires a later platform sandbox or separate uid together with a
-distinct child Principal. The daemon must not claim that process isolation is
+distinct child Caller. The daemon must not claim that process isolation is
 already an authorization boundary.
 
 Executable configuration accepts an absolute path, a manifest-relative path,
@@ -770,15 +770,15 @@ self-declared by runtime metadata.
 
 ## Protobuf and custom Runner APIs
 
-### Core control-plane schema ownership
+### Daemon control-plane schema ownership
 
-Core AUV protobuf contains the shared control-plane resources and stable
+The daemon protobuf package contains the shared control-plane resources and stable
 annotations, for example:
 
 ```text
-auv/api/core/v1/device.proto
-auv/api/core/v1/run.proto
-auv/api/core/v1/runner.proto
+auv/api/daemon/v1/device.proto
+auv/api/daemon/v1/run.proto
+auv/api/daemon/v1/runner.proto
 auv/api/runner/v1/runtime.proto
 auv/api/annotations/v1/annotations.proto
 ```
@@ -949,7 +949,7 @@ interactive calling is part of discoverability.
 An unannotated method remains a normal typed gRPC method and generated clients
 may call it. It is only absent from generic developer-tool discovery. A
 `discoverable` annotation does not grant permission: the target Device's daemon
-still authenticates the Principal and applies its trusted method policy before
+still authenticates the Caller and applies its trusted method policy before
 forwarding. Every Runner call is already scoped to its Device. Run association,
 when present, is propagated uniformly by the client/control plane and is not a
 per-method annotation concern.
@@ -1018,12 +1018,12 @@ messages and `oneof` variants when needed.
 ## REST resources and discovery
 
 Implementation status (updated 2026-08-01): the daemon exposes the paths in this
-section as protobuf-over-HTTP routes backed directly by generated core protobuf
-messages. Discovery, the persistent local Device, principal-scoped in-memory
-Runs, and the core Device/Run/Runner/RunnerClass gRPC services are implemented.
+section as protobuf-over-HTTP routes backed directly by generated daemon protobuf
+messages. Discovery, the persistent local Device, caller-scoped in-memory
+Runs, and the daemon Device/Run/Runner/RunnerClass gRPC services are implemented.
 Typed service discovery is available through gRPC
-`DiscoveryService.ListServices` and `GET /apis/auv/core/v1/services`. Both
-project only methods visible to the authenticated Principal; a Principal with
+`DiscoveryService.ListServices` and `GET /apis/auv/daemon/v1/services`. Both
+project only methods visible to the authenticated Caller; a Caller with
 control-plane inspection but without operation execution sees an empty service
 catalog. The Rust `auv-api-client` exposes the same operation as
 `Client::list_services()`, and generated JavaScript clients receive it from the
@@ -1119,7 +1119,7 @@ is an exact four-field projection with explicit granted, missing, and unknown
 states; unspecified or unknown wire enum values fail closed. The permission
 slice is covered by descriptor and pure mapper tests, runtime reflection,
 the `operations_execute` gate, bearer-scope denial for an inspect-only
-Principal, exact selected capability matching, and irrelevant `--target`
+Caller, exact selected capability matching, and irrelevant `--target`
 rejection. It is not live-probed by automated tests because the existing
 Automation probe can trigger macOS consent UI. The media slice preserves the
 owning `auv-media-macos::NowPlayingState` and `MediaControlOutcome`, including
@@ -1204,8 +1204,8 @@ Control resources use an AUV-owned namespace followed by the API group,
 version, and collection:
 
 ```text
-GET    /apis/auv/core/v1/devices
-GET    /apis/auv/core/v1/devices/{device}
+GET    /apis/auv/daemon/v1/devices
+GET    /apis/auv/daemon/v1/devices/{device}
 
 GET    /apis/auv/runtime/v1/runners
 POST   /apis/auv/runtime/v1/runners
@@ -1261,7 +1261,7 @@ GET /apis/auv/{group}/{version}
 ```
 
 Discovery lists resources/services currently registered on the target Device
-and visible to the authenticated Principal. It is built from validated Runner
+and visible to the authenticated Caller. It is built from validated Runner
 descriptors, RunnerClass policy, and Device authorization. The developer-tool
 method catalog further filters this set to methods annotated as `discoverable`.
 
@@ -1291,8 +1291,8 @@ auv-netease-music frontend
   -> call PlayPlaylist
 
 daemon
-  -> authenticate Principal
-  -> authorize Principal + Device + Run + method
+  -> authenticate Caller
+  -> authorize Caller + Device + Run + method
   -> find/create a NetEase Runner
   -> lease Runner to Run
   -> proxy typed RPC through private IPC
@@ -1331,8 +1331,8 @@ leases; each Runner remains owned by exactly one Device.
 This flow is blocked pending an owner-approved distributed authority contract.
 The current `RunRef` contains only a daemon-local `run_id`; `CreateRun` accepts
 only Devices owned by the serving daemon; and `ClaimRunner` requires a running
-Run owned by the authenticated Principal in that daemon's in-memory control
-plane. Paired Principal IDs are also local pairing-store identities and are not
+Run owned by the authenticated Caller in that daemon's in-memory control
+plane. Paired Caller IDs are also local pairing-store identities and are not
 a stable cross-daemon subject. Consequently, creating one local Run on each
 daemon with the same label, caller-chosen string, or client correlation value
 would create several unrelated Runs. It is not an implementation of one Run
@@ -1348,7 +1348,7 @@ before this flow can be implemented:
   local projection of the canonical Run without creating another Run;
 - owner-issued delegation evidence bound to the canonical Run, participant
   Device, authenticated caller subject, validity window, and revocation or
-  generation, plus a cross-daemon Principal mapping that survives local
+  generation, plus a cross-daemon Caller mapping that survives local
   pairing IDs and credential rotation;
 - idempotent partial-failure semantics for participant attachment and Runner
   claims, including compensation that releases successful leases and reports
@@ -1408,10 +1408,10 @@ The migration baseline landed on 2026-07-31:
   private IPC, discovers runtime metadata and business APIs through
   Health/Reflection, and routes typed capability calls.
 - The daemon projects annotation-driven typed service discovery over
-  gRPC and versioned REST, filtered by Principal authorization.
+  gRPC and versioned REST, filtered by caller-based authorization.
 - `auv serve` atomically binds repeated local and paired-bearer listeners over one
   daemon handler, publishes only a preferred caller-local discovery endpoint,
-  and preserves per-listener authority plus Principal-scoped Runs.
+  and preserves per-listener authentication plus Caller-scoped Runs.
 - The currently admitted Display, Window, Capture, TextRecognition, Input,
   Overlay, and selected macOS Permission, MediaControl, Application, and
   Accessibility slices use dedicated protobuf services and hierarchical
@@ -1428,7 +1428,7 @@ The current REST discovery remains a typed protobuf-over-HTTP implementation.
 Generated HTTP/OpenAPI bindings and LIST/WATCH version semantics remain future
 slices; they must not be inferred from the retired `/v1/*:verb` prototype.
 
-Mechanisms worth preserving include transport principal projection, one-time
+Mechanisms worth preserving include transport caller authentication, one-time
 pairing tokens, live bearer revocation, Unix peer-owner checks, lazy resource
 initialization, active-operation tracking, draining, idle cleanup, Buf
 generation, and generated SDK validation.

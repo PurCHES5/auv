@@ -25,10 +25,10 @@ project requires AUV to make the same choice.
 
 ### Sourced facts: repository state
 
-- The Protobuf tree already declares separate, versioned packages:
-  `auv.api.core.v1`, `auv.api.driver.v1`, `auv.api.driver.macos.v1`, and
+- The Protobuf tree declares separate, versioned packages:
+  `auv.api.daemon.v1`, `auv.api.driver.v1`, `auv.api.driver.macos.v1`, and
   `auv.api.inference.v1`. `auv-api-proto` preserves that hierarchy under
-  `auv::api::{core,driver,inference}` and nests macOS below `driver`.
+  `auv::api::{daemon,driver,inference}` and nests macOS below `driver`.
 - Before the package-organization refactor on 2026-08-02, the handwritten
   `protocol::grpc::clients` module exported core, portable driver, macOS driver,
   and inference clients as siblings. It now exposes explicit
@@ -55,11 +55,10 @@ client and server modules. Flattening is therefore not merely cosmetic: it
 makes the composition root look like the owner of all capability semantics and
 makes platform/inference dependencies appear universally available.
 
-`core` is currently the daemon control contract in practice: discovery,
-pairing, Device, Run, Runner, and RunnerClass are daemon-owned resources. The
-name is less explicit than `daemon`, but renaming the wire package would be a
-separate compatibility decision. Rust can expose a `daemon`-named convenience
-handle while continuing to map it to `auv.api.core.v1`.
+The former experimental `core` package was the daemon control contract in
+practice: discovery, pairing, Device, Run, Runner, and RunnerClass are
+daemon-owned resources. It was renamed to `auv.api.daemon.v1` before
+stabilization so the wire package and Rust module name the same owner.
 
 ## Kubernetes: versioned groups below a clientset
 
@@ -90,7 +89,7 @@ Kubernetes supports the proposed analogy, but the important pattern is not
 1. keep a truthful group/version client below the seam; and
 2. optionally aggregate those clients without erasing their group/version.
 
-For AUV, `protocol::grpc::core::v1`, `driver::v1`,
+For AUV, `protocol::grpc::daemon::v1`, `driver::v1`,
 `driver::macos::v1`, and `inference::v1` should therefore remain independently
 navigable even if `Client` provides a convenient entry point. macOS should not
 be a sibling of portable driver services, and inference should not be a sibling
@@ -335,13 +334,13 @@ A maximum-isolation implementation could use companion adapter crates:
 ```text
 auv-api-client                    business facade and typed handles
 auv-api-client-grpc               channel/auth/metadata transport
-auv-api-core-client-grpc          auv.api.core.v1 adapters
+auv-api-daemon-client-grpc        auv.api.daemon.v1 adapters
 auv-api-driver-client-grpc        auv.api.driver.v1 adapters
 auv-api-driver-macos-client-grpc  auv.api.driver.macos.v1 adapters
 auv-api-inference-client-grpc     auv.api.inference.v1 adapters
 
 auv-api-server                    daemon composition root
-auv-api-core-server-grpc          core.v1 serving adapters
+auv-api-daemon-server-grpc        daemon.v1 serving adapters
 auv-api-driver-server-grpc        portable driver adapters
 auv-api-driver-macos-server-grpc  macOS adapters
 auv-api-inference-server-grpc     inference task adapters

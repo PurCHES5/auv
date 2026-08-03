@@ -18,12 +18,14 @@ the local/remote domain facade and `auv-daemon` as the long-lived control owner;
 `auv-api-client` and `auv-api-server` become protocol boundaries. MCP remains in
 `auv-cli`.
 
-Count: **13**
+Count: **15**
 
 - [`2026-08-03-auv-facade-daemon-runner-architecture.md`](2026-08-03-auv-facade-daemon-runner-architecture.md) — accepted facade, daemon, opaque routing, extension, and Runner target.
 - [`2026-07-31-device-run-runner-aggregated-api-design.md`](2026-07-31-device-run-runner-aggregated-api-design.md)
 - [`2026-07-31-daemon-session-api-architecture.md`](2026-07-31-daemon-session-api-architecture.md)
 - [`2026-08-02-api-client-server-package-architecture-research.md`](2026-08-02-api-client-server-package-architecture-research.md) — primary-source comparison and a capability-scoped client/server alternative.
+- [`2026-08-03-rust-server-lifecycle-naming-research.md`](2026-08-03-rust-server-lifecycle-naming-research.md) — primary-source Rust server lifecycle and naming comparison.
+- [`2026-08-03-auv-daemon-document-history.md`](2026-08-03-auv-daemon-document-history.md) — Git-backed timeline for when the independent `auv-daemon` owner became the accepted target.
 
 - [`2026-06-10-stateful-session-daemon-js-repl-v0.md`](2026-06-10-stateful-session-daemon-js-repl-v0.md)
 - [`2026-06-11-mcp-frontend-surface-v0.md`](2026-06-11-mcp-frontend-surface-v0.md)

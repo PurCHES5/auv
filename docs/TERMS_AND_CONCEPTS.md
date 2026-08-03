@@ -318,9 +318,9 @@ systemd, or brew services while executing the same serving implementation.
 Listener type is transport configuration rather than a separate server role.
 
 The daemon control protobuf package is `auv.api.daemon.v1`. It owns Device,
-pairing, discovery, Run, RunnerClass, and Runner services
-and messages. The experimental `auv.api.core.v1` package is to be retired in
-favor of this explicit owner. Capability packages do not import daemon resource
+pairing, discovery, Run, RunnerClass, and Runner services and messages. It
+replaced the experimental `auv.api.core.v1` package before stabilization so the
+wire identity names its actual owner. Capability packages do not import daemon resource
 references for routing; routing context belongs to transport metadata. A
 generic `meta.v1` package is intentionally deferred until a genuinely shared
 wire concept exists that is not owned by the daemon or a capability domain.
@@ -571,34 +571,34 @@ retention behind the routing boundary. This keeps extension messages opaque to
 the daemon and lets the same routing machinery serve first-party and custom
 protobuf services.
 
-## Principal
+## Caller
 
-A principal is the authenticated authority identity projected from transport
-context before an API handler executes. It is not a caller-provided protobuf
-field, Device ID, Run ID, Runner attachment, or internal session.
+A caller is the authenticated identity established from transport evidence
+before an API handler executes. It is not a caller-provided protobuf field,
+Device ID, Run ID, Runner attachment, or internal session.
 
 Public transport middleware authenticates once, parses AUV routing metadata,
-and injects a request context containing the Principal before dispatch to a
+and injects a request context containing the Caller before dispatch to a
 typed daemon control adapter or the opaque capability router. Handlers do not
-re-parse credentials or call an authority service to establish the Principal
-again. A daemon domain operation may use the established Principal for a
+re-parse credentials or call an authenticator to establish the Caller again. A
+daemon domain operation may use the established Caller for a
 resource-specific decision that depends on its decoded control request, but
 that is authorization over an existing identity rather than authentication.
 
 Local owner-checked transport is the authority for pairing administration. The
-accepted paired-Device authority is an opaque bearer credential obtained by
-consuming a one-time bootstrap token; bearer lookup uses the current
-pairing-store snapshot so revocation applies to the next request without a
-certificate revocation list. The owner creates tokens through the daemon's
-same-UID Unix socket. `auv devices pair connect` consumes a token remotely,
-saves the returned bearer in a local Device profile, and does not print it.
-Tokens and bearers are unversioned CSPRNG-generated hexadecimal secrets; their
-format carries no protocol metadata. Client certificates are not Device identity and the current
-pairing protocol has no client PKI, CRL, or certificate refresh lifecycle.
-The target authorization decision includes Principal, target
-Device, optional Run, selected RunnerClass, and gRPC service/method path. The daemon
-performs this check before forwarding to private Runner IPC. Runner processes
-do not repeat external authentication.
+accepted paired-Device credential is an opaque bearer obtained by consuming a
+one-time bootstrap token; bearer lookup uses the current pairing-store snapshot
+so revocation applies to the next request without a certificate revocation
+list. The owner creates tokens through the daemon's same-UID Unix socket.
+`auv devices pair connect` consumes a token remotely, saves the returned bearer
+in a local Device profile, and does not print it. Tokens and bearers are
+unversioned CSPRNG-generated hexadecimal secrets; their format carries no
+protocol metadata. Client certificates are not Device identity and the current
+pairing protocol has no client PKI, CRL, or certificate refresh lifecycle. The
+target authorization decision includes Caller, target Device, optional Run,
+selected RunnerClass, and gRPC service/method path. The daemon performs this
+check before forwarding to private Runner IPC. Runner processes do not repeat
+external authentication.
 
 ## Span
 

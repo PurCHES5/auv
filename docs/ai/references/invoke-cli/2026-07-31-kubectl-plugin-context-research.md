@@ -203,7 +203,7 @@ In particular:
   daemon perform authentication/authorization;
 - resolve executable paths deterministically, diagnose shadowing, and reserve
   built-in command names;
-- make authorization depend on the authenticated device/principal and typed
+- make authorization depend on the authenticated caller and typed
   RPC, not on plugin executable name or claimed labels;
 - avoid logging the entire child environment in run traces or error reports.
 

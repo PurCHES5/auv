@@ -106,8 +106,8 @@ RunnerClassService
 RunnerService
 ```
 
-Their protobuf package is `auv.api.daemon.v1`. The experimental
-`auv.api.core.v1` package is retired. No `meta.v1` package is introduced without
+Their protobuf package is `auv.api.daemon.v1`. It replaced the experimental
+`auv.api.core.v1` package before stabilization. No `meta.v1` package is introduced without
 a shared wire concept that lacks a domain owner.
 
 All capability services use one opaque route, including first-party Driver,
@@ -233,8 +233,8 @@ prewarming and operations.
 ### Request context and authentication
 
 Public transport middleware authenticates once, parses routing metadata, and
-injects a request context containing the Principal. Handlers do not establish
-the Principal again. A typed daemon domain operation may still make a
+injects a request context containing the Caller. Handlers do not establish the
+Caller again. A typed daemon domain operation may still make a
 resource-specific authorization decision using that established identity.
 
 Daemon-created private IPC does not repeat external authentication inside the
@@ -308,8 +308,8 @@ behavior changes.
    requests and clients.
 5. **Landed:** Replace typed capability forwarding with a streaming opaque proxy for both
    first-party and extension services.
-6. **Pending:** Rename `auv.api.core.v1` to `auv.api.daemon.v1` before treating the current
-   experimental schema as stable.
+6. **Landed:** Rename the experimental `auv.api.core.v1` package and REST group
+   to `auv.api.daemon.v1` / `daemon/v1` before stabilization.
 7. **Landed:** Replace public claim/lease lifecycle with daemon-internal Run attachments and
    RunnerClass resolution.
 8. **Landed:** Remove `RunnerRuntimeService` and place inherited local transport
