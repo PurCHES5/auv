@@ -11,7 +11,6 @@ use crate::auv::api::driver::v1::input_service_client::InputServiceClient;
 use crate::auv::api::driver::v1::overlay_service_client::OverlayServiceClient;
 use crate::auv::api::driver::v1::text_recognition_service_client::TextRecognitionServiceClient;
 use crate::auv::api::driver::v1::window_service_client::WindowServiceClient;
-use crate::v1::inference::object_detection_service_client::ObjectDetectionServiceClient;
 use crate::{FILE_DESCRIPTOR_SET, descriptor_set_for_service, descriptor_set_for_services};
 use prost::Message;
 use prost_reflect::{DescriptorPool, Value};
@@ -132,24 +131,7 @@ fn overlay_service_is_two_typed_mutations() {
 }
 
 #[test]
-fn object_detection_service_is_typed_and_route_independent() {
-  let descriptor_set = FileDescriptorSet::decode(FILE_DESCRIPTOR_SET).expect("decode FILE_DESCRIPTOR_SET");
-  let file = descriptor_set.file.iter().find(|file| file.package.as_deref() == Some("auv.api.inference.v1")).expect("inference descriptor");
-  let service =
-    file.service.iter().find(|service| service.name.as_deref() == Some("ObjectDetectionService")).expect("ObjectDetectionService");
-  assert_eq!(service.method.iter().filter_map(|method| method.name.as_deref()).collect::<Vec<_>>(), vec!["DetectObjects"]);
-  let request =
-    file.message_type.iter().find(|message| message.name.as_deref() == Some("DetectObjectsRequest")).expect("DetectObjectsRequest");
-  assert!(!request.field.iter().any(|field| field.name.as_deref() == Some("lease")));
-  let frame = request.field.iter().find(|field| field.name.as_deref() == Some("frame")).expect("frame field");
-  assert_eq!(frame.type_name.as_deref(), Some(".auv.api.image.v1.RgbFrame"));
-
-  fn assert_client<T>() {}
-  assert_client::<ObjectDetectionServiceClient<tonic::transport::Channel>>();
-}
-
-#[test]
-fn core_control_services_are_typed_and_do_not_claim_watch() {
+fn daemon_control_services_are_typed_and_do_not_claim_watch() {
   let descriptor_set = FileDescriptorSet::decode(FILE_DESCRIPTOR_SET).expect("decode FILE_DESCRIPTOR_SET");
   let mut services = descriptor_set
     .file

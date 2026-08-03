@@ -29,7 +29,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
       "../../proto/auv/api/driver/macos/v1/accessibility.proto",
       "../../proto/auv/api/driver/macos/v1/application.proto",
       "../../proto/auv/api/driver/macos/v1/media_control.proto",
-      "../../proto/auv/api/inference/v1/object_detection.proto",
       "../../proto/auv/api/image/v1/image.proto",
       "../../proto/auv/api/image/v1/region.proto",
     ],
@@ -53,7 +52,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   println!("cargo:rerun-if-changed=../../proto/auv/api/driver/macos/v1/accessibility.proto");
   println!("cargo:rerun-if-changed=../../proto/auv/api/driver/macos/v1/application.proto");
   println!("cargo:rerun-if-changed=../../proto/auv/api/driver/macos/v1/media_control.proto");
-  println!("cargo:rerun-if-changed=../../proto/auv/api/inference/v1/object_detection.proto");
   println!("cargo:rerun-if-changed=../../proto/auv/api/image/v1/image.proto");
   println!("cargo:rerun-if-changed=../../proto/auv/api/image/v1/region.proto");
   Ok(())

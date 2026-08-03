@@ -87,12 +87,6 @@ pub mod auv {
       }
     }
 
-    pub mod inference {
-      pub mod v1 {
-        tonic::include_proto!("auv.api.inference.v1");
-      }
-    }
-
     pub mod driver {
       pub mod v1 {
         tonic::include_proto!("auv.api.driver.v1");
@@ -117,7 +111,6 @@ pub mod auv {
 pub mod v1 {
   pub use crate::auv::api::driver::v1 as driver;
   pub use crate::auv::api::image::v1 as image;
-  pub use crate::auv::api::inference::v1 as inference;
 }
 
 #[cfg(test)]

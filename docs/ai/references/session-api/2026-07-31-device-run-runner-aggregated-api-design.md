@@ -176,7 +176,6 @@ Examples of provisional RunnerClass identities are:
 
 ```text
 auv.core.local
-auv.inference.ultralytics
 auv.app.netease_music
 auv.app.apple_music
 auv.game.balatro
@@ -254,7 +253,7 @@ Capabilities are authoritative versioned API facts, for example:
 ```text
 auv.api.driver.v1.WindowService
 auv.api.driver.v1.TextRecognitionService
-auv.api.inference.v1.ObjectDetectionService
+auv.game.balatro.v1.BalatroDetectionService
 auv.netease_music.v1.PlaylistService
 ```
 
@@ -663,10 +662,11 @@ retains unary/streaming semantics, deadlines, cancellation, metadata, flow
 control, health, and reflection without inventing another multiplexed protocol.
 An inherited connected stream is an implementation adapter, not a public
 listener. There is no `auv-` filename requirement for Runner executables. The
-first-party `auv.core.local` and `auv.inference.ultralytics` providers spawn the
-same `auv` executable with a private internal role argument, so packaging the
-root binary is sufficient; those internal roles are not CLI subcommands and do
-not appear in help.
+first-party `auv.core.local` provider spawns the `auv` executable with a private
+internal role argument. Application capabilities such as Balatro object
+detection are owned and served by their application Runner binaries, then
+registered explicitly as custom providers; they are not bundled into `auv
+serve`. Internal roles are not CLI subcommands and do not appear in help.
 
 For `RemoteGrpc`, the daemon connects an already-running endpoint and subjects
 it to the same Health, Reflection, runtime-metadata, status, and reflected

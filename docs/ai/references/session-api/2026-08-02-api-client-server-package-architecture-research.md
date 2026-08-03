@@ -7,6 +7,12 @@ Status: superseded for implementation direction by
 This note remains primary-source research context; its capability-handle,
 Runner lease, and package-ownership recommendations are not the accepted target.
 
+Update (2026-08-03): the experimental core inference API and built-in
+Ultralytics Runner described below were removed. Balatro now owns
+`auv.game.balatro.v1.BalatroDetectionService` and the `auv.game.balatro`
+Runner. The repository-state statements below are retained as historical input,
+not current implementation guidance.
+
 ## Question
 
 How should AUV preserve the existing daemon/core, driver, platform-specific
@@ -21,24 +27,24 @@ This note uses only project source and primary upstream sources. Sections headed
 **AUV inference** are design conclusions; they are not claims that an upstream
 project requires AUV to make the same choice.
 
-## Current AUV evidence
+## Historical AUV evidence
 
 ### Sourced facts: repository state
 
-- The Protobuf tree declares separate, versioned packages:
+- At the time of this research, the Protobuf tree declared separate, versioned packages:
   `auv.api.daemon.v1`, `auv.api.driver.v1`, `auv.api.driver.macos.v1`, and
-  `auv.api.inference.v1`. `auv-api-proto` preserves that hierarchy under
-  `auv::api::{daemon,driver,inference}` and nests macOS below `driver`.
+  `auv.api.inference.v1`. `auv-api-proto` then preserved that hierarchy under
+  `auv::api::{daemon,driver,inference}` and nested macOS below `driver`.
 - Before the package-organization refactor on 2026-08-02, the handwritten
   `protocol::grpc::clients` module exported core, portable driver, macOS driver,
-  and inference clients as siblings. It now exposes explicit
+  and inference clients as siblings. The researched revision exposed explicit
   `daemon::v1`, `driver::v1`, `driver::macos::v1`, and `inference::v1`
   modules while retaining one shared gRPC transport client.
 - Before the same refactor, `control_grpc.rs` implemented core, driver, macOS,
   and inference gRPC adapters in one file. The server adapters now use the
   matching package-shaped modules under `protocol::grpc`; listener
   registration and RPC behavior remain unchanged.
-- `ObjectDetectorSpec` currently combines task configuration (confidence, IoU,
+- `ObjectDetectorSpec` combined task configuration (confidence, IoU,
   labels and output limit), model loading (`model_path`), cache identity, and
   execution-provider selection (`InferenceDeviceKind`). The response can
   represent only rectangular detections. The schema is explicitly marked
@@ -337,7 +343,7 @@ auv-api-client-grpc               channel/auth/metadata transport
 auv-api-daemon-client-grpc        auv.api.daemon.v1 adapters
 auv-api-driver-client-grpc        auv.api.driver.v1 adapters
 auv-api-driver-macos-client-grpc  auv.api.driver.macos.v1 adapters
-auv-api-inference-client-grpc     auv.api.inference.v1 adapters
+auv-api-inference-client-grpc     historical auv.api.inference.v1 adapters
 
 auv-api-server                    daemon composition root
 auv-api-daemon-server-grpc        daemon.v1 serving adapters
@@ -403,8 +409,9 @@ Costs and risks:
 
 The evidence supports the following sequence, not an immediate large rewrite:
 
-1. Treat `core`, `driver`, `driver::macos`, and `inference` as accepted package
-   seams in handwritten client and server modules.
+1. Historical proposal: treat `core`, `driver`, `driver::macos`, and
+   `inference` as package seams. The accepted implementation instead keeps
+   app-specific inference contracts with their owning app Runner.
 2. Preserve one composition root and one shared authenticated transport; do not
    infer that every package needs a crate immediately.
 3. Stop evolving `ObjectDetectorSpec` as provider configuration. Specify task,
