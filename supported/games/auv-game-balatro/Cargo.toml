@@ -18,6 +18,10 @@ tracing = ["dep:auv-tracing"]
 card-corner-onnx = ["dep:auv-inference-ort"]
 
 [dependencies]
+auv = { path = "../../../crates/auv" }
+auv-api-client = { path = "../../../crates/auv-api-client" }
+auv-api-proto = { path = "../../../crates/auv-api-proto" }
+auv-api-server = { path = "../../../crates/auv-api-server" }
 auv-file = { path = "../../../crates/auv-file" }
 auv-tracing = { path = "../../../crates/auv-tracing", optional = true }
 auv-driver = { path = "../../../crates/auv-driver" }
@@ -29,10 +33,21 @@ clap = { version = "4.5", features = ["derive"] }
 hf-hub = { version = "1.0.0-rc.1", features = ["blocking", "rustls-tls"] }
 image.workspace = true
 futures-util = { workspace = true, features = ["io"] }
+prost = "0.14"
+prost-types = "0.14"
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tonic = { version = "0.14", features = ["transport"] }
+tonic-health = "0.14"
+tonic-prost = "0.14"
+tonic-reflection = "0.14"
+
+[build-dependencies]
+protoc-bin-vendored = "3"
+tonic-prost-build = "0.14"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 auv-driver-macos = { path = "../../../crates/auv-driver-macos" }
@@ -40,6 +55,8 @@ auv-driver-macos = { path = "../../../crates/auv-driver-macos" }
 [dev-dependencies]
 auv-tracing = { path = "../../../crates/auv-tracing", features = ["memory-store"] }
 futures-executor = "0.3"
+tempfile = "3"
+tokio-util = "0.7"
 
 [[test]]
 name = "integrated"
