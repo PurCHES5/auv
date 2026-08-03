@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "crates/auv",
   "supported/apps/auv-apple-music",
   "supported/apps/auv-apple-notes",
   "supported/apps/auv-apple-textedit",

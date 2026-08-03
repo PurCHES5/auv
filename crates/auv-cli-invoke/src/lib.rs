@@ -15,6 +15,7 @@ pub mod help;
 pub mod models;
 pub mod registry;
 pub mod render;
+pub mod runner;
 
 pub use auv_cli_invoke_macros::invoke_command;
 pub use command::{
