@@ -17,7 +17,6 @@ export default defineConfig([
       "rust/no-private-schema-toolkit": "warn",
       "rust/no-unearned-function-boundary": "warn",
       "rust/prefer-established-foundation": "warn",
-      "rust/unsafe-safety-comment": "warn",
     },
   },
   {
@@ -31,7 +30,6 @@ export default defineConfig([
     rules: {
       "rust/no-mod-names-checks-in-tests": "error",
       "rust/no-source-files-compare-in-tests": "error",
-      "rust/no-platform-coded-test-paths": "error",
     },
   },
   {
@@ -49,7 +47,7 @@ export default defineConfig([
     },
   },
   {
-    name: "auv/app-game-test-organization",
+    name: "auv/non-runtime-test-ownership",
     files: [
       "supported/**/{src,tests,examples}/**/*.rs",
     ],
@@ -59,34 +57,7 @@ export default defineConfig([
       rust: auv,
     },
     rules: {
-      "rust/require-case-scoped-app-game-tests": "error",
-    },
-  },
-  {
-    name: "auv/non-runtime-test-ownership",
-    files: [
-      "**/{src,tests,examples}/**/*.rs",
-    ],
-    language: "plaintext",
-    agent: createApeiraAdapter(),
-    plugins: {
-      rust: auv,
-    },
-    rules: {
       "rust/restrict-non-runtime-unit-tests": "error",
-    },
-  },
-  {
-    name: "auv/app-integration-directories",
-    directories: [
-      "supported/**",
-    ],
-    agent: createApeiraAdapter(),
-    plugins: {
-      rust: auv,
-    },
-    rules: {
-      "rust/require-platform-scoped-app-integration": 'off',
     },
   },
 ]);

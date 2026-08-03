@@ -20,11 +20,16 @@ interface ToolResult {
 }
 
 const toolName = "report_findings";
+// NOTICE: Some OpenAI-compatible providers occasionally return truncated tool arguments.
+// Two repair turns bound duplicate model spend while giving the model enough context
+// to correct its own call.
+const maxResponseAttempts = 3;
 
 export async function judgeSource(options: JudgeSourceOptions): Promise<JudgeFinding[]> {
   const model = await options.context.model();
-  const response = await requestToolResult(model, {
+  const toolResult = await requestToolResult(model, {
     instructions: `${options.instructions}\n\nCall ${toolName} exactly once. Use an empty findings array when there is no qualifying issue.`,
+    onUsage: usage => recordUsage(options.context, model, usage),
     prompt: [
       `Review operation: ${options.operation}`,
       options.prompt,
@@ -34,59 +39,103 @@ export async function judgeSource(options: JudgeSourceOptions): Promise<JudgeFin
     ]
       .filter(Boolean)
       .join("\n\n"),
+    signal: options.context.signal,
   });
 
-  recordUsage(options.context, model, response.usage);
-
-  return parseFindings(response.toolResult);
+  return parseFindings(toolResult);
 }
 
 async function requestToolResult(
   model: ResolvedModel,
-  input: { instructions: string; prompt: string },
-): Promise<{ toolResult: ToolResult; usage: unknown }> {
-  const response = await fetch(chatCompletionsUrl(model.provider.endpoint), {
-    body: JSON.stringify({
-      messages: [
-        { content: input.instructions, role: "system" },
-        { content: input.prompt, role: "user" },
-      ],
-      model: model.id,
-      temperature: 0,
-      // NOTICE: Alibaba thinking-mode models reject required/object tool_choice.
-      // Auto remains portable while the system instruction still requires exactly
-      // one report call. Remove this workaround when those providers accept the
-      // standard forced-function request used by OpenAI-compatible endpoints.
-      tool_choice: "auto",
-      tools: [
-        {
-          function: {
-            description: "Report all warning-level findings for the reviewed source file.",
-            name: toolName,
-            parameters: reportFindingsParameters(),
-            strict: true,
+  input: { instructions: string; onUsage: (usage: unknown) => void; prompt: string; signal?: AbortSignal },
+): Promise<ToolResult> {
+  const messages: unknown[] = [
+    { content: input.instructions, role: "system" },
+    { content: input.prompt, role: "user" },
+  ];
+  for (let attempt = 1; attempt <= maxResponseAttempts; attempt += 1) {
+    const response = await fetch(chatCompletionsUrl(model.provider.endpoint), {
+      body: JSON.stringify({
+        messages,
+        model: model.id,
+        temperature: 0,
+        // NOTICE: Alibaba thinking-mode models reject required/object tool_choice.
+        // Auto remains portable while the system instruction still requires exactly
+        // one report call. Remove this workaround when those providers accept the
+        // standard forced-function request used by OpenAI-compatible endpoints.
+        tool_choice: "auto",
+        tools: [
+          {
+            function: {
+              description: "Report all warning-level findings for the reviewed source file.",
+              name: toolName,
+              parameters: reportFindingsParameters(),
+              strict: true,
+            },
+            type: "function",
           },
-          type: "function",
-        },
-      ],
-    }),
-    headers: {
-      "content-type": "application/json",
-      ...model.provider.headers,
-    },
-    method: "POST",
-    signal: undefined,
-  });
+        ],
+      }),
+      headers: {
+        "content-type": "application/json",
+        ...model.provider.headers,
+      },
+      method: "POST",
+      signal: input.signal,
+    });
 
-  if (!response.ok) {
-    throw new Error(`alint model request failed with HTTP ${response.status}`);
+    if (!response.ok) {
+      throw new Error(`alint model request failed with HTTP ${response.status}`);
+    }
+
+    let body: unknown;
+    try {
+      body = await response.json() as unknown;
+    }
+    catch (error) {
+      if (attempt === maxResponseAttempts) {
+        throw error;
+      }
+      messages.push(retryRequest("The previous response body was not valid JSON."));
+      continue;
+    }
+
+    input.onUsage(asRecord(body)?.usage);
+    try {
+      return extractToolResult(body);
+    }
+    catch (error) {
+      if (attempt === maxResponseAttempts) {
+        throw error;
+      }
+      appendToolRepairMessages(messages, body);
+    }
   }
 
-  const body = await response.json() as unknown;
-  return {
-    toolResult: extractToolResult(body),
-    usage: asRecord(body)?.usage,
-  };
+  throw new Error("alint model response repair attempts were exhausted");
+}
+
+function appendToolRepairMessages(messages: unknown[], body: unknown): void {
+  const choice = asRecord(asArray(asRecord(body)?.choices)?.[0]);
+  const message = asRecord(choice?.message);
+  const toolCall = asRecord(asArray(message?.tool_calls)?.[0]);
+  const toolCallId = toolCall?.id;
+
+  if (message) {
+    messages.push(message);
+  }
+  if (typeof toolCallId === "string") {
+    messages.push({
+      content: `The ${toolName} call arguments were not valid JSON matching the required schema.`,
+      role: "tool",
+      tool_call_id: toolCallId,
+    });
+  }
+  messages.push(retryRequest(`Call ${toolName} again exactly once with valid JSON matching the required schema.`));
+}
+
+function retryRequest(content: string): Record<string, unknown> {
+  return { content, role: "user" };
 }
 
 function reportFindingsParameters(): Record<string, unknown> {
@@ -109,11 +158,15 @@ function reportFindingsParameters(): Record<string, unknown> {
               type: "number",
             },
             message: {
-              description: "Short diagnostic message naming the reported symbol.",
+              description: [
+                "Self-contained terminal diagnostic: name the symbol, cite the concrete code shape,",
+                "explain why it violates this rule, and state the remediation direction.",
+                "The default formatter prints only this field, so never return only a symbol name or category label.",
+              ].join(" "),
               type: "string",
             },
             suggestion: {
-              description: "One concrete remediation direction, under 35 words.",
+              description: "One concrete remediation direction, under 35 words. This may restate the remediation included in message.",
               type: "string",
             },
           },
