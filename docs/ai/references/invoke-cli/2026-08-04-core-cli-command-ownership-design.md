@@ -2,8 +2,8 @@
 
 Date: 2026-08-04
 
-Status: in-progress owner interview. Only confirmed decisions are normative;
-open questions must not be treated as implementation approval.
+Status: accepted and implemented. This note records the resulting ownership
+contract and its intentional deferrals.
 
 ## Scope classification
 
@@ -11,8 +11,8 @@ This is a coordinated ownership migration across `auv-cli`, `auv`,
 `auv-api-client`, `auv-api-server`, and the new `auv-daemon` crate. It removes
 the pass-through `cli_frontend` module, establishes canonical operation
 interfaces, and lands the accepted daemon server-SDK ownership without a
-transitional compatibility layer. The interview does not approve production
-code changes until the owner confirms the complete shared understanding.
+transitional compatibility layer. The owner approved this coordinated
+migration as one refactor rather than a sequence of compatibility stages.
 
 The future `auv-cli-mcp` package is an architectural consumer used to test whether
 operations are genuinely reusable. This design does not approve creating that
@@ -148,8 +148,9 @@ or outer-layer errors. They do not expose protobuf messages or
 The current general-purpose `Client::grpc()` path is not used as a core
 operation interface. Extension-specific generated clients may instead obtain a
 purpose-named routed transport after context, routing, and authentication have
-been resolved. Protobuf conversion and gRPC status mapping remain inside
-`auv-api-client` adapters.
+been resolved. `auv-api-client` owns generated gRPC calls and routed transport
+construction; the `auv` operation adapter immediately converts their wire
+responses and statuses into its public domain results and errors.
 
 ### Unified operation interface with resource-specific interfaces
 
@@ -331,11 +332,23 @@ and every active paired Device bearer have equal authority to create tokens,
 enable or disable Devices, unpair Devices, and revoke credentials. Pairing does
 not add an administrator role; `PairDevice` remains token-authenticated.
 
-## Open questions
+## Implemented result
 
-- Which current `cli_frontend` responsibilities are command presentation,
-  operation/client behavior, transport behavior, or root process lifecycle?
-- Which duplicated selector and context-resolution paths require an owning
-  crate interface before the CLI can delete its local implementation?
-- In what dependency order can `cli_frontend` be deleted without creating a
-  temporary shared-helper module?
+- `auv-cli` parses once and routes directly into cohesive command-family
+  modules; `cli_frontend` and the second command representation are gone.
+- `auv` owns typed Device, Run, Runner, Pairing, configured-profile
+  observation, selection, capability results, and client-visible error policy.
+  Core CLI commands no longer construct daemon protobuf requests or interpret
+  tonic statuses, and public operation errors retain their transport source
+  chain without exposing it as a business-facing type.
+- `auv-daemon` is the concrete server SDK for state, pairing persistence,
+  Runner providers and supervision, routing, discovery publication, and
+  bind/serve/shutdown lifecycle.
+- `auv-api-server` is a protocol adapter over injected control and pairing
+  contracts. It contains no concrete daemon store or supervisor, including in
+  its test build.
+- Pairing administration is live through the daemon API. Local-owner and
+  active paired-bearer callers share the approved administration authority;
+  `auv::pairing` also exposes typed credential revocation.
+- `auv-cli-invoke` remains in place with the required MCP-triggered ownership
+  TODO at its CLI consumption seam; no `auv-cli-mcp` crate was created.

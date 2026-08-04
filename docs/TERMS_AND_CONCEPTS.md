@@ -156,9 +156,9 @@ not treat the wire client as an alternative public operation interface.
 The operation interface's canonical request, result, and capability types are Rust domain
 contracts owned by the relevant Driver, inference, media, or operation crate.
 Protobuf messages are wire projections used by API adapters; they are not the
-operation interface's domain model and domain crates do not depend on them. A local backend
-passes domain values directly, while a remote backend converts domain values to
-and from protobuf at the `auv-api-client` boundary. Daemon built-in service
+operation interface's public domain model. A local backend passes domain values
+directly, while the `auv` remote operation adapter converts the wire values
+returned by `auv-api-client` into domain values before exposing them. Daemon built-in service
 adapters perform the inverse conversion before calling the same domain
 providers. Provider-specific types stay behind their provider unless they
 represent an accepted provider-independent domain concept.
@@ -247,6 +247,11 @@ extension discovery and routing contracts are accepted.
 
 Root Device and Run flags written before the plugin name are parent context.
 The root resolves them and supplies `AuvContext` as inline JSON in `AUV_CONTEXT`.
+When that context contains a Run, the root also supplies the frontend-owned
+tracing store root in `AUV_TRACING_STORE_ROOT`. A recording-capable plugin may
+open that store, create a tracing context for the inherited Run ID, and flush
+its own events and artifacts before exit. The path does not select a Device or
+create a second Run; `AUV_CONTEXT` remains the authority for execution routing.
 Flags written after the plugin name remain plugin-owned; a plugin may use AUV
 CLI utilities to expose equivalent overrides. `auv invoke` remains restricted
 to atomic operations registered by `auv-cli-invoke` and does not invoke plugin
@@ -417,11 +422,10 @@ or installation and require no user registration. Third-party classes require
 explicit local operator configuration. This trust-source distinction does not
 create a second capability protocol.
 
-First-party classes default to `InProcess` composition inside `auv-daemon`:
-platform Driver, bundled inference, and media gRPC service adapters call their
-owning domain providers while participating in the same Runner routing model.
-They may move to `Executable` later when isolation has a concrete need without
-changing their public capability protocol. Third-party classes normally use
+First-party and third-party classes share the same runtime model. The current
+first-party local Driver is hosted as an `Executable` child Runner so frontend
+process concerns remain outside the daemon SDK while the daemon still owns
+admission, IPC, supervision, routing, and shutdown. Third-party classes use
 `Executable` or `RemoteGrpc`.
 
 There is no dedicated inference Runner crate. Ultralytics behavior remains in
@@ -447,10 +451,10 @@ approves an endpoint.
 
 RunnerRuntime is the daemon-side Rust/configuration transport used by a
 RunnerProvider. It is not a protobuf resource or a client-visible placement
-choice. The accepted target model has three runtime forms:
+choice. The accepted model reserves three runtime forms:
 
-- `InProcess` assembles a trusted first-party service implementation into the
-  daemon process;
+- `InProcess` would assemble a trusted first-party service implementation into
+  the daemon process;
 - `Executable` starts an approved binary with arguments over daemon-owned
   private IPC;
 - `RemoteGrpc` attaches an existing compatible gRPC endpoint without taking
@@ -466,7 +470,7 @@ supports `Executable` and `RemoteGrpc`; `InProcess` is an accepted but not yet
 implemented runtime form.
 
 There is no shared Runner protocol crate. The inherited local gRPC transport is
-owned by `auv-api-server::transport`, while each executable host assembles its
+owned by `auv-api-server::runner_transport`, while each executable host assembles its
 own standard Health and Reflection services, injected `AuvContext`, and process
 shutdown behavior. No AUV-specific runtime service or business capability API
 is implied by this transport helper.

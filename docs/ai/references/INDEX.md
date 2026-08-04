@@ -36,7 +36,7 @@ Do not put engineering slice codes (`a2`, `p14`, scan-step codes, etc.) in navig
 |---|---|---|---|
 | [`runtime/`](runtime/INDEX.md) | Active | Execution, contract, action seam, admission, query readiness | |
 | [`invoke-cli/`](invoke-cli/INDEX.md) | Active | Invoke routing, CLI handlers, catalog | |
-| [`session-api/`](session-api/INDEX.md) | Active | AUV facade, daemon control API, opaque capability routing, Device, Run, and Runner; folder name retained from the session prototype | |
+| [`session-api/`](session-api/INDEX.md) | Active | AUV operation interface, daemon control API, opaque capability routing, Device, Run, and Runner; folder name retained from the session prototype | |
 | [`inspect/`](inspect/INDEX.md) | Active | Run recording, inspect viewer, trace | |
 | [`driver/`](driver/INDEX.md) | Active | Platform drivers, input, window, permissions | |
 | [`view-memory/`](view-memory/INDEX.md) | Active | View-parser IR and view memory | |
