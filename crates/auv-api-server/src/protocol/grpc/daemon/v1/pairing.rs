@@ -16,8 +16,8 @@ impl PairingServiceGrpc {
     Self { auth }
   }
 
-  fn store(&self) -> Result<crate::auth::PairingStore, Status> {
-    self.auth.pairing_store().ok_or_else(|| Status::failed_precondition("pairing store is not configured"))
+  fn pairing(&self) -> Result<std::sync::Arc<dyn crate::control::Pairing>, Status> {
+    self.auth.pairing().ok_or_else(|| Status::unimplemented("pairing is not configured"))
   }
 }
 
@@ -30,7 +30,7 @@ impl PairingService for PairingServiceGrpc {
     self.auth.authenticate(&request)?;
     let request = request.into_inner();
     let lifetime = request.ttl.as_ref().map(proto_duration).transpose()?;
-    let token = self.store()?.issue_token(lifetime).map_err(pairing_status)?;
+    let token = self.pairing()?.issue_token(lifetime).map_err(pairing_status)?;
     let expires_at = lifetime.map(|lifetime| {
       let deadline = std::time::SystemTime::now() + lifetime;
       let duration = deadline.duration_since(std::time::UNIX_EPOCH).expect("current time is after Unix epoch");
@@ -40,7 +40,7 @@ impl PairingService for PairingServiceGrpc {
       }
     });
     Ok(Response::new(proto::CreatePairingTokenResponse {
-      token: token.expose_once(),
+      token: token.token,
       expires_at,
     }))
   }
@@ -50,10 +50,10 @@ impl PairingService for PairingServiceGrpc {
     if request.token.is_empty() || request.device_id.is_empty() {
       return Err(Status::invalid_argument("token and device_id are required"));
     }
-    let enrollment = self.store()?.consume_token(&request.token, request.device_id.clone(), request.label).map_err(pairing_status)?;
+    let enrollment = self.pairing()?.enroll(&request.token, request.device_id.clone(), request.label).map_err(pairing_status)?;
     Ok(Response::new(proto::PairDeviceResponse {
-      device_id: request.device_id,
-      device_credential: enrollment.expose_credential_once(),
+      device_id: enrollment.device_id,
+      device_credential: enrollment.credential,
     }))
   }
 
@@ -66,8 +66,31 @@ impl PairingService for PairingServiceGrpc {
     if device_id.is_empty() {
       return Err(Status::invalid_argument("device_id is required"));
     }
-    let revoked = self.store()?.revoke_device_credentials(&device_id).map_err(pairing_status)?;
+    let revoked = self.pairing()?.revoke_device_credentials(&device_id).map_err(pairing_status)?;
     Ok(Response::new(proto::RevokeDeviceCredentialResponse { revoked }))
+  }
+
+  async fn set_paired_device_enabled(
+    &self,
+    request: Request<proto::SetPairedDeviceEnabledRequest>,
+  ) -> Result<Response<proto::SetPairedDeviceEnabledResponse>, Status> {
+    self.auth.authenticate(&request)?;
+    let request = request.into_inner();
+    if request.device_selector.is_empty() {
+      return Err(Status::invalid_argument("device_selector is required"));
+    }
+    let changed = self.pairing()?.set_enabled(&request.device_selector, request.enabled).map_err(pairing_status)?;
+    Ok(Response::new(proto::SetPairedDeviceEnabledResponse { changed }))
+  }
+
+  async fn unpair_device(&self, request: Request<proto::UnpairDeviceRequest>) -> Result<Response<proto::UnpairDeviceResponse>, Status> {
+    self.auth.authenticate(&request)?;
+    let selector = request.into_inner().device_selector;
+    if selector.is_empty() {
+      return Err(Status::invalid_argument("device_selector is required"));
+    }
+    let removed = self.pairing()?.unpair(&selector).map_err(pairing_status)?;
+    Ok(Response::new(proto::UnpairDeviceResponse { removed }))
   }
 }
 
@@ -81,13 +104,15 @@ fn proto_duration(value: &prost_types::Duration) -> Result<std::time::Duration, 
   ))
 }
 
-fn pairing_status(error: crate::auth::PairingError) -> Status {
+fn pairing_status(error: crate::control::PairingError) -> Status {
+  use crate::control::PairingError;
   match error {
-    crate::auth::PairingError::InvalidPairingToken => Status::unauthenticated(error.to_string()),
-    crate::auth::PairingError::InvalidTokenLifetime
-    | crate::auth::PairingError::EmptyPairId
-    | crate::auth::PairingError::DuplicatePairId(_) => Status::invalid_argument(error.to_string()),
-    crate::auth::PairingError::UnknownPair(_) | crate::auth::PairingError::UnknownCredential => Status::not_found(error.to_string()),
-    _ => Status::internal(error.to_string()),
+    PairingError::InvalidToken => Status::unauthenticated(error.to_string()),
+    PairingError::Invalid(_) => Status::invalid_argument(error.to_string()),
+    PairingError::NotFound(_) => Status::not_found(error.to_string()),
+    PairingError::Ambiguous(_) => Status::failed_precondition(error.to_string()),
+    PairingError::Unauthenticated => Status::unauthenticated(error.to_string()),
+    PairingError::NotConfigured => Status::unimplemented(error.to_string()),
+    PairingError::Persistence(_) => Status::internal(error.to_string()),
   }
 }

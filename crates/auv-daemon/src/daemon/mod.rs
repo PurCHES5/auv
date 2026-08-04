@@ -13,7 +13,7 @@ use auv_api_proto::auv::api::daemon::v1 as proto;
 use tonic::transport::Channel;
 
 use self::runner::RunnerSupervisor;
-use crate::auth::CallerId;
+use auv_api_server::control::{CallerId, Control, ControlError, RoutedOperation, RunnerRoute};
 
 const LOCAL_DEVICE_ID_FILE: &str = "device-id";
 
@@ -37,13 +37,6 @@ struct RunnerAffinityKey {
   runner_class: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct RunnerRoute {
-  pub(crate) device_id: Option<String>,
-  pub(crate) run_id: Option<String>,
-  pub(crate) runner_class: String,
-}
-
 struct OwnedRun {
   caller: CallerId,
   run: proto::Run,
@@ -53,30 +46,9 @@ pub(crate) struct OperationPermit {
   _runner: runner::OperationPermit,
 }
 
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum DaemonError {
-  #[error("failed to generate control-plane identity: {0}")]
-  Identity(String),
-  #[error("invalid control-plane argument: {0}")]
-  InvalidArgument(&'static str),
-  #[error("unknown Device: {0}")]
-  UnknownDevice(String),
-  #[error("unknown Run: {0}")]
-  UnknownRun(String),
-  #[error("unknown Runner: {0}")]
-  UnknownRunner(String),
-  #[error("no RunnerProvider is registered for RunnerClass: {0}")]
-  RunnerProviderUnavailable(String),
-  #[error("Runner operation failed: {0}")]
-  RunnerOperation(String),
-}
+pub(crate) type DaemonError = ControlError;
 
 impl Daemon {
-  #[cfg(test)]
-  pub(crate) fn open(store_root: &Path) -> Result<Self, String> {
-    Self::open_with_runner_providers_and_parent_endpoint(store_root, None, runner_provider::FirstPartyRunnerRuntimes::default(), Vec::new())
-  }
-
   pub(super) fn open_with_runner_providers_and_parent_endpoint(
     store_root: &Path,
     parent_endpoint: Option<String>,
@@ -440,6 +412,127 @@ impl From<runner::RunnerError> for DaemonError {
       runner::RunnerError::Unknown(id) => Self::UnknownRunner(id),
       error => Self::RunnerOperation(error.to_string()),
     }
+  }
+}
+
+#[tonic::async_trait]
+impl Control for Daemon {
+  fn list_devices(&self) -> Result<Vec<auv::devices::Device>, ControlError> {
+    Daemon::list_devices(self).devices.into_iter().map(domain_device).collect()
+  }
+  fn get_device(&self, device_id: &str) -> Result<Option<auv::devices::Device>, ControlError> {
+    Daemon::get_device(self, device_id).map(domain_device).transpose()
+  }
+  fn create_run(&self, caller: &CallerId, request: auv::runs::CreateRun) -> Result<auv::runs::Run, ControlError> {
+    let response = Daemon::create_run(
+      self,
+      caller,
+      proto::CreateRunRequest {
+        devices: request
+          .devices
+          .into_iter()
+          .map(|id| proto::DeviceRef {
+            device_id: id.to_string(),
+          })
+          .collect(),
+        labels: request.labels,
+      },
+    )?;
+    domain_run(response.run.ok_or(ControlError::InvalidArgument("CreateRun response omitted Run"))?)
+  }
+  async fn stop_run(&self, caller: &CallerId, run_id: &str, outcome: auv::runs::RunOutcome) -> Result<auv::runs::Run, ControlError> {
+    let outcome = match outcome {
+      auv::runs::RunOutcome::Succeeded => proto::RunOutcome::Succeeded,
+      auv::runs::RunOutcome::Failed => proto::RunOutcome::Failed,
+      auv::runs::RunOutcome::Canceled => proto::RunOutcome::Canceled,
+    };
+    let response = Daemon::stop_run(self, caller, run_id, outcome).await?;
+    domain_run(response.run.ok_or(ControlError::InvalidArgument("StopRun response omitted Run"))?)
+  }
+  fn list_runs(&self, caller: &CallerId) -> Result<Vec<auv::runs::Run>, ControlError> {
+    Daemon::list_runs(self, caller).runs.into_iter().map(domain_run).collect()
+  }
+  fn get_run(&self, caller: &CallerId, run_id: &str) -> Result<auv::runs::Run, ControlError> {
+    let response = Daemon::get_run(self, caller, run_id)?;
+    domain_run(response.run.ok_or(ControlError::InvalidArgument("GetRun response omitted Run"))?)
+  }
+  fn list_runners(&self) -> Result<Vec<auv::runners::Runner>, ControlError> {
+    Daemon::list_runners(self).runners.into_iter().map(domain_runner).collect()
+  }
+  async fn create_runner(&self, request: auv::runners::CreateRunner) -> Result<auv::runners::Runner, ControlError> {
+    let response = Daemon::create_runner(
+      self,
+      proto::CreateRunnerRequest {
+        device: request.device.map(|id| proto::DeviceRef {
+          device_id: id.to_string(),
+        }),
+        runner_class: Some(proto::RunnerClassRef {
+          runner_class: request.class.to_string(),
+        }),
+        labels: request.labels,
+        lifecycle: proto::RunnerLifecycle::from(request.lifecycle) as i32,
+        idle_timeout: request.idle_timeout.map(duration_to_proto),
+      },
+    )
+    .await?;
+    domain_runner(response.runner.ok_or(ControlError::InvalidArgument("CreateRunner response omitted Runner"))?)
+  }
+  fn get_runner(&self, runner_id: &str) -> Result<auv::runners::Runner, ControlError> {
+    let response = Daemon::get_runner(self, runner_id)?;
+    domain_runner(response.runner.ok_or(ControlError::InvalidArgument("GetRunner response omitted Runner"))?)
+  }
+  fn list_runner_classes(&self, device_id: Option<&str>) -> Result<Vec<auv::runners::RunnerClass>, ControlError> {
+    Daemon::list_runner_classes(self, device_id)?.runner_classes.into_iter().map(domain_runner_class).collect()
+  }
+  fn get_runner_class(&self, device_id: Option<&str>, runner_class: &str) -> Result<auv::runners::RunnerClass, ControlError> {
+    let response = Daemon::get_runner_class(self, device_id, runner_class)?;
+    domain_runner_class(response.runner_class.ok_or(ControlError::InvalidArgument("GetRunnerClass response omitted RunnerClass"))?)
+  }
+  async fn delete_runner(&self, runner_id: &str, options: auv::runners::StopRunner) -> Result<auv::runners::Runner, ControlError> {
+    let response = Daemon::delete_runner(self, runner_id, options.grace_period.map(duration_to_proto), options.force).await?;
+    domain_runner(response.runner.ok_or(ControlError::InvalidArgument("DeleteRunner response omitted Runner"))?)
+  }
+  async fn admit_routed_channel(
+    &self,
+    caller: &CallerId,
+    route: RunnerRoute,
+    service: &str,
+    method: &str,
+  ) -> Result<RoutedOperation, ControlError> {
+    let (channel, permit) = Daemon::admit_routed_channel(self, caller, route, service, method).await?;
+    Ok(RoutedOperation {
+      channel,
+      permit: Box::new(permit),
+    })
+  }
+  async fn shutdown(&self) {
+    Daemon::shutdown(self).await
+  }
+  fn has_live_runners(&self) -> bool {
+    Daemon::has_live_runners(self)
+  }
+}
+
+fn domain_device(value: proto::Device) -> Result<auv::devices::Device, ControlError> {
+  auv::devices::Device::try_from(value).map_err(|error| ControlError::Identity(error.to_string()))
+}
+
+fn domain_run(value: proto::Run) -> Result<auv::runs::Run, ControlError> {
+  auv::runs::Run::try_from(value).map_err(|error| ControlError::Identity(error.to_string()))
+}
+
+fn domain_runner(value: proto::Runner) -> Result<auv::runners::Runner, ControlError> {
+  auv::runners::Runner::try_from(value).map_err(|error| ControlError::Identity(error.to_string()))
+}
+
+fn domain_runner_class(value: proto::RunnerClass) -> Result<auv::runners::RunnerClass, ControlError> {
+  auv::runners::RunnerClass::try_from(value).map_err(|error| ControlError::Identity(error.to_string()))
+}
+
+fn duration_to_proto(value: std::time::Duration) -> prost_types::Duration {
+  prost_types::Duration {
+    seconds: value.as_secs().try_into().unwrap_or(i64::MAX),
+    nanos: value.subsec_nanos() as i32,
   }
 }
 

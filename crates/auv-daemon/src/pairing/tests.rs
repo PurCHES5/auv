@@ -55,10 +55,26 @@ fn disable_and_remove_apply_to_the_next_bearer_lookup() {
   let token = store.issue_token(None).unwrap().expose_once();
   let bearer = store.consume_token(&token, "tablet".to_string(), "Tablet".to_string()).unwrap().expose_credential_once();
 
-  store.set_enabled("tablet", false).unwrap();
+  assert!(store.set_enabled("tablet", false).unwrap());
+  assert!(!store.set_enabled("tablet", false).unwrap());
   assert!(matches!(store.authenticate_bearer(&bearer), Err(PairingError::Unauthenticated)));
-  store.set_enabled("tablet", true).unwrap();
+  assert!(store.set_enabled("tablet", true).unwrap());
   assert!(store.authenticate_bearer(&bearer).is_ok());
   store.remove_pair("tablet").unwrap();
   assert!(matches!(store.authenticate_bearer(&bearer), Err(PairingError::Unauthenticated)));
+}
+
+#[test]
+fn credential_revocation_resolves_labels_and_id_prefixes() {
+  let directory = tempfile::tempdir().unwrap();
+  let store = PairingStore::open(directory.path().join("pairs.json")).unwrap();
+  let first_token = store.issue_token(None).unwrap().expose_once();
+  let first = store.consume_token(&first_token, "device-tablet-0123".to_string(), "Tablet".to_string()).unwrap().expose_credential_once();
+  let second_token = store.issue_token(None).unwrap().expose_once();
+  let second = store.consume_token(&second_token, "device-phone-4567".to_string(), "Phone".to_string()).unwrap().expose_credential_once();
+
+  assert!(auv_api_server::control::Pairing::revoke_device_credentials(&store, "Tablet").unwrap());
+  assert!(matches!(store.authenticate_bearer(&first), Err(PairingError::Unauthenticated)));
+  assert!(auv_api_server::control::Pairing::revoke_device_credentials(&store, "device-phone").unwrap());
+  assert!(matches!(store.authenticate_bearer(&second), Err(PairingError::Unauthenticated)));
 }

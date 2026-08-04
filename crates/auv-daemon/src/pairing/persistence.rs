@@ -8,7 +8,7 @@ use std::sync::{Mutex, RwLock};
 
 use fs2::FileExt;
 
-use super::pairing::{PairingError, PairingRecord};
+use super::{PairingError, PairingRecord};
 
 const STORE_VERSION: u32 = 1;
 
@@ -45,14 +45,6 @@ impl FileStore {
     })
   }
 
-  pub(super) fn path(&self) -> &Path {
-    &self.path
-  }
-
-  pub(super) fn revision(&self) -> u64 {
-    self.snapshot.read().expect("pairing snapshot lock poisoned").revision
-  }
-
   pub(super) fn devices(&self) -> Vec<PairingRecord> {
     self.snapshot.read().expect("pairing snapshot lock poisoned").devices.clone()
   }
@@ -61,17 +53,17 @@ impl FileStore {
     read(&self.snapshot.read().expect("pairing snapshot lock poisoned"))
   }
 
-  pub(super) fn update(&self, mutate: impl FnOnce(&mut StoreFile) -> Result<(), PairingError>) -> Result<(), PairingError> {
+  pub(super) fn update<T>(&self, mutate: impl FnOnce(&mut StoreFile) -> Result<T, PairingError>) -> Result<T, PairingError> {
     let _mutation = self.mutation.lock().expect("pairing mutation lock poisoned");
     let mut next = self.snapshot.read().expect("pairing snapshot lock poisoned").clone();
-    mutate(&mut next)?;
+    let result = mutate(&mut next)?;
     next.revision = next.revision.checked_add(1).ok_or_else(|| update_error(&self.path, "pairing store revision overflow"))?;
     validate_store(&next)?;
     let persistence = write_store(&self.path, &next);
     if persistence.is_ok() || matches!(persistence, Err(PairingError::CommittedButDurabilityUnknown { .. })) {
       *self.snapshot.write().expect("pairing snapshot lock poisoned") = next;
     }
-    persistence
+    persistence.map(|()| result)
   }
 }
 

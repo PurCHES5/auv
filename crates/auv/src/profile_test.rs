@@ -21,7 +21,7 @@ fn profile_accepts_unknown_fields_and_default_permissions() {
   let path = directory.path().join("profiles.json");
   std::fs::write(
       &path,
-      br#"{"future_document_field":true,"profiles":{"studio":{"device_id":"device_studio","device_name":"Studio","endpoint":"http://localhost:9847","device_credential":"secret","future_profile_field":42}}}"#,
+      br#"{"future_document_field":true,"profiles":{"studio":{"device_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","device_name":"Studio","endpoint":"http://localhost:9847","device_credential":"secret","future_profile_field":42}}}"#,
     )
     .unwrap();
   #[cfg(unix)]
@@ -32,7 +32,7 @@ fn profile_accepts_unknown_fields_and_default_permissions() {
 
   let store = ProfileStore::from_path(path);
   let listed = store.list_devices().unwrap();
-  assert_eq!(listed[0].device_id(), "device_studio");
+  assert_eq!(listed[0].device_id(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
   let resolved = store
     .resolve(&AuvContext {
       config_profile: Some("studio".to_string()),
@@ -70,7 +70,7 @@ fn profile_crud_is_atomic_and_stores_the_opaque_bearer_inline() {
     .create(
       "studio",
       DeviceProfileInput {
-        device_id: "device_studio".into(),
+        device_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
         device_name: "Studio".into(),
         endpoint: "http://localhost:9847".into(),
         device_credential: "secret-1".into(),
@@ -83,7 +83,7 @@ fn profile_crud_is_atomic_and_stores_the_opaque_bearer_inline() {
     .update(
       "studio",
       DeviceProfileInput {
-        device_id: "device_studio".into(),
+        device_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
         device_name: "Studio 2".into(),
         endpoint: "http://localhost:9848".into(),
         device_credential: "secret-2".into(),

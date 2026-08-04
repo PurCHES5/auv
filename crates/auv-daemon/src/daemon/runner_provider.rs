@@ -17,7 +17,9 @@ const LOCAL_RUNNER_CLASS: &str = "auv.core.local";
 /// through the opaque route.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct RunnerProviderConfig {
+  /// RunnerClass served by this provider.
   pub runner_class: String,
+  /// Runtime used to reach the provider.
   pub runtime: RunnerRuntime,
 }
 
@@ -29,10 +31,13 @@ pub struct RunnerProviderConfig {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(tag = "type", content = "config", rename_all = "kebab-case")]
 pub enum RunnerRuntime {
+  /// Spawn a child process that inherits the daemon Runner transport.
   Executable(ExecutableRunnerRuntime),
+  /// Connect to an already-running gRPC provider.
   RemoteGrpc(RemoteGrpcRunnerRuntime),
 }
 
+/// Executable child-process runtime configuration.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct ExecutableRunnerRuntime {
   /// Program passed to the operating system at spawn time.
@@ -42,6 +47,7 @@ pub struct ExecutableRunnerRuntime {
   /// Absolute paths remain unchanged.
   pub executable: PathBuf,
   #[serde(default)]
+  /// Arguments passed to the child process.
   pub arguments: Vec<String>,
   /// Optional child working directory. A relative directory is resolved from
   /// the provider manifest directory by `load_json`.
@@ -54,8 +60,10 @@ pub struct ExecutableRunnerRuntime {
   pub environment: BTreeMap<String, String>,
 }
 
+/// Remote gRPC Runner runtime configuration.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct RemoteGrpcRunnerRuntime {
+  /// Runner endpoint URI.
   pub endpoint: String,
   // TODO(remote-runner-credentials): add a typed daemon-owned credential
   // reference when authenticated outbound Runner connections are approved;
@@ -65,6 +73,7 @@ pub struct RemoteGrpcRunnerRuntime {
 /// First-party runtimes supplied by the process that embeds the API server.
 #[derive(Clone, Debug, Default)]
 pub struct FirstPartyRunnerRuntimes {
+  /// Runtime for the built-in local Driver Runner.
   pub local_driver: Option<RunnerRuntime>,
 }
 
@@ -110,24 +119,34 @@ fn is_bare_executable_name(path: &Path) -> bool {
   path.parent().is_none_or(|parent| parent.as_os_str().is_empty())
 }
 
+/// Failure while loading a Runner provider manifest.
 #[derive(Debug, thiserror::Error)]
 pub enum RunnerProviderConfigError {
+  /// Reading the manifest file failed.
   #[error("failed to read Runner provider config {path}: {source}")]
   FileRead {
+    /// Manifest path.
     path: PathBuf,
+    /// Filesystem error returned while reading.
     #[source]
     source: std::io::Error,
   },
+  /// Decoding the manifest JSON failed.
   #[error("invalid Runner provider JSON {path}: {source}")]
   Json {
+    /// Manifest path.
     path: PathBuf,
+    /// JSON decoding error.
     #[source]
     source: serde_json::Error,
   },
+  /// A manifest contains an invalid RunnerClass identity.
   #[error("invalid RunnerClass identity: {0}")]
   InvalidRunnerClass(String),
+  /// A manifest attempts to replace a daemon-owned RunnerClass.
   #[error("RunnerClass {0} is reserved by the daemon")]
   ReservedRunnerClass(String),
+  /// More than one manifest entry owns the same RunnerClass.
   #[error("RunnerClass is configured more than once: {0}")]
   DuplicateRunnerClass(String),
 }

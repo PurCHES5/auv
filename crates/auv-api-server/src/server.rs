@@ -22,13 +22,14 @@ use tokio_stream::wrappers::UnixListenerStream;
 use tokio_util::sync::CancellationToken;
 use tonic::{Request, Status};
 
-use crate::auth::{CallerId, PairingError, PairingStore};
-use crate::daemon::Daemon;
+use crate::control::{CallerId, Control, Pairing, PairingError};
 use crate::protocol::grpc::daemon::v1::{
   DeviceServiceGrpc, DiscoveryServiceGrpc, PairingServiceGrpc, RunServiceGrpc, RunnerClassServiceGrpc, RunnerServiceGrpc,
 };
 
+/// Default loopback host for a local TCP listener.
 pub const DEFAULT_API_HOST: &str = "127.0.0.1";
+/// Default port for a local TCP listener.
 pub const DEFAULT_API_PORT: u16 = 9847;
 
 /// Server-side endpoint on which the API accepts gRPC connections.
@@ -39,13 +40,26 @@ pub enum ListenEndpoint {
   // TODO(local-tcp-authentication): loopback is not user identity on a multi-user
   // host. Add a descriptor-delivered local credential before treating TCP as
   // equivalent to owner-checked Unix transport outside development use.
-  Tcp { host: String, port: u16 },
+  Tcp {
+    /// Host or address to bind.
+    host: String,
+    /// TCP port to bind.
+    port: u16,
+  },
   /// Paired gRPC authenticated by an opaque Device bearer.
   ///
-  Remote { host: String, port: u16 },
+  Remote {
+    /// Host or address to bind.
+    host: String,
+    /// TCP port to bind.
+    port: u16,
+  },
   /// Local gRPC over a Unix domain socket.
   #[cfg(unix)]
-  Unix { path: PathBuf },
+  Unix {
+    /// Unix-domain socket path.
+    path: PathBuf,
+  },
 }
 
 impl Default for ListenEndpoint {
@@ -57,34 +71,31 @@ impl Default for ListenEndpoint {
   }
 }
 
-/// Configuration for one AUV API server instance.
-#[derive(Clone, Debug, Default)]
-pub struct ServerConfig {
-  /// Primary listener retained as the single-listener convenience.
+/// Protocol-listener configuration consumed by a server-side SDK backend.
+#[derive(Clone, Default)]
+pub struct BindConfig {
+  /// Primary listener exposed by the server.
   pub listen: ListenEndpoint,
-  /// Additional listeners sharing the same daemon control plane and Runner
-  /// supervisor. Each listener retains its own authentication mode.
+  /// Extra listeners that share the same daemon control plane.
   pub additional_listeners: Vec<ListenEndpoint>,
-  pub store_root: PathBuf,
-  /// Durable short-token and Device-bearer authentication store shared by local
-  /// administration and remote listeners.
-  pub pairing_store: Option<PathBuf>,
-  /// Operator-trusted custom Runner providers registered before serving.
-  ///
-  /// This experimental configuration is loaded before any child is started.
-  pub runner_providers: Vec<crate::runner_provider::RunnerProviderConfig>,
-  /// Built-in Runner implementations explicitly hosted by this process.
-  pub first_party_runners: crate::runner_provider::FirstPartyRunnerRuntimes,
-  /// Optional process-level idle timeout. Live Runners keep the daemon alive.
+  /// Optional pairing backend used for enrollment and bearer authentication.
+  pub pairing: Option<Arc<dyn Pairing>>,
+  /// Optional inactivity deadline applied to daemon-owned runner supervision.
   pub daemon_idle_timeout: Option<std::time::Duration>,
+  /// Private listener used by executable Runners when no caller-local
+  /// listener was configured. The daemon SDK owns the path decision.
+  pub internal_runner_parent: Option<PathBuf>,
 }
 
 /// Resolved endpoint of a bound server.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BoundEndpoint {
+  /// Bound caller-local TCP address.
   Tcp(SocketAddr),
+  /// Bound paired-bearer TCP address.
   Remote(SocketAddr),
   #[cfg(unix)]
+  /// Bound caller-local Unix-domain socket path.
   Unix(PathBuf),
 }
 
@@ -116,7 +127,7 @@ enum BoundListener {
 pub struct Server {
   endpoints: Vec<BoundEndpoint>,
   listeners: Vec<BoundListenerState>,
-  daemon: Arc<Daemon>,
+  daemon: Arc<dyn Control>,
   daemon_idle_timeout: Option<std::time::Duration>,
 }
 
@@ -126,6 +137,52 @@ struct BoundListenerState {
 }
 
 impl Server {
+  /// Binds protocol listeners, then asks the daemon SDK to construct the
+  /// control backend with the concrete caller-local parent endpoint.
+  pub async fn bind_with<F>(config: BindConfig, factory: F) -> Result<Self, String>
+  where
+    F: FnOnce(Option<String>) -> Result<Arc<dyn Control>, String>,
+  {
+    let pairing = config.pairing;
+    let mut configured = Vec::with_capacity(1 + config.additional_listeners.len());
+    configured.push(config.listen);
+    configured.extend(config.additional_listeners);
+    let mut endpoints = Vec::with_capacity(configured.len());
+    let mut listeners = Vec::with_capacity(configured.len());
+    for endpoint in configured {
+      let (listener, endpoint, auth) = bind_listener(endpoint, pairing.clone()).await?;
+      endpoints.push(endpoint);
+      listeners.push(BoundListenerState { listener, auth });
+    }
+    let mut parent_endpoint = endpoints
+      .iter()
+      .find(|endpoint| matches!(endpoint, BoundEndpoint::Unix(_)))
+      .or_else(|| endpoints.iter().find(|endpoint| matches!(endpoint, BoundEndpoint::Tcp(_))))
+      .map(ToString::to_string);
+    if parent_endpoint.is_none()
+      && let Some(path) = config.internal_runner_parent
+    {
+      #[cfg(unix)]
+      let endpoint = ListenEndpoint::Unix { path };
+      #[cfg(not(unix))]
+      let endpoint = ListenEndpoint::Tcp {
+        host: DEFAULT_API_HOST.to_string(),
+        port: 0,
+      };
+      let (listener, endpoint, auth) = bind_listener(endpoint, pairing).await?;
+      parent_endpoint = Some(endpoint.to_string());
+      endpoints.push(endpoint);
+      listeners.push(BoundListenerState { listener, auth });
+    }
+    let daemon = factory(parent_endpoint)?;
+    Ok(Self {
+      endpoints,
+      listeners,
+      daemon,
+      daemon_idle_timeout: config.daemon_idle_timeout,
+    })
+  }
+
   /// Primary endpoint, retained for callers that configure one listener.
   pub fn endpoint(&self) -> &BoundEndpoint {
     self.endpoints.first().expect("bind always produces a primary endpoint")
@@ -192,7 +249,7 @@ impl Server {
   }
 }
 
-async fn serve_listener(listener: BoundListenerState, daemon: Arc<Daemon>, shutdown: CancellationToken) -> Result<(), String> {
+async fn serve_listener(listener: BoundListenerState, daemon: Arc<dyn Control>, shutdown: CancellationToken) -> Result<(), String> {
   let pairing_service = PairingServiceGrpc::new(listener.auth.clone());
   let discovery_service = DiscoveryServiceGrpc::new();
   let device_service = DeviceServiceGrpc::new(Arc::clone(&daemon));
@@ -236,7 +293,7 @@ async fn serve_listener(listener: BoundListenerState, daemon: Arc<Daemon>, shutd
   }
 }
 
-async fn shutdown_when_daemon_idle(daemon: Arc<Daemon>, shutdown: CancellationToken, timeout: std::time::Duration) {
+async fn shutdown_when_daemon_idle(daemon: Arc<dyn Control>, shutdown: CancellationToken, timeout: std::time::Duration) {
   let poll_interval = timeout.min(std::time::Duration::from_secs(1));
   let mut interval = tokio::time::interval(poll_interval);
   interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -256,85 +313,9 @@ async fn shutdown_when_daemon_idle(daemon: Arc<Daemon>, shutdown: CancellationTo
   }
 }
 
-impl Server {
-  /// Binds without starting request processing so a process supervisor can
-  /// publish readiness only after the endpoint actually exists.
-  pub async fn bind(config: ServerConfig) -> Result<Self, String> {
-    let ServerConfig {
-      listen,
-      additional_listeners,
-      store_root,
-      pairing_store,
-      runner_providers,
-      first_party_runners,
-      daemon_idle_timeout,
-    } = config;
-    let pairing_store =
-      pairing_store.map(PairingStore::open).transpose().map_err(|error| format!("failed to open pairing store: {error}"))?;
-    let mut configured = Vec::with_capacity(1 + additional_listeners.len());
-    configured.push(listen);
-    configured.extend(additional_listeners);
-    let mut endpoints = Vec::with_capacity(configured.len());
-    let mut listeners = Vec::with_capacity(configured.len());
-    for endpoint in configured {
-      let (listener, endpoint, auth) = bind_listener(endpoint, pairing_store.clone()).await?;
-      endpoints.push(endpoint);
-      listeners.push(BoundListenerState { listener, auth });
-    }
-    let mut parent_endpoint = endpoints
-      .iter()
-      .find(|endpoint| matches!(endpoint, BoundEndpoint::Unix(_)))
-      .or_else(|| endpoints.iter().find(|endpoint| matches!(endpoint, BoundEndpoint::Tcp(_))))
-      .map(ToString::to_string);
-    let executable_runner_requires_parent =
-      runner_providers.iter().any(|provider| matches!(provider.runtime, crate::runner_provider::RunnerRuntime::Executable(_)))
-        || [&first_party_runners.local_driver]
-          .into_iter()
-          .flatten()
-          .any(|runtime| matches!(runtime, crate::runner_provider::RunnerRuntime::Executable(_)));
-    if parent_endpoint.is_none() && executable_runner_requires_parent {
-      #[cfg(unix)]
-      let internal_endpoint = ListenEndpoint::Unix {
-        path: internal_runner_parent_socket(&store_root),
-      };
-      #[cfg(not(unix))]
-      let internal_endpoint = ListenEndpoint::Tcp {
-        host: DEFAULT_API_HOST.to_string(),
-        port: 0,
-      };
-      let (listener, endpoint, auth) = bind_listener(internal_endpoint, pairing_store.clone()).await?;
-      parent_endpoint = Some(endpoint.to_string());
-      endpoints.push(endpoint);
-      listeners.push(BoundListenerState { listener, auth });
-    }
-    // Build daemon state after listeners have concrete addresses so executable
-    // Runners receive a parent context pointing back to this daemon instance.
-    let daemon =
-      Arc::new(Daemon::open_with_runner_providers_and_parent_endpoint(&store_root, parent_endpoint, first_party_runners, runner_providers)?);
-    Ok(Self {
-      endpoints,
-      listeners,
-      daemon,
-      daemon_idle_timeout,
-    })
-  }
-}
-
-#[cfg(unix)]
-fn internal_runner_parent_socket(store_root: &Path) -> PathBuf {
-  use std::hash::{Hash as _, Hasher as _};
-
-  // NOTICE: Unix socket paths have a small platform limit (104 bytes on
-  // macOS), so a socket nested under a long temporary store path can fail to
-  // bind. Keep only a stable per-store hash in the platform temp directory.
-  let mut hash = std::collections::hash_map::DefaultHasher::new();
-  store_root.hash(&mut hash);
-  std::env::temp_dir().join(format!("auv-parent-{}-{:x}.sock", std::process::id(), hash.finish()))
-}
-
 async fn bind_listener(
   endpoint: ListenEndpoint,
-  pairing_store: Option<PairingStore>,
+  pairing: Option<Arc<dyn Pairing>>,
 ) -> Result<(BoundListener, BoundEndpoint, RequestAuth), String> {
   Ok(match endpoint {
     ListenEndpoint::Tcp { host, port } => {
@@ -348,7 +329,7 @@ async fn bind_listener(
         RequestAuth::local(
           #[cfg(unix)]
           None,
-          pairing_store,
+          pairing,
         ),
       )
     }
@@ -356,14 +337,14 @@ async fn bind_listener(
       let bind_addr = resolve_remote_bind_addr(&host, port)?;
       let listener = TcpListener::bind(bind_addr).await.map_err(|error| format!("failed to bind remote API server {bind_addr}: {error}"))?;
       let local_address = listener.local_addr().map_err(|error| format!("failed to read remote API server address: {error}"))?;
-      let store = pairing_store.ok_or_else(|| "remote API listener requires --pairing-store".to_string())?;
-      (BoundListener::Tcp(listener), BoundEndpoint::Remote(local_address), RequestAuth::paired_bearer(store))
+      let pairing = pairing.ok_or_else(|| "remote API listener requires pairing".to_string())?;
+      (BoundListener::Tcp(listener), BoundEndpoint::Remote(local_address), RequestAuth::paired_bearer(pairing))
     }
     #[cfg(unix)]
     ListenEndpoint::Unix { path } => {
       let (listener, cleanup) = bind_unix(&path)?;
       let owner_uid = cleanup.owner_uid;
-      (BoundListener::Unix { listener, cleanup }, BoundEndpoint::Unix(path), RequestAuth::local(Some(owner_uid), pairing_store))
+      (BoundListener::Unix { listener, cleanup }, BoundEndpoint::Unix(path), RequestAuth::local(Some(owner_uid), pairing))
     }
   })
 }
@@ -466,34 +447,41 @@ impl Drop for UnixSocketCleanup {
 /// through to local-owner authentication.
 #[derive(Clone)]
 pub enum RequestAuth {
+  /// Caller-local authentication, optionally with pairing administration.
   Local {
     #[cfg(unix)]
+    /// Unix user permitted to access the listener, when enforced.
     allowed_unix_uid: Option<u32>,
-    pairing_store: Option<PairingStore>,
+    /// Optional pairing backend exposed to the local owner.
+    pairing: Option<Arc<dyn Pairing>>,
   },
+  /// Authentication requiring an active paired Device bearer.
   PairedBearer {
-    store: PairingStore,
+    /// Pairing backend used to authenticate the bearer.
+    pairing: Arc<dyn Pairing>,
   },
 }
 
 impl RequestAuth {
-  pub fn local(#[cfg(unix)] allowed_unix_uid: Option<u32>, pairing_store: Option<PairingStore>) -> Self {
+  /// Creates authentication policy for a caller-local listener.
+  pub fn local(#[cfg(unix)] allowed_unix_uid: Option<u32>, pairing: Option<Arc<dyn Pairing>>) -> Self {
     Self::Local {
       #[cfg(unix)]
       allowed_unix_uid,
-      pairing_store,
+      pairing,
     }
   }
 
-  pub fn paired_bearer(store: PairingStore) -> Self {
-    Self::PairedBearer { store }
+  /// Creates authentication policy requiring an active paired bearer.
+  pub fn paired_bearer(pairing: Arc<dyn Pairing>) -> Self {
+    Self::PairedBearer { pairing }
   }
 
   pub(crate) fn authenticate<T>(&self, request: &Request<T>) -> Result<CallerId, Status> {
     match self {
       Self::Local { .. } => self.authenticate_extensions(request.extensions()),
-      Self::PairedBearer { store } => {
-        authenticate_bearer(store, request.metadata().get("authorization").and_then(|value| value.to_str().ok()))
+      Self::PairedBearer { pairing } => {
+        authenticate_bearer(pairing.as_ref(), request.metadata().get("authorization").and_then(|value| value.to_str().ok()))
       }
     }
   }
@@ -503,7 +491,7 @@ impl RequestAuth {
       Self::Local {
         #[cfg(unix)]
         allowed_unix_uid,
-        pairing_store: _,
+        pairing: _,
       } => {
         #[cfg(unix)]
         if let Some(allowed_uid) = allowed_unix_uid {
@@ -524,16 +512,16 @@ impl RequestAuth {
   pub(crate) fn authenticate_http<T>(&self, request: &axum::http::Request<T>) -> Result<CallerId, Status> {
     match self {
       Self::Local { .. } => self.authenticate_extensions(request.extensions()),
-      Self::PairedBearer { store } => {
-        authenticate_bearer(store, request.headers().get(axum::http::header::AUTHORIZATION).and_then(|value| value.to_str().ok()))
+      Self::PairedBearer { pairing } => {
+        authenticate_bearer(pairing.as_ref(), request.headers().get(axum::http::header::AUTHORIZATION).and_then(|value| value.to_str().ok()))
       }
     }
   }
 
-  pub(crate) fn pairing_store(&self) -> Option<PairingStore> {
+  pub(crate) fn pairing(&self) -> Option<Arc<dyn Pairing>> {
     match self {
-      Self::Local { pairing_store, .. } => pairing_store.clone(),
-      Self::PairedBearer { store } => Some(store.clone()),
+      Self::Local { pairing, .. } => pairing.clone(),
+      Self::PairedBearer { pairing } => Some(pairing.clone()),
     }
   }
 }
@@ -546,12 +534,12 @@ impl tonic::service::Interceptor for RequestAuth {
   }
 }
 
-fn authenticate_bearer(store: &PairingStore, authorization: Option<&str>) -> Result<CallerId, Status> {
+fn authenticate_bearer(pairing: &dyn Pairing, authorization: Option<&str>) -> Result<CallerId, Status> {
   let credential = authorization
     .and_then(|value| value.strip_prefix("Bearer "))
     .filter(|value| !value.is_empty())
     .ok_or_else(|| Status::unauthenticated("paired Device bearer required"))?;
-  store.authenticate_bearer(credential).map_err(map_pairing_auth_error)
+  pairing.authenticate_bearer(credential).map_err(map_pairing_auth_error)
 }
 
 fn map_pairing_auth_error(error: PairingError) -> Status {
@@ -560,6 +548,3 @@ fn map_pairing_auth_error(error: PairingError) -> Status {
     _ => Status::internal("paired-device authentication store failed"),
   }
 }
-
-#[cfg(test)]
-mod tests;

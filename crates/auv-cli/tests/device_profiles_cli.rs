@@ -3,6 +3,7 @@ use std::process::Command;
 
 #[test]
 fn profile_crud_and_offline_device_listing_use_an_opaque_bearer() {
+  const DEVICE_ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
   let directory = tempfile::tempdir().unwrap();
   let config = directory.path().join("profiles.json");
   let discovery = directory.path().join("missing-discovery.json");
@@ -19,7 +20,7 @@ fn profile_crud_and_offline_device_listing_use_an_opaque_bearer() {
       "create",
       "studio",
       "--device-id",
-      "device_studio",
+      DEVICE_ID,
       "--device-name",
       "Studio",
       "--endpoint",
@@ -34,7 +35,7 @@ fn profile_crud_and_offline_device_listing_use_an_opaque_bearer() {
   let listed = base().args(["devices", "list", "--json"]).output().unwrap();
   assert!(listed.status.success(), "{}", String::from_utf8_lossy(&listed.stderr));
   let devices: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
-  assert_eq!(devices[0]["device_id"], "device_studio");
+  assert_eq!(devices[0]["device_id"], DEVICE_ID);
   assert_eq!(devices[0]["status"], "offline");
   assert_eq!(devices[0]["config_profile"], "studio");
 
@@ -45,7 +46,7 @@ fn profile_crud_and_offline_device_listing_use_an_opaque_bearer() {
       "update",
       "studio",
       "--device-id",
-      "device_studio",
+      DEVICE_ID,
       "--device-name",
       "Studio 2",
       "--endpoint",

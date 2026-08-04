@@ -2,8 +2,8 @@
 
 use tonic::Status;
 
-pub(crate) fn map_control_error(error: crate::daemon::DaemonError) -> Status {
-  use crate::daemon::DaemonError;
+pub(crate) fn map_control_error(error: crate::control::ControlError) -> Status {
+  use crate::control::ControlError as DaemonError;
   match error {
     DaemonError::Identity(_) => Status::internal(error.to_string()),
     DaemonError::InvalidArgument(_) | DaemonError::UnknownDevice(_) => Status::invalid_argument(error.to_string()),

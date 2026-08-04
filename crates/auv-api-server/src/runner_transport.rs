@@ -14,11 +14,14 @@ use std::task::{Context, Poll};
 #[cfg(unix)]
 use tokio_stream::StreamExt as _;
 
+/// Environment variable naming the inherited Runner IPC file descriptor.
 pub const RUNNER_IPC_FD_ENV: &str = "AUV_RUNNER_IPC_FD";
 #[cfg(unix)]
+/// Fixed file descriptor used for inherited Runner IPC on Unix.
 pub const RUNNER_IPC_FD: RawFd = 3;
 
 #[cfg(unix)]
+/// Connected Runner IPC stream that signals when its parent side disconnects.
 pub struct InheritedStream {
   inner: tokio::net::UnixStream,
   disconnected: Option<tokio::sync::oneshot::Sender<()>>,
@@ -72,6 +75,8 @@ pub struct InheritedTransport {
 
 #[cfg(unix)]
 impl InheritedTransport {
+  /// Splits the transport into tonic's incoming stream and a parent-disconnect
+  /// shutdown signal.
   pub fn into_parts(
     self,
   ) -> (impl tokio_stream::Stream<Item = Result<InheritedStream, std::io::Error>> + Send + 'static, impl Future<Output = ()> + Send + 'static)

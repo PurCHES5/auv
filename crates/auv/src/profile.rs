@@ -1,4 +1,4 @@
-//! Connection profiles used by the domain-facing client facade.
+//! Connection profiles used by the domain-facing operation interface.
 
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -45,6 +45,7 @@ impl ProfileStore {
       .map(|(config_profile, profile)| {
         validate_required("config_profile", &config_profile)?;
         validate_required("device_id", &profile.device_id)?;
+        profile.device_id.parse::<crate::resource::DeviceId>()?;
         let endpoint = validate_remote_endpoint(&profile.endpoint)?;
         Ok(ConfiguredDevice {
           config_profile,
@@ -112,6 +113,7 @@ impl ProfileStore {
     let configs: ConfigDocument = read_json(&self.config_path, "config profile store")?;
     validate_unique_device_ids(&configs.profiles)?;
     let (config_name, config) = select_config(&configs.profiles, context)?;
+    config.device_id.parse::<crate::resource::DeviceId>()?;
     validate_context_matches(config_name, config, context)?;
     Ok(ResolvedRemoteProfile {
       config_profile: config_name.to_string(),
@@ -276,6 +278,8 @@ pub enum ProfileError {
   InvalidEndpoint(String),
   #[error("profile field {0} must not be empty")]
   EmptyField(&'static str),
+  #[error(transparent)]
+  Identity(#[from] crate::resource::IdentityError),
 }
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
@@ -322,8 +326,15 @@ fn select_config<'a>(
   }
   let matches = profiles
     .iter()
-    .filter(|(_, profile)| context.device_id.as_ref().is_none_or(|id| crate::resource_id_matches(&profile.device_id, id)))
-    .filter(|(_, profile)| context.device_name.as_ref().is_none_or(|name| profile.device_name == *name))
+    .filter(|(_, profile)| {
+      let selector = match (&context.device_id, &context.device_name) {
+        (Some(id), Some(name)) => crate::resource::DeviceSelector::by_id_and_name(id, name.clone()),
+        (Some(id), None) => crate::resource::DeviceSelector::by_id(id),
+        (None, Some(name)) => crate::resource::DeviceSelector::by_name(name.clone()),
+        (None, None) => return true,
+      };
+      selector.matches_wire(&profile.device_id, &profile.device_name)
+    })
     .collect::<Vec<_>>();
   match matches.as_slice() {
     [(name, profile)] => Ok((name.as_str(), *profile)),
@@ -355,7 +366,7 @@ fn validate_context_matches(profile_name: &str, profile: &DeviceProfile, context
   ] {
     if let Some(actual) = actual
       && if field == "device_id" {
-        !crate::resource_id_matches(expected, actual)
+        !crate::resource::DeviceSelector::by_id(actual).matches_wire(expected, &profile.device_name)
       } else {
         actual != expected
       }
@@ -389,6 +400,7 @@ fn validate_required(field: &'static str, value: &str) -> Result<(), ProfileErro
 fn validate_profile_input(name: &str, input: &DeviceProfileInput) -> Result<(), ProfileError> {
   validate_required("config_profile", name)?;
   validate_required("device_id", &input.device_id)?;
+  input.device_id.parse::<crate::resource::DeviceId>()?;
   validate_required("device_credential", &input.device_credential)?;
   validate_remote_endpoint(&input.endpoint)?;
   Ok(())

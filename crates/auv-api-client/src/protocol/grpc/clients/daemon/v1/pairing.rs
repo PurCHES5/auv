@@ -37,6 +37,33 @@ impl Client {
     )
   }
 
+  pub async fn set_enabled(&mut self, device_selector: impl Into<String>, enabled: bool) -> Result<bool, tonic::Status> {
+    Ok(
+      self
+        .inner
+        .set_paired_device_enabled(daemon_proto::SetPairedDeviceEnabledRequest {
+          device_selector: device_selector.into(),
+          enabled,
+        })
+        .await?
+        .into_inner()
+        .changed,
+    )
+  }
+
+  pub async fn unpair(&mut self, device_selector: impl Into<String>) -> Result<bool, tonic::Status> {
+    Ok(
+      self
+        .inner
+        .unpair_device(daemon_proto::UnpairDeviceRequest {
+          device_selector: device_selector.into(),
+        })
+        .await?
+        .into_inner()
+        .removed,
+    )
+  }
+
   pub async fn pair_device(
     endpoint: http::Uri,
     request: daemon_proto::PairDeviceRequest,

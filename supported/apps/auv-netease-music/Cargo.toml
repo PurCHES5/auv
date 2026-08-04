@@ -57,6 +57,7 @@ protoc-bin-vendored = "3"
 tonic-prost-build = "0.14"
 
 [dev-dependencies]
+auv-daemon = { path = "../../../crates/auv-daemon" }
 tempfile.workspace = true
 tokio-util = "0.7"
 

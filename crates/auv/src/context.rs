@@ -40,8 +40,10 @@ pub enum ContextError {
   ProfileEndpointMismatch { context: String, profile: String },
   #[error(transparent)]
   Profile(#[from] profile::ProfileError),
+  #[error(transparent)]
+  Identity(#[from] crate::resource::IdentityError),
   #[error("paired daemon ListDevices failed: {0}")]
-  RemoteDeviceList(tonic::Status),
+  RemoteDeviceList(crate::error::ClientError),
   #[error("paired daemon did not expose configured canonical Device ID {0:?}")]
   CanonicalDeviceMissing(String),
   #[error("Device selection {selector:?} is ambiguous across local and paired profiles; candidate IDs: {candidate_ids}")]
@@ -55,17 +57,17 @@ pub enum ContextError {
   RunNotFound(String),
   #[error("Run {run_id:?} exists on more than one daemon: {locations}")]
   RunAmbiguous { run_id: String, locations: String },
-  #[error("failed to look up Run on {location}: {status}")]
+  #[error("failed to look up Run on {location}: {error}")]
   RunLookup {
     location: String,
-    status: tonic::Status,
+    error: crate::error::ClientError,
   },
   #[error(transparent)]
   Discovery(#[from] discovery::DiscoveryError),
-  #[error(transparent)]
-  Connect(#[from] tonic::transport::Error),
-  #[error(transparent)]
-  PairedConnect(#[from] auv_api_client::PairedConnectError),
+  #[error("failed to connect to AUV API server: {0}")]
+  Connect(String),
+  #[error("failed to connect to paired AUV API server: {0}")]
+  PairedConnect(String),
 }
 
 #[cfg(test)]

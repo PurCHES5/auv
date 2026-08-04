@@ -12,6 +12,8 @@ service PairingService {
   rpc CreatePairingToken(CreatePairingTokenRequest) returns (CreatePairingTokenResponse);
   rpc PairDevice(PairDeviceRequest) returns (PairDeviceResponse);
   rpc RevokeDeviceCredential(RevokeDeviceCredentialRequest) returns (RevokeDeviceCredentialResponse);
+  rpc SetPairedDeviceEnabled(SetPairedDeviceEnabledRequest) returns (SetPairedDeviceEnabledResponse);
+  rpc UnpairDevice(UnpairDeviceRequest) returns (UnpairDeviceResponse);
 }
 
 message CreatePairingTokenRequest {
@@ -47,4 +49,23 @@ message RevokeDeviceCredentialRequest {
 
 message RevokeDeviceCredentialResponse {
   bool revoked = 1;
+}
+
+message SetPairedDeviceEnabledRequest {
+  // Stable paired Device ID or an unambiguous label.
+  string device_selector = 1;
+  bool enabled = 2;
+}
+
+message SetPairedDeviceEnabledResponse {
+  bool changed = 1;
+}
+
+message UnpairDeviceRequest {
+  // Stable paired Device ID or an unambiguous label.
+  string device_selector = 1;
+}
+
+message UnpairDeviceResponse {
+  bool removed = 1;
 }

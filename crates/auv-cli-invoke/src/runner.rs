@@ -80,13 +80,7 @@ pub async fn invoke(input: crate::InvokeCommandInput, context: auv::AuvContext) 
       runner
         .macos()
         .applications()
-        .activate_bundle_id(
-          target,
-          Some(prost_types::Duration {
-            seconds: 0,
-            nanos: 150_000_000,
-          }),
-        )
+        .activate_bundle_id(target, std::time::Duration::from_millis(150))
         .await
         .map_err(|status| format!("ApplicationService/ActivateBundleId failed: {status}"))
         .and_then(|result| {
@@ -173,51 +167,29 @@ pub async fn invoke(input: crate::InvokeCommandInput, context: auv::AuvContext) 
         .map_err(|status| format!("OverlayService/ShowOverlay failed: {status}"))
         .and_then(|()| crate::commands::overlay::selected_overlay_output(&plan, true))
     }
-    "display.list" => {
-      runner.displays().list().await.map_err(|status| format!("DisplayService/ListDisplays failed: {status}")).and_then(|displays| {
-        let displays = displays.into_iter().map(display_from_proto).collect::<Result<Vec<_>, String>>()?;
-        crate::commands::display::list_displays_output(&auv_driver::ObservedDisplays { displays })
-      })
-    }
+    "display.list" => runner
+      .displays()
+      .list()
+      .await
+      .map_err(|status| format!("DisplayService/ListDisplays failed: {status}"))
+      .and_then(|displays| crate::commands::display::list_displays_output(&displays)),
     "display.capture" => match runner.displays().capture(None).await {
       Err(status) => Err(format!("CaptureService/CaptureDisplay failed: {status}")),
-      Ok(response) => {
-        let capture = (|| {
-          Ok(auv_driver::DisplayCapture {
-            display: display_from_proto(response.display.ok_or_else(|| "CaptureDisplay response omitted Display".to_string())?)?,
-            capture: capture_from_proto(response.capture.ok_or_else(|| "CaptureDisplay response omitted CapturedFrame".to_string())?)?,
-          })
-        })();
-        match capture {
-          Ok(capture) => crate::commands::display::recorded_display_capture_output(&capture).await,
-          Err(error) => Err(error),
-        }
-      }
+      Ok(capture) => crate::commands::display::recorded_display_capture_output(&capture).await,
     },
     "screen.captureRegion" => match selected_screen_region(&input) {
       Err(error) => Err(error),
       Ok(region) => match runner.displays().capture_region(region, None).await {
         Err(status) => Err(format!("CaptureService/CaptureRegion failed: {status}")),
-        Ok(response) => {
-          let capture = (|| {
-            Ok(auv_driver::RegionCapture {
-              display: display_from_proto(response.display.ok_or_else(|| "CaptureRegion response omitted Display".to_string())?)?,
-              capture: capture_from_proto(response.capture.ok_or_else(|| "CaptureRegion response omitted CapturedFrame".to_string())?)?,
-            })
-          })();
-          match capture {
-            Ok(capture) => crate::commands::screen::recorded_region_capture_output(&capture).await,
-            Err(error) => Err(error),
-          }
-        }
+        Ok(capture) => crate::commands::screen::recorded_region_capture_output(&capture).await,
       },
     },
-    "window.list" => {
-      runner.windows().list().await.map_err(|status| format!("WindowService/ListWindows failed: {status}")).and_then(|windows| {
-        let windows = windows.into_iter().map(window_from_proto).collect::<Result<Vec<_>, String>>()?;
-        crate::commands::window::list_windows_output(&windows)
-      })
-    }
+    "window.list" => runner
+      .windows()
+      .list()
+      .await
+      .map_err(|status| format!("WindowService/ListWindows failed: {status}"))
+      .and_then(|windows| crate::commands::window::list_windows_output(&windows)),
     "window.capture" => {
       let selector = selected_window_selector(&input);
       let response = match runner.windows().resolve(selector).await {
@@ -227,16 +199,11 @@ pub async fn invoke(input: crate::InvokeCommandInput, context: auv::AuvContext) 
       match response {
         Err(status) => Err(format!("WindowService/ResolveWindow or CaptureService/CaptureWindow failed: {status}")),
         Ok(response) => {
-          let capture = (|| {
-            Ok(crate::commands::window::WindowCapture {
-              window: window_from_proto(response.window.ok_or_else(|| "CaptureWindow response omitted Window".to_string())?)?,
-              capture: capture_from_proto(response.capture.ok_or_else(|| "CaptureWindow response omitted CapturedFrame".to_string())?)?,
-            })
-          })();
-          match capture {
-            Ok(capture) => crate::commands::window::recorded_window_capture_output(&capture).await,
-            Err(error) => Err(error),
-          }
+          crate::commands::window::recorded_window_capture_output(&crate::commands::window::WindowCapture {
+            window: response.window,
+            capture: response.capture,
+          })
+          .await
         }
       }
     }
@@ -249,21 +216,13 @@ pub async fn invoke(input: crate::InvokeCommandInput, context: auv::AuvContext) 
         };
         match response {
           Err(status) => Err(format!("WindowService/ResolveWindow or TextRecognitionService/FindWindowText failed: {status}")),
-          Ok(response) => {
-            let projected = (|| {
-              let result = crate::commands::window::WindowTextRecognition {
-                window: window_from_proto(response.window.ok_or_else(|| "FindWindowText response omitted Window".to_string())?)?,
-                matches: ocr_matches_from_proto(response.matches)?,
-              };
-              let capture =
-                capture_from_proto(response.capture.ok_or_else(|| "FindWindowText response omitted source capture".to_string())?)?;
-              Ok((result, capture))
-            })();
-            match projected {
-              Ok((result, capture)) => crate::commands::window::recorded_window_text_matches_output(&result, &capture),
-              Err(error) => Err(error),
-            }
-          }
+          Ok(response) => crate::commands::window::recorded_window_text_matches_output(
+            &crate::commands::window::WindowTextRecognition {
+              window: response.window,
+              matches: response.matches,
+            },
+            &response.capture,
+          ),
         }
       }
     },
@@ -282,26 +241,18 @@ pub async fn invoke(input: crate::InvokeCommandInput, context: auv::AuvContext) 
               let query = query.clone();
               async move { window.find_text(query).await.map_err(|status| format!("TextRecognitionService/FindWindowText failed: {status}")) }
             },
-            |response| !response.matches.is_empty(),
+            |response| !response.matches.matches.is_empty(),
           )
           .await;
           match response {
             Err(error) => Err(error),
-            Ok(response) => {
-              let projected = (|| {
-                let result = crate::commands::window::WindowTextRecognition {
-                  window: window_from_proto(response.window.ok_or_else(|| "FindWindowText response omitted Window".to_string())?)?,
-                  matches: ocr_matches_from_proto(response.matches)?,
-                };
-                let capture =
-                  capture_from_proto(response.capture.ok_or_else(|| "FindWindowText response omitted source capture".to_string())?)?;
-                Ok((result, capture))
-              })();
-              match projected {
-                Ok((result, capture)) => crate::commands::window::recorded_window_text_matches_output(&result, &capture),
-                Err(error) => Err(error),
-              }
-            }
+            Ok(response) => crate::commands::window::recorded_window_text_matches_output(
+              &crate::commands::window::WindowTextRecognition {
+                window: response.window,
+                matches: response.matches,
+              },
+              &response.capture,
+            ),
           }
         }
       },
@@ -312,19 +263,7 @@ pub async fn invoke(input: crate::InvokeCommandInput, context: auv::AuvContext) 
         let response = runner.displays().find_text(None, query).await;
         match response {
           Err(status) => Err(format!("TextRecognitionService/FindDisplayText failed: {status}")),
-          Ok(response) => {
-            let projected = (|| {
-              let _display = display_from_proto(response.display.ok_or_else(|| "FindDisplayText response omitted Display".to_string())?)?;
-              let matches = ocr_matches_from_proto(response.matches)?;
-              let capture =
-                capture_from_proto(response.capture.ok_or_else(|| "FindDisplayText response omitted source capture".to_string())?)?;
-              Ok((matches, capture))
-            })();
-            match projected {
-              Ok((matches, capture)) => crate::commands::screen::recorded_screen_text_matches_output(&matches, &capture),
-              Err(error) => Err(error),
-            }
-          }
+          Ok(response) => crate::commands::screen::recorded_screen_text_matches_output(&response.matches, &response.capture),
         }
       }
     },
@@ -336,29 +275,19 @@ pub async fn invoke(input: crate::InvokeCommandInput, context: auv::AuvContext) 
           .find_text(None, query.clone())
           .await
           .map_err(|status| format!("TextRecognitionService/FindDisplayText failed: {status}"))?;
-        let _display = display_from_proto(recognized.display.ok_or_else(|| "FindDisplayText response omitted Display".to_string())?)?;
-        let matches = ocr_matches_from_proto(recognized.matches)?;
-        let capture = capture_from_proto(recognized.capture.ok_or_else(|| "FindDisplayText response omitted source capture".to_string())?)?;
+        let matches = recognized.matches;
+        let capture = recognized.capture;
         let point = matches.best_match().ok_or_else(|| format!("screen.clickText did not find text {query:?}"))?.action_point();
         let click = selected_click_options(&input)?.click;
         let response = runner
           .input()
-          .click_screen_point(
-            auv_api_proto::auv::api::driver::v1::ScreenPoint {
-              x: point.x,
-              y: point.y,
-            },
-            Some(auv_api_proto::auv::api::driver::v1::ScreenClickOptions { click }),
-          )
+          .click_screen_point(point, click)
           .await
           .map_err(|status| format!("InputService/ClickScreenPoint failed: {status}"))?;
-        let point = response.point.ok_or_else(|| "ClickScreenPoint response omitted ScreenPoint".to_string())?;
-        let action =
-          input_action_from_proto(response.action.ok_or_else(|| "ClickScreenPoint response omitted InputActionResult".to_string())?)?;
         let result = crate::commands::screen::ScreenTextClick {
           matches,
-          point: auv_driver::Point::new(point.x, point.y),
-          action,
+          point: response.point,
+          action: response.action,
         };
         crate::commands::screen::recorded_screen_text_click_output(&result, &capture)
       }
@@ -380,24 +309,12 @@ pub async fn invoke(input: crate::InvokeCommandInput, context: auv::AuvContext) 
               displays.find_text(None, query).await.map_err(|status| format!("TextRecognitionService/FindDisplayText failed: {status}"))
             }
           },
-          |response| !response.matches.is_empty(),
+          |response| !response.matches.matches.is_empty(),
         )
         .await;
         match response {
           Err(error) => Err(error),
-          Ok(response) => {
-            let projected = (|| {
-              let _display = display_from_proto(response.display.ok_or_else(|| "FindDisplayText response omitted Display".to_string())?)?;
-              let matches = ocr_matches_from_proto(response.matches)?;
-              let capture =
-                capture_from_proto(response.capture.ok_or_else(|| "FindDisplayText response omitted source capture".to_string())?)?;
-              Ok((matches, capture))
-            })();
-            match projected {
-              Ok((matches, capture)) => crate::commands::screen::recorded_screen_text_matches_output(&matches, &capture),
-              Err(error) => Err(error),
-            }
-          }
+          Ok(response) => crate::commands::screen::recorded_screen_text_matches_output(&response.matches, &response.capture),
         }
       }
     },
@@ -415,39 +332,27 @@ pub async fn invoke(input: crate::InvokeCommandInput, context: auv::AuvContext) 
           .resolve(selected_window_selector(&input))
           .await
           .map_err(|status| format!("WindowService/ResolveWindow failed: {status}"))?;
-        let resolved_window = window_from_proto(resolved.resource().clone())?;
+        let resolved_window = resolved.resource().clone();
         let recognized =
           resolved.find_text(query.clone()).await.map_err(|status| format!("TextRecognitionService/FindWindowText failed: {status}"))?;
-        let matches = ocr_matches_from_proto(recognized.matches)?;
-        let capture = capture_from_proto(recognized.capture.ok_or_else(|| "FindWindowText response omitted source capture".to_string())?)?;
+        let matches = recognized.matches;
+        let capture = recognized.capture;
         let matched = crate::commands::window::selected_window_text_match(&matches, &query, selected_index)?;
         let point = matched_window_point(&resolved_window, matched)?;
-        let wire_options = selected_click_options(&input)?;
-        let options = driver_click_options_from_proto(&wire_options)?;
-        let response = resolved
-          .click(
-            auv_api_proto::auv::api::driver::v1::WindowPoint {
-              x: point.point().x,
-              y: point.point().y,
-            },
-            Some(wire_options),
-          )
-          .await
-          .map_err(|status| format!("InputService/ClickWindowPoint failed: {status}"))?;
-        let clicked_window = window_from_proto(response.window.ok_or_else(|| "ClickWindowPoint response omitted Window".to_string())?)?;
+        let options = selected_click_options(&input)?;
+        let response =
+          resolved.click(point, options.clone()).await.map_err(|status| format!("InputService/ClickWindowPoint failed: {status}"))?;
+        let clicked_window = response.window;
         if clicked_window.reference != resolved_window.reference {
           return Err("ClickWindowPoint response changed the resolved WindowRef".to_string());
         }
-        let returned_point = response.point.ok_or_else(|| "ClickWindowPoint response omitted WindowPoint".to_string())?;
-        let action =
-          input_action_from_proto(response.action.ok_or_else(|| "ClickWindowPoint response omitted InputActionResult".to_string())?)?;
         let result = crate::commands::window::WindowTextClick {
           window: clicked_window,
           matches,
           selected_index,
-          point: auv_driver::WindowPoint::new(returned_point.x, returned_point.y),
+          point: response.point,
           options,
-          action,
+          action: response.action,
         };
         crate::commands::window::recorded_window_text_click_output(&result, &capture)
       }
@@ -457,11 +362,10 @@ pub async fn invoke(input: crate::InvokeCommandInput, context: auv::AuvContext) 
       None => Err("input.typeText omitted its typed text argument".to_string()),
       Some(text) => runner
         .input()
-        .type_text(text, Some(Default::default()))
+        .type_text(text, auv_driver::TypeTextOptions::default())
         .await
         .map_err(|status| format!("InputService/TypeText failed: {status}"))
-        .and_then(|response| {
-          let action = input_action_from_proto(response.action.ok_or_else(|| "TypeText response omitted InputActionResult".to_string())?)?;
+        .and_then(|action| {
           crate::emit_input_action_result(&action);
           crate::commands::input::input_action_output(&action)
         }),
@@ -470,139 +374,58 @@ pub async fn invoke(input: crate::InvokeCommandInput, context: auv::AuvContext) 
       None => Err("input.pasteText omitted its typed text argument".to_string()),
       Some(text) => runner
         .input()
-        .paste_text(text, Some(Default::default()))
+        .paste_text(auv_driver::PasteTextOptions {
+          text,
+          ..Default::default()
+        })
         .await
         .map_err(|status| format!("InputService/PasteText failed: {status}"))
-        .and_then(|response| {
-          let action = input_action_from_proto(response.action.ok_or_else(|| "PasteText response omitted InputActionResult".to_string())?)?;
+        .and_then(|action| {
           crate::emit_input_action_result(&action);
           crate::commands::input::input_action_output(&action)
         }),
     },
     "input.key" => match input.inputs.get("key").cloned() {
       None => Err("input.key omitted its typed key argument".to_string()),
-      Some(key) => {
-        runner.input().press_key(key.clone(), None).await.map_err(|status| format!("InputService/PressKey failed: {status}")).and_then(
-          |response| {
-            let action = input_action_from_proto(response.action.ok_or_else(|| "PressKey response omitted InputActionResult".to_string())?)?;
-            crate::emit_input_action_result(&action);
-            crate::commands::input::press_key_output(&action, &key)
-          },
-        )
-      }
+      Some(key) => runner
+        .input()
+        .press_key(auv_driver::KeyPressOptions {
+          key: key.clone(),
+          settle: std::time::Duration::ZERO,
+        })
+        .await
+        .map_err(|status| format!("InputService/PressKey failed: {status}"))
+        .and_then(|action| {
+          crate::emit_input_action_result(&action);
+          crate::commands::input::press_key_output(&action, &key)
+        }),
     },
     "input.clickWindowPoint" => match runner.windows().resolve(selected_window_selector(&input)).await {
       Err(status) => Err(format!("WindowService/ResolveWindow failed: {status}")),
-      Ok(resolved) => match window_from_proto(resolved.resource().clone()) {
-        Err(error) => Err(error),
-        Ok(window) => match (selected_window_point(&input, &window), selected_click_options(&input)) {
+      Ok(resolved) => {
+        let window = resolved.resource().clone();
+        match (selected_window_point(&input, &window), selected_click_options(&input)) {
           (Err(error), _) | (_, Err(error)) => Err(error),
-          (Ok(point), Ok(options)) => {
-            match resolved
-              .click(
-                auv_api_proto::auv::api::driver::v1::WindowPoint {
-                  x: point.point().x,
-                  y: point.point().y,
-                },
-                Some(options),
-              )
-              .await
-            {
-              Err(status) => Err(format!("InputService/ClickWindowPoint failed: {status}")),
-              Ok(response) => {
-                let projected = (|| {
-                  let point = response.point.ok_or_else(|| "ClickWindowPoint response omitted WindowPoint".to_string())?;
-                  let action = input_action_from_proto(
-                    response.action.ok_or_else(|| "ClickWindowPoint response omitted InputActionResult".to_string())?,
-                  )?;
-                  Ok(crate::commands::input::WindowPointClickResult {
-                    window: window_from_proto(response.window.ok_or_else(|| "ClickWindowPoint response omitted Window".to_string())?)?,
-                    point: auv_driver::WindowPoint::new(point.x, point.y),
-                    action: Some(action),
-                  })
-                })();
-                match projected {
-                  Ok(result) => {
-                    if let Some(action) = result.action.as_ref() {
-                      crate::emit_input_action_result(action);
-                    }
-                    crate::commands::input::window_point_click_output_without_overlay(result)
-                  }
-                  Err(error) => Err(error),
-                }
-              }
+          (Ok(point), Ok(options)) => match resolved.click(point, options).await {
+            Err(status) => Err(format!("InputService/ClickWindowPoint failed: {status}")),
+            Ok(response) => {
+              crate::emit_input_action_result(&response.action);
+              crate::commands::input::window_point_click_output_without_overlay(crate::commands::input::WindowPointClickResult {
+                window: response.window,
+                point: response.point,
+                action: Some(response.action),
+              })
             }
-          }
-        },
-      },
+          },
+        }
+      }
     },
     _ => unreachable!("typed Runner adapter was selected above"),
   };
   invoked
 }
 
-fn display_from_proto(display: auv_api_proto::auv::api::driver::v1::Display) -> Result<auv_driver::Display, String> {
-  let frame = display.frame.ok_or_else(|| format!("Display {:?} omitted its screen frame", display.display_id))?;
-  Ok(auv_driver::Display {
-    id: display.display_id,
-    name: display.name,
-    frame: auv_driver::Rect::new(frame.x, frame.y, frame.width, frame.height),
-    coordinate_space: auv_driver::CoordinateSpace::Screen,
-    scale_factor: display.scale_factor,
-    is_primary: display.primary,
-    is_builtin: display.builtin,
-  })
-}
-
-fn window_from_proto(window: auv_api_proto::auv::api::driver::v1::Window) -> Result<auv_driver::Window, String> {
-  let reference = window.r#ref.ok_or_else(|| "Window omitted its reference".to_string())?;
-  let frame = window.frame.ok_or_else(|| format!("Window {:?} omitted its screen frame", reference.window_id))?;
-  Ok(auv_driver::Window {
-    reference: auv_driver::WindowRef {
-      id: reference.window_id,
-    },
-    title: window.title,
-    app_name: window.application_name,
-    app_bundle_id: window.application_bundle_id,
-    process_id: window.process_id,
-    frame: auv_driver::Rect::new(frame.x, frame.y, frame.width, frame.height),
-    coordinate_space: auv_driver::CoordinateSpace::Screen,
-    is_main: window.is_main,
-    is_visible: window.is_visible,
-  })
-}
-
-fn capture_from_proto(capture: auv_api_proto::auv::api::driver::v1::CapturedFrame) -> Result<auv_driver::Capture, String> {
-  let image = capture.image.ok_or_else(|| "CapturedFrame omitted its RGBA image".to_string())?;
-  let bounds = capture.bounds.ok_or_else(|| "CapturedFrame omitted its screen bounds".to_string())?;
-  let image = image::RgbaImage::from_raw(image.width, image.height, image.data)
-    .ok_or_else(|| "CapturedFrame contains malformed RGBA8 data".to_string())?;
-  Ok(auv_driver::Capture {
-    image,
-    bounds: auv_driver::Rect::new(bounds.x, bounds.y, bounds.width, bounds.height),
-    scale_factor: capture.scale_factor,
-    backend: capture.backend,
-    fallback_reason: capture.fallback_reason,
-  })
-}
-
-fn ocr_matches_from_proto(matches: Vec<auv_api_proto::auv::api::driver::v1::TextMatch>) -> Result<auv_driver::OcrMatches, String> {
-  Ok(auv_driver::OcrMatches {
-    matches: matches
-      .into_iter()
-      .map(|matched| {
-        let bounds = matched.bounds.ok_or_else(|| format!("text match {:?} omitted its screen bounds", matched.text))?;
-        Ok(auv_driver::OcrMatch {
-          text: matched.text,
-          confidence: matched.confidence,
-          bounds: auv_driver::Rect::new(bounds.x, bounds.y, bounds.width, bounds.height),
-        })
-      })
-      .collect::<Result<Vec<_>, String>>()?,
-  })
-}
-
-fn selected_screen_region(input: &crate::InvokeCommandInput) -> Result<auv_api_proto::auv::api::driver::v1::ScreenRect, String> {
+fn selected_screen_region(input: &crate::InvokeCommandInput) -> Result<auv_driver::Rect, String> {
   let number = |name: &str| {
     input
       .inputs
@@ -611,19 +434,17 @@ fn selected_screen_region(input: &crate::InvokeCommandInput) -> Result<auv_api_p
       .parse::<f64>()
       .map_err(|error| format!("screen.captureRegion has invalid --{name}: {error}"))
   };
-  let region = auv_api_proto::auv::api::driver::v1::ScreenRect {
-    x: number("x")?,
-    y: number("y")?,
-    width: number("width")?,
-    height: number("height")?,
-  };
-  if !region.x.is_finite() || !region.y.is_finite() {
+  let x = number("x")?;
+  let y = number("y")?;
+  let width = number("width")?;
+  let height = number("height")?;
+  if !x.is_finite() || !y.is_finite() {
     return Err("screen.captureRegion requires finite --x and --y".to_string());
   }
-  if !region.width.is_finite() || !region.height.is_finite() || region.width <= 0.0 || region.height <= 0.0 {
+  if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
     return Err("screen.captureRegion requires --width and --height greater than zero".to_string());
   }
-  Ok(region)
+  Ok(auv_driver::Rect::new(x, y, width, height))
 }
 
 fn selected_window_point(input: &crate::InvokeCommandInput, window: &auv_driver::Window) -> Result<auv_driver::WindowPoint, String> {
@@ -657,16 +478,14 @@ fn selected_window_point(input: &crate::InvokeCommandInput, window: &auv_driver:
   Ok(point)
 }
 
-fn selected_click_options(input: &crate::InvokeCommandInput) -> Result<auv_api_proto::auv::api::driver::v1::ClickOptions, String> {
-  use auv_api_proto::auv::api::driver::v1::{InputPolicy, WindowClickStrategy};
-
+fn selected_click_options(input: &crate::InvokeCommandInput) -> Result<auv_driver::ClickOptions, String> {
   let command_id = input.command_id.as_str();
 
   let policy = match input.inputs.get("input-policy").map(String::as_str) {
-    None if command_id == "screen.clickText" => InputPolicy::ForegroundPreferred,
-    None | Some("background-preferred") => InputPolicy::BackgroundPreferred,
-    Some("background-only") => InputPolicy::BackgroundOnly,
-    Some("foreground-preferred") => InputPolicy::ForegroundPreferred,
+    None if command_id == "screen.clickText" => auv_driver::InputPolicy::ForegroundPreferred,
+    None | Some("background-preferred") => auv_driver::InputPolicy::BackgroundPreferred,
+    Some("background-only") => auv_driver::InputPolicy::BackgroundOnly,
+    Some("foreground-preferred") => auv_driver::InputPolicy::ForegroundPreferred,
     Some(value) => return Err(format!("{command_id} has unknown --input-policy {value:?}")),
   };
   let count = input
@@ -684,59 +503,22 @@ fn selected_click_options(input: &crate::InvokeCommandInput) -> Result<auv_api_p
     .map(|value| value.parse::<u64>().map_err(|error| format!("{command_id} has invalid --click-interval-ms: {error}")))
     .transpose()?
     .unwrap_or(75);
-  let interval = (count > 1).then(|| prost_types::Duration {
-    seconds: i64::try_from(interval_ms / 1000).unwrap_or(i64::MAX),
-    nanos: i32::try_from((interval_ms % 1000) * 1_000_000).expect("subsecond milliseconds fit i32"),
-  });
   if count > 1 && interval_ms == 0 {
     return Err(format!("{command_id} requires a positive --click-interval-ms for repeated clicks"));
   }
-  Ok(auv_api_proto::auv::api::driver::v1::ClickOptions {
-    policy: policy as i32,
-    click: Some(auv_api_proto::auv::api::driver::v1::Click { count, interval }),
-    window_strategy: WindowClickStrategy::ChromiumCompatible as i32,
-  })
-}
-
-fn driver_click_options_from_proto(options: &auv_api_proto::auv::api::driver::v1::ClickOptions) -> Result<auv_driver::ClickOptions, String> {
-  use auv_api_proto::auv::api::driver::v1::{InputPolicy as ProtoPolicy, WindowClickStrategy as ProtoStrategy};
-
-  let policy = match ProtoPolicy::try_from(options.policy).map_err(|_| format!("unknown InputPolicy value {}", options.policy))? {
-    ProtoPolicy::Unspecified | ProtoPolicy::BackgroundPreferred => auv_driver::InputPolicy::BackgroundPreferred,
-    ProtoPolicy::BackgroundOnly => auv_driver::InputPolicy::BackgroundOnly,
-    ProtoPolicy::ForegroundPreferred => auv_driver::InputPolicy::ForegroundPreferred,
-  };
-  let click = match options.click.as_ref() {
-    None => auv_driver::Click::Single,
-    Some(click) if click.count == 1 => auv_driver::Click::Single,
-    Some(click) => {
-      let interval = click.interval.as_ref().ok_or_else(|| "repeated click omitted its interval".to_string())?;
-      if interval.seconds < 0 || interval.nanos < 0 {
-        return Err("click interval must not be negative".to_string());
-      }
-      let interval = std::time::Duration::new(
-        u64::try_from(interval.seconds).map_err(|_| "click interval seconds do not fit u64".to_string())?,
-        u32::try_from(interval.nanos).map_err(|_| "click interval nanos do not fit u32".to_string())?,
-      );
-      match click.count {
-        2 => auv_driver::Click::Double { interval },
-        count if (3..=u32::from(u8::MAX)).contains(&count) => auv_driver::Click::Repeated {
-          count: u8::try_from(count).expect("validated click count fits u8"),
-          interval,
-        },
-        count => return Err(format!("click count {count} is outside 1..=255")),
-      }
-    }
-  };
-  let window_strategy = match ProtoStrategy::try_from(options.window_strategy) {
-    Ok(ProtoStrategy::Unspecified | ProtoStrategy::ChromiumCompatible) => auv_driver::WindowClickStrategy::ChromiumCompatible,
-    Ok(ProtoStrategy::PidTargeted) => auv_driver::WindowClickStrategy::PidTargeted,
-    Err(_) => return Err(format!("unknown WindowClickStrategy value {}", options.window_strategy)),
+  let interval = std::time::Duration::from_millis(interval_ms);
+  let click = match count {
+    1 => auv_driver::Click::Single,
+    2 => auv_driver::Click::Double { interval },
+    count => auv_driver::Click::Repeated {
+      count: u8::try_from(count).expect("validated click count fits u8"),
+      interval,
+    },
   };
   Ok(auv_driver::ClickOptions {
     policy,
     click,
-    window_strategy,
+    window_strategy: auv_driver::WindowClickStrategy::ChromiumCompatible,
   })
 }
 
@@ -750,86 +532,25 @@ fn matched_window_point(window: &auv_driver::Window, matched: &auv_driver::OcrMa
   Ok(point)
 }
 
-fn selected_window_selector(input: &crate::InvokeCommandInput) -> auv_api_proto::auv::api::driver::v1::WindowSelector {
-  use auv_api_proto::auv::api::driver::v1::window_selector::{Application, Window};
-
-  let application = input
+fn selected_window_selector(input: &crate::InvokeCommandInput) -> auv_driver::WindowSelector {
+  let app = input
     .target_application_id
     .as_ref()
     // TODO(cross-platform-application-selector): `--target` currently carries
     // an application id and therefore maps to bundle/accessibility id. Add an
     // explicit application-name selector when the CLI contract can distinguish
     // ids from names; do not guess from punctuation or silently retry.
-    .map(|bundle_id| Application::ApplicationBundleId(bundle_id.clone()))
-    .unwrap_or(Application::FrontmostApplication(true));
-  let window = input
-    .inputs
-    .get("title")
-    .filter(|title| !title.trim().is_empty())
-    .map(|title| Window::TitleContains(title.clone()))
-    .unwrap_or(Window::MainVisible(true));
-  auv_api_proto::auv::api::driver::v1::WindowSelector {
-    application: Some(application),
-    window: Some(window),
+    .map(|bundle_id| auv_driver::App::bundle_id(bundle_id.clone()))
+    .unwrap_or_else(auv_driver::App::frontmost);
+  let title =
+    input.inputs.get("title").filter(|title| !title.trim().is_empty()).map(|title| auv_driver::TextMatcher::Contains(title.clone()));
+  auv_driver::WindowSelector {
+    app: Some(app),
+    main_visible: title.is_none(),
+    title,
   }
 }
 
-fn input_action_from_proto(action: auv_api_proto::auv::api::driver::v1::InputActionResult) -> Result<auv_driver::InputActionResult, String> {
-  use auv_api_proto::auv::api::driver::v1::{DisturbanceLevel as ProtoDisturbance, InputDeliveryPath as ProtoPath};
-
-  fn path(value: i32) -> Result<auv_driver::InputDeliveryPath, String> {
-    Ok(match ProtoPath::try_from(value).map_err(|_| format!("unknown InputDeliveryPath value {value}"))? {
-      ProtoPath::Unspecified => return Err("InputDeliveryPath must not be unspecified".to_string()),
-      ProtoPath::Noop => auv_driver::InputDeliveryPath::Noop,
-      ProtoPath::AxPress => auv_driver::InputDeliveryPath::AxPress,
-      ProtoPath::AxFocus => auv_driver::InputDeliveryPath::AxFocus,
-      ProtoPath::AxSetValue => auv_driver::InputDeliveryPath::AxSetValue,
-      ProtoPath::AxScroll => auv_driver::InputDeliveryPath::AxScroll,
-      ProtoPath::AxSelectedText => auv_driver::InputDeliveryPath::AxSelectedText,
-      ProtoPath::WindowTargetedMouse => auv_driver::InputDeliveryPath::WindowTargetedMouse,
-      ProtoPath::WindowTargetedWheel => auv_driver::InputDeliveryPath::WindowTargetedWheel,
-      ProtoPath::WindowTargetedKeyboard => auv_driver::InputDeliveryPath::WindowTargetedKeyboard,
-      ProtoPath::WindowTargetedKeyboardScroll => auv_driver::InputDeliveryPath::WindowTargetedKeyboardScroll,
-      ProtoPath::ClipboardPaste => auv_driver::InputDeliveryPath::ClipboardPaste,
-      ProtoPath::ForegroundSystemEvents => auv_driver::InputDeliveryPath::ForegroundSystemEvents,
-      ProtoPath::Unsupported => auv_driver::InputDeliveryPath::Unsupported,
-    })
-  }
-
-  fn disturbance(value: i32) -> Result<auv_driver::DisturbanceLevel, String> {
-    Ok(match ProtoDisturbance::try_from(value).map_err(|_| format!("unknown DisturbanceLevel value {value}"))? {
-      ProtoDisturbance::Unspecified => return Err("DisturbanceLevel must not be unspecified".to_string()),
-      ProtoDisturbance::None => auv_driver::DisturbanceLevel::None,
-      ProtoDisturbance::Temporary => auv_driver::DisturbanceLevel::Temporary,
-      ProtoDisturbance::Foreground => auv_driver::DisturbanceLevel::Foreground,
-      ProtoDisturbance::Unknown => auv_driver::DisturbanceLevel::Unknown,
-    })
-  }
-
-  let result = auv_driver::InputActionResult {
-    selected_path: path(action.selected_path)?,
-    attempts: action
-      .attempts
-      .into_iter()
-      .map(|attempt| {
-        Ok(auv_driver::InputAttempt {
-          path: path(attempt.path)?,
-          succeeded: attempt.succeeded,
-          message: attempt.message,
-        })
-      })
-      .collect::<Result<Vec<_>, String>>()?,
-    // TODO(input-action-result-wire-verification): the current protobuf shape
-    // cannot carry semantic verification. Keep remote projections false until
-    // an owner-approved producer/reader schema slice adds that evidence.
-    verified: false,
-    mouse_disturbance: disturbance(action.mouse_disturbance)?,
-    focus_disturbance: disturbance(action.focus_disturbance)?,
-    clipboard_disturbance: disturbance(action.clipboard_disturbance)?,
-  };
-  result.validate()?;
-  Ok(result)
-}
 #[cfg(test)]
 #[path = "runner_test.rs"]
 mod tests;

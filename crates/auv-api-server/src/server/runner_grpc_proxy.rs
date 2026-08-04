@@ -16,7 +16,7 @@ use tonic::{Code, Status};
 use tower::ServiceExt as _;
 
 use super::RequestAuth;
-use crate::daemon::{Daemon, RunnerRoute};
+use crate::control::{Control, OperationPermit, RunnerRoute};
 use crate::protocol::grpc::status::map_control_error;
 
 pub(crate) const ROUTE_DEVICE_METADATA: &str = "auv-device-id";
@@ -25,12 +25,12 @@ pub(crate) const ROUTE_RUNNER_CLASS_METADATA: &str = "auv-runner-class";
 
 #[derive(Clone)]
 pub(crate) struct RunnerGrpcProxy {
-  daemon: Arc<Daemon>,
+  daemon: Arc<dyn Control>,
   auth: RequestAuth,
 }
 
 impl RunnerGrpcProxy {
-  pub(crate) fn new(daemon: Arc<Daemon>, auth: RequestAuth) -> Self {
+  pub(crate) fn new(daemon: Arc<dyn Control>, auth: RequestAuth) -> Self {
     Self { daemon, auth }
   }
 
@@ -45,9 +45,9 @@ impl RunnerGrpcProxy {
     require_grpc_request(request)?;
     let (service, method) = grpc_method(request.uri().path())?;
     reject_daemon_namespace(service)?;
-    let caller = self.auth.authenticate_http(&request)?;
+    let caller = self.auth.authenticate_http(request)?;
     let route = runner_route(request.headers())?;
-    let (channel, permit) = self.daemon.admit_routed_channel(&caller, route, service, method).await.map_err(map_control_error)?;
+    let operation = self.daemon.admit_routed_channel(&caller, route, service, method).await.map_err(map_control_error)?;
 
     // Route fields are daemon input rather than application metadata.
     request.headers_mut().remove(ROUTE_DEVICE_METADATA);
@@ -55,18 +55,19 @@ impl RunnerGrpcProxy {
     request.headers_mut().remove(ROUTE_RUNNER_CLASS_METADATA);
 
     let forwarded = std::mem::replace(request, Request::new(AxumBody::empty())).map(TonicBody::new);
-    let response = channel.oneshot(forwarded).await.map_err(|error| Status::unavailable(format!("Runner transport failed: {error}")))?;
-    Ok(response.map(|body| TonicBody::new(PermitBody::new(body, permit))))
+    let response =
+      operation.channel.oneshot(forwarded).await.map_err(|error| Status::unavailable(format!("Runner transport failed: {error}")))?;
+    Ok(response.map(|body| TonicBody::new(PermitBody::new(body, operation.permit))))
   }
 }
 
 struct PermitBody {
   inner: TonicBody,
-  permit: Option<crate::daemon::OperationPermit>,
+  permit: Option<Box<dyn OperationPermit>>,
 }
 
 impl PermitBody {
-  fn new(inner: TonicBody, permit: crate::daemon::OperationPermit) -> Self {
+  fn new(inner: TonicBody, permit: Box<dyn OperationPermit>) -> Self {
     Self {
       inner,
       permit: Some(permit),
@@ -126,7 +127,7 @@ fn reject_daemon_namespace(service: &str) -> Result<(), Status> {
   Ok(())
 }
 
-fn runner_route(headers: &http::HeaderMap) -> Result<RunnerRoute, Status> {
+fn runner_route(headers: &axum::http::HeaderMap) -> Result<RunnerRoute, Status> {
   let value = |name: &'static str, required: bool| -> Result<Option<String>, Status> {
     let mut values = headers.get_all(name).iter();
     let first = values.next();
@@ -147,7 +148,3 @@ fn runner_route(headers: &http::HeaderMap) -> Result<RunnerRoute, Status> {
     runner_class: value(ROUTE_RUNNER_CLASS_METADATA, true)?.expect("required route metadata was checked"),
   })
 }
-
-#[cfg(test)]
-#[path = "runner_grpc_proxy_test.rs"]
-mod tests;

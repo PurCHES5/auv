@@ -1,5 +1,56 @@
 use super::*;
 
+#[derive(Debug)]
+struct LargeCaptureService;
+
+#[tonic::async_trait]
+impl proto::capture_service_server::CaptureService for LargeCaptureService {
+  async fn capture_window(
+    &self,
+    _request: tonic::Request<proto::CaptureWindowRequest>,
+  ) -> Result<tonic::Response<proto::CaptureWindowResponse>, tonic::Status> {
+    Err(tonic::Status::unimplemented("not used by this regression"))
+  }
+
+  async fn capture_display(
+    &self,
+    _request: tonic::Request<proto::CaptureDisplayRequest>,
+  ) -> Result<tonic::Response<proto::CaptureDisplayResponse>, tonic::Status> {
+    Ok(tonic::Response::new(proto::CaptureDisplayResponse {
+      display: Some(proto::Display {
+        display_id: "primary".to_string(),
+        frame: Some(proto::ScreenRect {
+          width: 1280.0,
+          height: 1024.0,
+          ..Default::default()
+        }),
+        ..Default::default()
+      }),
+      capture: Some(proto::CapturedFrame {
+        image: Some(auv_api_proto::auv::api::image::v1::RgbaFrame {
+          width: 1280,
+          height: 1024,
+          data: vec![0; 1280 * 1024 * 4],
+        }),
+        bounds: Some(proto::ScreenRect {
+          width: 1280.0,
+          height: 1024.0,
+          ..Default::default()
+        }),
+        ..Default::default()
+      }),
+      ..Default::default()
+    }))
+  }
+
+  async fn capture_region(
+    &self,
+    _request: tonic::Request<proto::CaptureRegionRequest>,
+  ) -> Result<tonic::Response<proto::CaptureRegionResponse>, tonic::Status> {
+    Err(tonic::Status::unimplemented("not used by this regression"))
+  }
+}
+
 fn disconnected_client() -> GrpcClient {
   let channel = tonic::transport::Endpoint::from_static("http://127.0.0.1:9").connect_lazy();
   GrpcClient::from_channel(channel)
@@ -24,7 +75,36 @@ async fn runner_hierarchy_rejects_an_empty_class_before_any_transport_call() {
     },
   )
   .expect_err("empty RunnerClass must fail");
-  assert_eq!(error.code(), tonic::Code::InvalidArgument);
+  assert!(matches!(error, CapabilityError::InvalidArgument(_)));
+}
+
+#[tokio::test]
+async fn capture_client_accepts_desktop_frames_larger_than_tonic_default() {
+  // ROOT CAUSE:
+  //
+  // If a desktop capture exceeded tonic's 4 MiB decoded-message default, the
+  // routed client rejected the valid frame before the extension could inspect
+  // it. Runner image clients must share the server's image-message policy.
+  let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind capture fixture");
+  let address = listener.local_addr().expect("capture fixture address");
+  drop(listener);
+  let server = tokio::spawn(async move {
+    tonic::transport::Server::builder()
+      .add_service(
+        proto::capture_service_server::CaptureServiceServer::new(LargeCaptureService)
+          .max_encoding_message_size(IMAGE_RPC_MESSAGE_SIZE_LIMIT),
+      )
+      .serve(address)
+      .await
+  });
+  tokio::task::yield_now().await;
+
+  let grpc = GrpcClient::connect(format!("http://{address}").parse().expect("fixture URI")).await.expect("connect capture fixture");
+  let response =
+    RunnerClient::new(grpc, route()).expect("runner client").displays().capture(None).await.expect("decode capture larger than 4 MiB");
+  assert!(response.capture.image.as_raw().len() > 4 * 1024 * 1024);
+
+  server.abort();
 }
 
 #[tokio::test]
@@ -32,25 +112,32 @@ async fn resolved_window_child_retains_the_exact_resource_reference() {
   let runner = RunnerClient::new(disconnected_client(), route()).expect("runner client");
   let child = WindowClient {
     runner,
-    window: proto::Window {
-      r#ref: Some(proto::WindowRef {
-        window_id: "window_test".to_string(),
-      }),
-      ..Default::default()
+    window: auv_driver::Window {
+      reference: auv_driver::WindowRef {
+        id: "window_test".to_string(),
+      },
+      title: None,
+      app_name: None,
+      app_bundle_id: None,
+      process_id: None,
+      frame: auv_driver::Rect::new(0.0, 0.0, 100.0, 100.0),
+      coordinate_space: auv_driver::CoordinateSpace::Screen,
+      is_main: true,
+      is_visible: true,
     },
     window_ref: proto::WindowRef {
       window_id: "window_test".to_string(),
     },
   };
-  assert_eq!(child.reference().window_id, "window_test");
-  assert_eq!(child.resource().r#ref.as_ref(), Some(child.reference()));
+  assert_eq!(child.reference().id, "window_test");
+  assert_eq!(&child.resource().reference, child.reference());
 }
 
 #[tokio::test]
 async fn runner_input_exposes_typed_screen_point_click() {
   let runner = RunnerClient::new(disconnected_client(), route()).expect("runner client");
   let input = runner.input();
-  let call = input.click_screen_point(proto::ScreenPoint { x: 10.0, y: 20.0 }, Some(Default::default()));
+  let call = input.click_screen_point(auv_driver::Point::new(10.0, 20.0), auv_driver::Click::Single);
   drop(call);
 }
 
@@ -79,7 +166,7 @@ fn permission_mapper_rejects_unspecified_and_unknown_wire_values() {
       automation_to_system_events: macos_proto::PermissionStatus::Unknown as i32,
     })
     .expect_err("invalid wire status must not silently become Unknown");
-    assert_eq!(error.code(), tonic::Code::DataLoss);
+    assert!(matches!(error, CapabilityError::InvalidResponse(_)));
   }
 }
 
@@ -118,7 +205,7 @@ fn accessibility_mapper_preserves_ax_identity_and_delivery_evidence() {
 #[test]
 fn accessibility_mapper_rejects_missing_result_before_rendering() {
   let error = ax_focus_result_from_proto(macos_proto::FocusTextResponse::default()).expect_err("missing focus result");
-  assert_eq!(error.code(), tonic::Code::DataLoss);
+  assert!(matches!(error, CapabilityError::InvalidResponse(_)));
 }
 
 #[test]
@@ -150,7 +237,7 @@ fn application_activation_mapper_rejects_missing_or_empty_evidence() {
     verification: None,
   })
   .expect_err("missing verification must fail closed");
-  assert_eq!(missing.code(), tonic::Code::DataLoss);
+  assert!(matches!(missing, CapabilityError::InvalidResponse(_)));
 
   let empty = activation_result_from_proto(macos_proto::ActivateBundleIdResponse {
     requested_bundle_id: "com.example.Requested".to_string(),
@@ -161,7 +248,7 @@ fn application_activation_mapper_rejects_missing_or_empty_evidence() {
     }),
   })
   .expect_err("empty reason must fail closed");
-  assert_eq!(empty.code(), tonic::Code::DataLoss);
+  assert!(matches!(empty, CapabilityError::InvalidResponse(_)));
 }
 
 #[tokio::test]
@@ -208,7 +295,7 @@ fn now_playing_mapper_preserves_exact_owner_state() {
 #[test]
 fn now_playing_mapper_rejects_missing_or_non_finite_wire_state() {
   let missing = now_playing_from_proto(macos_proto::GetNowPlayingResponse::default()).expect_err("state is required");
-  assert_eq!(missing.code(), tonic::Code::DataLoss);
+  assert!(matches!(missing, CapabilityError::InvalidResponse(_)));
   let invalid = now_playing_from_proto(macos_proto::GetNowPlayingResponse {
     state: Some(macos_proto::NowPlayingState {
       duration_seconds: Some(f64::NAN),
@@ -216,7 +303,7 @@ fn now_playing_mapper_rejects_missing_or_non_finite_wire_state() {
     }),
   })
   .expect_err("non-finite wire value must fail closed");
-  assert_eq!(invalid.code(), tonic::Code::DataLoss);
+  assert!(matches!(invalid, CapabilityError::InvalidResponse(_)));
 }
 
 #[test]
@@ -249,11 +336,11 @@ fn media_control_mapper_preserves_owner_outcome_and_method_identity() {
 
 #[test]
 fn media_control_mapper_rejects_missing_or_malformed_evidence() {
-  assert_eq!(media_control_outcome_from_proto(None, "play").expect_err("outcome required").code(), tonic::Code::DataLoss);
-  assert_eq!(
-    media_control_outcome_from_proto(Some(macos_proto::MediaControlOutcome::default()), "play").expect_err("before required").code(),
-    tonic::Code::DataLoss
-  );
+  assert!(matches!(media_control_outcome_from_proto(None, "play").expect_err("outcome required"), CapabilityError::InvalidResponse(_)));
+  assert!(matches!(
+    media_control_outcome_from_proto(Some(macos_proto::MediaControlOutcome::default()), "play").expect_err("before required"),
+    CapabilityError::InvalidResponse(_)
+  ));
   let malformed = macos_proto::MediaControlOutcome {
     before: Some(macos_proto::NowPlayingState::default()),
     after: Some(macos_proto::NowPlayingState {
@@ -262,7 +349,10 @@ fn media_control_mapper_rejects_missing_or_malformed_evidence() {
     }),
     verified: false,
   };
-  assert_eq!(media_control_outcome_from_proto(Some(malformed), "next").expect_err("finite evidence required").code(), tonic::Code::DataLoss);
+  assert!(matches!(
+    media_control_outcome_from_proto(Some(malformed), "next").expect_err("finite evidence required"),
+    CapabilityError::InvalidResponse(_)
+  ));
 }
 
 #[tokio::test]

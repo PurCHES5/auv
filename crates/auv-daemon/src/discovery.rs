@@ -1,5 +1,3 @@
-//! Process-owned publication of the local API endpoint.
-
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};

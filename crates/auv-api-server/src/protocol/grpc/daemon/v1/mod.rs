@@ -14,10 +14,10 @@ pub(crate) use run::RunServiceGrpc;
 pub(crate) use runner::RunnerServiceGrpc;
 pub(crate) use runner_class::RunnerClassServiceGrpc;
 
-fn caller<T>(request: &tonic::Request<T>) -> Result<crate::auth::CallerId, tonic::Status> {
+fn caller<T>(request: &tonic::Request<T>) -> Result<crate::control::CallerId, tonic::Status> {
   request
     .extensions()
-    .get::<crate::auth::CallerId>()
+    .get::<crate::control::CallerId>()
     .cloned()
     .ok_or_else(|| tonic::Status::internal("gRPC authentication interceptor omitted CallerId"))
 }

@@ -50,8 +50,12 @@ fn resource_selectors_accept_unique_short_ids_and_reject_ambiguity() {
   let selected = select_device(&devices, &DeviceSelector::by_id("0123456789ab"), PlacementConstraint::Automatic, None).unwrap();
   assert_eq!(device_id(&selected), device_id(&devices[0]));
 
-  let run_ids = ["abc000", "abc111"];
-  let error = resolve_resource_id("Run", "abc", run_ids.into_iter()).unwrap_err();
+  let run_ids = [
+    "abc00000000000000000000000000000",
+    "abc11111111111111111111111111111",
+  ];
+  let selector = RunSelector::parse("abc").unwrap();
+  let error = resolve_run_id(&selector, run_ids.into_iter()).unwrap_err();
   assert!(error.to_string().contains("ambiguous"));
 }
 

@@ -61,3 +61,59 @@ pub struct ApiServerServeArgs {
   #[arg(long = "runner-provider", value_name = "PATH")]
   pub runner_providers: Vec<PathBuf>,
 }
+
+pub async fn run(args: ApiServerArgs, project_root: &std::path::Path) -> Result<i32, String> {
+  match args.command {
+    ApiServerCommand::Serve(args) => serve(args, project_root).await,
+  }
+}
+
+async fn serve(args: ApiServerServeArgs, project_root: &std::path::Path) -> Result<i32, String> {
+  if args.remote_listen.is_some() && args.pairing_store.is_none() {
+    return Err("--remote-listen requires --pairing-store".to_string());
+  }
+  #[cfg(unix)]
+  if args.remote_listen.is_some() && args.unix_socket.is_some() {
+    return Err("--remote-listen conflicts with --unix-socket".to_string());
+  }
+  let listener = if let Some(host) = args.remote_listen {
+    auv_daemon::ListenEndpoint::Remote {
+      host,
+      port: args.port,
+    }
+  } else {
+    #[cfg(unix)]
+    if let Some(path) = args.unix_socket {
+      auv_daemon::ListenEndpoint::Unix {
+        path: if path.is_absolute() {
+          path
+        } else {
+          project_root.join(path)
+        },
+      }
+    } else {
+      auv_daemon::ListenEndpoint::Tcp {
+        host: args.host,
+        port: args.port,
+      }
+    }
+    #[cfg(not(unix))]
+    auv_daemon::ListenEndpoint::Tcp {
+      host: args.host,
+      port: args.port,
+    }
+  };
+  super::serve::run_listeners(
+    super::serve::HostOptions {
+      listeners: vec![listener],
+      pairing_store: args.pairing_store,
+      store_root: args.store_root,
+      discovery_file: args.discovery_file,
+      publish_discovery: !args.no_discovery,
+      daemon_idle_timeout: args.daemon_idle_timeout,
+      runner_providers: args.runner_providers,
+    },
+    project_root,
+  )
+  .await
+}

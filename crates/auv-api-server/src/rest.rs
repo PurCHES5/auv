@@ -12,22 +12,22 @@ use axum::routing::{get, post};
 use prost::Message;
 use tonic::{Code, Status};
 
-use crate::auth::CallerId;
-use crate::daemon::{Daemon, DaemonError};
+use crate::control::{CallerId, Control, ControlError};
+use crate::protocol::domain;
 use crate::server::RequestAuth;
 
 const PROTOBUF_CONTENT_TYPE: &str = "application/protobuf";
 
 #[derive(Clone)]
 struct RestState {
-  daemon: Arc<Daemon>,
+  daemon: Arc<dyn Control>,
   auth: RequestAuth,
 }
 
-pub(crate) fn router(daemon: Arc<Daemon>, auth: RequestAuth) -> Router {
-  // TODO(rest-transcoding-v1): these handwritten routes map canonical protobuf
-  // messages without creating a second Rust domain model. Replace the mapping
-  // with google.api.http + Protovalidate + OpenAPI generation when that Buf
+pub(crate) fn router(daemon: Arc<dyn Control>, auth: RequestAuth) -> Router {
+  // TODO(rest-transcoding-v1): these handwritten routes explicitly map the
+  // shared Rust domain model to protobuf. Replace the transport mapping with
+  // google.api.http + Protovalidate + OpenAPI generation when that Buf
   // dependency/toolchain slice is owner-approved.
   // TODO(websocket-events): no WebSocket route is exposed until a concrete
   // non-video event consumer defines ordering, cursor, gap recovery, and
@@ -100,7 +100,7 @@ async fn get_auv_api_group_version(
         daemon_proto::ApiResourceOperation::List,
         daemon_proto::ApiResourceOperation::Get,
       ];
-      if !state.daemon.list_runner_classes(None)?.runner_classes.is_empty() {
+      if !state.daemon.list_runner_classes(None)?.is_empty() {
         runner_operations.extend([
           daemon_proto::ApiResourceOperation::Create,
           daemon_proto::ApiResourceOperation::Delete,
@@ -150,7 +150,8 @@ async fn list_devices(
   request: Request<Body>,
 ) -> Result<Protobuf<daemon_proto::ListDevicesResponse>, RestError> {
   let _caller = authenticate(&state, &request)?;
-  Ok(Protobuf(state.daemon.list_devices()))
+  let devices = state.daemon.list_devices()?.into_iter().map(domain::device).collect();
+  Ok(Protobuf(daemon_proto::ListDevicesResponse { devices }))
 }
 
 async fn get_device(
@@ -161,22 +162,26 @@ async fn get_device(
   let _caller = authenticate(&state, &request)?;
   let device = state
     .daemon
-    .get_device(&device_id)
+    .get_device(&device_id)?
     .ok_or_else(|| RestError::new(StatusCode::NOT_FOUND, "not_found", format!("unknown Device: {device_id}")))?;
   Ok(Protobuf(daemon_proto::GetDeviceResponse {
-    device: Some(device),
+    device: Some(domain::device(device)),
   }))
 }
 
 async fn create_run(State(state): State<RestState>, request: Request<Body>) -> Result<Protobuf<daemon_proto::CreateRunResponse>, RestError> {
   let caller = authenticate(&state, &request)?;
-  let request = decode_protobuf_body(request).await?;
-  state.daemon.create_run(&caller, request).map(Protobuf).map_err(RestError::from)
+  let request = domain::create_run(decode_protobuf_body(request).await?)?;
+  let run = state.daemon.create_run(&caller, request)?;
+  Ok(Protobuf(daemon_proto::CreateRunResponse {
+    run: Some(domain::run(run)),
+  }))
 }
 
 async fn list_runs(State(state): State<RestState>, request: Request<Body>) -> Result<Protobuf<daemon_proto::ListRunsResponse>, RestError> {
   let caller = authenticate(&state, &request)?;
-  Ok(Protobuf(state.daemon.list_runs(&caller)))
+  let runs = state.daemon.list_runs(&caller)?.into_iter().map(domain::run).collect();
+  Ok(Protobuf(daemon_proto::ListRunsResponse { runs }))
 }
 
 async fn get_run(
@@ -185,7 +190,10 @@ async fn get_run(
   request: Request<Body>,
 ) -> Result<Protobuf<daemon_proto::GetRunResponse>, RestError> {
   let caller = authenticate(&state, &request)?;
-  state.daemon.get_run(&caller, &run_id).map(Protobuf).map_err(RestError::from)
+  let run = state.daemon.get_run(&caller, &run_id)?;
+  Ok(Protobuf(daemon_proto::GetRunResponse {
+    run: Some(domain::run(run)),
+  }))
 }
 
 async fn stop_run(
@@ -200,7 +208,11 @@ async fn stop_run(
   }
   let outcome = daemon_proto::RunOutcome::try_from(request.outcome)
     .map_err(|_| RestError::new(StatusCode::BAD_REQUEST, "invalid_argument", "Run outcome is unknown"))?;
-  state.daemon.stop_run(&caller, &run_id, outcome).await.map(Protobuf).map_err(RestError::from)
+  let outcome = domain::run_outcome(outcome)?;
+  let run = state.daemon.stop_run(&caller, &run_id, outcome).await?;
+  Ok(Protobuf(daemon_proto::StopRunResponse {
+    run: Some(domain::run(run)),
+  }))
 }
 
 async fn create_runner(
@@ -208,8 +220,11 @@ async fn create_runner(
   request: Request<Body>,
 ) -> Result<Protobuf<daemon_proto::CreateRunnerResponse>, RestError> {
   let _caller = authenticate(&state, &request)?;
-  let request = decode_protobuf_body(request).await?;
-  state.daemon.create_runner(request).await.map(Protobuf).map_err(RestError::from)
+  let request = domain::create_runner(decode_protobuf_body(request).await?)?;
+  let runner = state.daemon.create_runner(request).await?;
+  Ok(Protobuf(daemon_proto::CreateRunnerResponse {
+    runner: Some(domain::runner(runner)),
+  }))
 }
 
 async fn list_runners(
@@ -217,7 +232,8 @@ async fn list_runners(
   request: Request<Body>,
 ) -> Result<Protobuf<daemon_proto::ListRunnersResponse>, RestError> {
   let _caller = authenticate(&state, &request)?;
-  Ok(Protobuf(state.daemon.list_runners()))
+  let runners = state.daemon.list_runners()?.into_iter().map(domain::runner).collect();
+  Ok(Protobuf(daemon_proto::ListRunnersResponse { runners }))
 }
 
 async fn list_runner_classes(
@@ -225,7 +241,8 @@ async fn list_runner_classes(
   request: Request<Body>,
 ) -> Result<Protobuf<daemon_proto::ListRunnerClassesResponse>, RestError> {
   let _caller = authenticate(&state, &request)?;
-  state.daemon.list_runner_classes(None).map(Protobuf).map_err(RestError::from)
+  let runner_classes = state.daemon.list_runner_classes(None)?.into_iter().map(domain::runner_class).collect();
+  Ok(Protobuf(daemon_proto::ListRunnerClassesResponse { runner_classes }))
 }
 
 async fn get_runner_class(
@@ -234,7 +251,10 @@ async fn get_runner_class(
   request: Request<Body>,
 ) -> Result<Protobuf<daemon_proto::GetRunnerClassResponse>, RestError> {
   let _caller = authenticate(&state, &request)?;
-  state.daemon.get_runner_class(None, &runner_class).map(Protobuf).map_err(RestError::from)
+  let runner_class = state.daemon.get_runner_class(None, &runner_class)?;
+  Ok(Protobuf(daemon_proto::GetRunnerClassResponse {
+    runner_class: Some(domain::runner_class(runner_class)),
+  }))
 }
 
 async fn get_runner(
@@ -243,7 +263,10 @@ async fn get_runner(
   request: Request<Body>,
 ) -> Result<Protobuf<daemon_proto::GetRunnerResponse>, RestError> {
   let _caller = authenticate(&state, &request)?;
-  state.daemon.get_runner(&runner_id).map(Protobuf).map_err(RestError::from)
+  let runner = state.daemon.get_runner(&runner_id)?;
+  Ok(Protobuf(daemon_proto::GetRunnerResponse {
+    runner: Some(domain::runner(runner)),
+  }))
 }
 
 async fn delete_runner(
@@ -252,7 +275,10 @@ async fn delete_runner(
   request: Request<Body>,
 ) -> Result<Protobuf<daemon_proto::DeleteRunnerResponse>, RestError> {
   let _caller = authenticate(&state, &request)?;
-  state.daemon.delete_runner(&runner_id, None, false).await.map(Protobuf).map_err(RestError::from)
+  let runner = state.daemon.delete_runner(&runner_id, auv::runners::StopRunner::default()).await?;
+  Ok(Protobuf(daemon_proto::DeleteRunnerResponse {
+    runner: Some(domain::runner(runner)),
+  }))
 }
 
 fn authenticate(state: &RestState, request: &Request<Body>) -> Result<CallerId, RestError> {
@@ -316,8 +342,9 @@ impl From<Status> for RestError {
   }
 }
 
-impl From<DaemonError> for RestError {
-  fn from(error: DaemonError) -> Self {
+impl From<ControlError> for RestError {
+  fn from(error: ControlError) -> Self {
+    use ControlError as DaemonError;
     match error {
       DaemonError::Identity(_) => Self::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", error.to_string()),
       DaemonError::InvalidArgument(_) => Self::new(StatusCode::BAD_REQUEST, "invalid_argument", error.to_string()),
@@ -341,7 +368,3 @@ impl IntoResponse for RestError {
     (self.status, [(header::CONTENT_TYPE, HeaderValue::from_static("application/problem+json"))], body.to_string()).into_response()
   }
 }
-
-#[cfg(test)]
-#[path = "rest_test.rs"]
-mod tests;

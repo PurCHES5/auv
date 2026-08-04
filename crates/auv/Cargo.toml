@@ -7,7 +7,7 @@ publish.workspace = true
 readme.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Domain-facing local and remote SDK facade for AUV"
+description = "Domain-facing local and remote operation interface for AUV"
 documentation.workspace = true
 homepage.workspace = true
 repository.workspace = true
@@ -20,7 +20,11 @@ auv-driver-overlay-common = { path = "../auv-driver-overlay-common" }
 auv-media-macos = { path = "../auv-media-macos" }
 directories = "6"
 fs2.workspace = true
+futures-util.workspace = true
+getrandom = "0.3"
+hex = "0.4"
 http = "1"
+image.workspace = true
 prost-types = "0.14"
 serde.workspace = true
 serde_json.workspace = true

@@ -344,25 +344,67 @@ fn local_daemon_routes_driver_grpc_without_claims_or_leases() {
 
 #[test]
 fn device_trust_name_requires_a_unique_paired_device() {
-  use auv_api_server::auth::PairingStore;
-
   let directory = tempfile::tempdir().expect("temporary pairing directory");
   let store_path = directory.path().join("pairings.json");
-  let store = PairingStore::open(store_path.clone()).expect("open pairing store");
-  for pair_id in ["device_a", "device_b"] {
-    let token = store.issue_token(None).expect("issue seed token").expose_once();
-    store.consume_token(&token, pair_id.to_string(), "shared name".to_string()).expect("seed paired Device");
+  let socket = directory.path().join("auv.sock");
+  let discovery = directory.path().join("daemon.json");
+  let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+  let mut daemon = ChildGuard(
+    Command::new(env!("CARGO_BIN_EXE_auv"))
+      .args([
+        "serve",
+        "--listen",
+        &format!("unix://{}", socket.display()),
+        "--listen",
+        &format!("http://127.0.0.1:{port}"),
+        "--pairing-store",
+        store_path.to_str().unwrap(),
+        "--store-root",
+        directory.path().join("store").to_str().unwrap(),
+        "--discovery-file",
+        discovery.to_str().unwrap(),
+      ])
+      .stdin(Stdio::null())
+      .stdout(Stdio::null())
+      .stderr(Stdio::inherit())
+      .spawn()
+      .expect("start paired daemon"),
+  );
+  wait_for_path(&mut daemon.0, &discovery);
+
+  for (pair_id, profile) in [("device_a", "a"), ("device_b", "b")] {
+    let created = Command::new(env!("CARGO_BIN_EXE_auv"))
+      .args(["devices", "pair", "create-token"])
+      .env("AUV_DISCOVERY_FILE", &discovery)
+      .output()
+      .expect("create pairing token");
+    assert!(created.status.success(), "stderr={}", stderr(&created));
+    let token = stdout(&created).trim().to_string();
+    let connected = Command::new(env!("CARGO_BIN_EXE_auv"))
+      .args([
+        "devices",
+        "pair",
+        "--endpoint",
+        &format!("http://127.0.0.1:{port}"),
+        "connect",
+        "--token",
+        &token,
+        "--device-id",
+        pair_id,
+        "--label",
+        "shared name",
+        "--profile",
+        profile,
+      ])
+      .env("AUV_CONFIG_PROFILES_FILE", directory.path().join(format!("profiles-{profile}.json")))
+      .output()
+      .expect("seed paired Device");
+    assert!(connected.status.success(), "stderr={}", stderr(&connected));
   }
-  drop(store);
 
   let ambiguous = Command::new(env!("CARGO_BIN_EXE_auv"))
-    .args([
-      "devices",
-      "disable",
-      "shared name",
-      "--store",
-      store_path.to_str().unwrap(),
-    ])
+    .args(["devices", "disable", "shared name"])
+    .env("AUV_DISCOVERY_FILE", &discovery)
     .output()
     .expect("resolve ambiguous paired Device name");
   assert!(!ambiguous.status.success());
@@ -471,7 +513,7 @@ fn unknown_top_level_command_executes_matching_auv_plugin() {
   let plugin = temp.path().join("auv-fixture");
   std::fs::write(
     &plugin,
-    "#!/bin/sh\nprintf 'args=%s|%s\\n' \"$1\" \"$2\"\nprintf 'auv_path=%s\\n' \"$AUV_PATH\"\nprintf 'auv_context=%s\\n' \"$AUV_CONTEXT\"\nprintf 'plugin stderr\\n' >&2\nexit 23\n",
+    "#!/bin/sh\nprintf 'args=%s|%s\\n' \"$1\" \"$2\"\nprintf 'auv_path=%s\\n' \"$AUV_PATH\"\nprintf 'auv_context=%s\\n' \"$AUV_CONTEXT\"\nprintf 'trace_store=%s\\n' \"$AUV_TRACING_STORE_ROOT\"\nprintf 'plugin stderr\\n' >&2\nexit 23\n",
   )
   .expect("write fixture plugin");
   let mut permissions = std::fs::metadata(&plugin).expect("read plugin metadata").permissions();
@@ -496,6 +538,10 @@ fn unknown_top_level_command_executes_matching_auv_plugin() {
   assert!(context["invocation_id"].as_str().is_some_and(|value| value.starts_with("invocation_")));
   assert!(context.get("version").is_none());
   assert!(context.get("credential").is_none());
+  assert_eq!(
+    lines.next(),
+    Some(format!("trace_store={}", std::env::current_dir().expect("current directory").join(".auv/store").display()).as_str())
+  );
   assert_eq!(lines.next(), None);
   assert_eq!(stderr(&output), "plugin stderr\n");
 }

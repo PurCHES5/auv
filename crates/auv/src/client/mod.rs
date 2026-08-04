@@ -13,76 +13,74 @@ use auv_api_proto::auv::api::daemon::v1 as proto;
 use auv_api_client::PairedConnectConfig;
 use auv_api_client::protocol::grpc::Client as GrpcClient;
 
+use crate::resource::{DeviceSelector, RunSelector, RunnerClassId};
 use crate::{AuvContext, ContextError, discovery, profile};
 
+/// Failure while resolving placement or managing an implicit Run.
 #[derive(Debug, thiserror::Error)]
 pub enum PlacementError {
+  /// Resolving the connection context failed.
   #[error(transparent)]
   Context(#[from] ContextError),
+  /// The inherited context environment is not valid Unicode.
   #[error("AUV_CONTEXT is not valid Unicode: {0}")]
   ContextEnvironment(std::env::VarError),
+  /// A daemon control request failed.
   #[error(transparent)]
-  Status(#[from] tonic::Status),
+  Client(#[from] crate::error::ClientError),
+  /// A routed Runner capability operation failed.
+  #[error(transparent)]
+  Capability(#[from] runner::CapabilityError),
+  /// Resource placement could not be resolved.
   #[error("{0}")]
   Selection(String),
+  /// The primary operation and its cleanup both failed.
   #[error("{primary}; cleanup also failed: {cleanup}")]
-  Cleanup { primary: String, cleanup: String },
+  Cleanup {
+    /// Failure from the primary operation.
+    primary: String,
+    /// Failure from cleanup after the primary failure.
+    cleanup: String,
+  },
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct DeviceSelector {
-  pub id: Option<String>,
-  pub name: Option<String>,
-}
-
-impl DeviceSelector {
-  pub fn by_id(id: impl Into<String>) -> Self {
-    Self {
-      id: Some(id.into()),
-      name: None,
-    }
-  }
-
-  pub fn by_name(name: impl Into<String>) -> Self {
-    Self {
-      id: None,
-      name: Some(name.into()),
-    }
-  }
-
-  fn is_empty(&self) -> bool {
-    self.id.is_none() && self.name.is_none()
-  }
-}
-
+/// How a high-level operation obtains its Run.
 #[derive(Clone, Debug, Default)]
 pub enum RunSelection {
   /// Inherit `AUV_CONTEXT.run_id` when present, otherwise create a Run.
   #[default]
   Auto,
-  Existing(String),
+  /// Attach to one existing Run selected by canonical ID or prefix.
+  Existing(RunSelector),
   /// Explicitly create a Run even when inherited context names another Run.
   New,
 }
 
+/// Run selection, Device placement, and labels for high-level operations.
 #[derive(Clone, Debug, Default)]
 pub struct RunOptions {
+  /// Whether to inherit, attach, or create a Run.
   pub selection: RunSelection,
+  /// Optional Device placement selector.
   pub device: DeviceSelector,
+  /// Labels applied when this operation creates a Run.
   pub labels: HashMap<String, String>,
 }
 
+/// Device and RunnerClass placement for a routed Runner.
 #[derive(Clone, Debug)]
 pub struct RunnerOptions {
+  /// Optional Device placement selector.
   pub device: DeviceSelector,
-  pub runner_class: String,
+  /// RunnerClass to route or instantiate.
+  pub runner_class: RunnerClassId,
 }
 
 impl Default for RunnerOptions {
   fn default() -> Self {
     Self {
       device: DeviceSelector::default(),
-      runner_class: "auv.core.local".to_string(),
+      runner_class: "auv.core.local".parse().expect("the built-in RunnerClass ID is valid"),
     }
   }
 }
@@ -108,7 +106,31 @@ pub struct Client {
 }
 
 impl Client {
-  pub fn from_grpc(grpc: GrpcClient) -> Self {
+  pub(crate) fn grpc_client(&self) -> GrpcClient {
+    self.grpc.clone()
+  }
+
+  /// Returns Device inventory operations.
+  pub fn devices(&self) -> crate::devices::Devices {
+    crate::devices::Devices::new(self.clone())
+  }
+
+  /// Returns live pairing operations.
+  pub fn pairing(&self) -> crate::pairing::Pairing {
+    crate::pairing::Pairing::new(self.clone())
+  }
+
+  /// Returns Run control operations.
+  pub fn runs(&self) -> crate::runs::Runs {
+    crate::runs::Runs::new(self.clone())
+  }
+
+  /// Returns Runner and RunnerClass control operations.
+  pub fn runners(&self) -> crate::runners::Runners {
+    crate::runners::Runners::new(self.clone())
+  }
+
+  pub(crate) fn from_grpc(grpc: GrpcClient) -> Self {
     Self {
       grpc,
       context: None,
@@ -117,26 +139,24 @@ impl Client {
     }
   }
 
+  /// Connects using one non-secret AUV context.
   pub async fn from_context(context: AuvContext) -> Result<Self, PlacementError> {
     Ok(Self::resolve_context(context).await?)
   }
 
+  /// Connects using a context and an explicitly supplied profile store.
   pub async fn from_context_with_profiles(context: AuvContext, profiles: &profile::ProfileStore) -> Result<Self, ContextError> {
     Self::resolve_context_with_profiles(context, profiles).await
   }
 
+  /// Loads `AUV_CONTEXT` and connects to its selected daemon.
   pub async fn from_env() -> Result<Self, PlacementError> {
     Self::from_context(AuvContext::from_env()?).await
   }
 
+  /// Returns the resolved non-secret context, when connection used one.
   pub fn context(&self) -> Option<&AuvContext> {
     self.context.as_ref()
-  }
-
-  /// Returns the selected gRPC protocol client for daemon-administration
-  /// operations that intentionally work below the business hierarchy.
-  pub fn grpc(&self) -> GrpcClient {
-    self.grpc.clone()
   }
 
   /// Uses inherited plugin context when present, otherwise discovers the
@@ -149,13 +169,24 @@ impl Client {
       }
       Err(std::env::VarError::NotPresent) => {
         let endpoint = discovery::resolve(None).map_err(ContextError::Discovery)?.ok_or(ContextError::EndpointNotDiscovered)?;
-        Ok(Self::from_grpc(GrpcClient::connect(endpoint).await.map_err(ContextError::Connect)?))
+        Ok(Self::from_grpc(GrpcClient::connect(endpoint).await.map_err(|error| ContextError::Connect(error.to_string()))?))
       }
       Err(error) => Err(PlacementError::ContextEnvironment(error)),
     }
   }
 
+  /// Connects to an explicit daemon endpoint or the locally discovered daemon.
+  /// A missing discovery descriptor is reported as `Ok(None)` so inventory
+  /// interfaces can preserve their daemon-optional behavior.
+  pub async fn discover(explicit: Option<&str>) -> Result<Option<Self>, ContextError> {
+    let Some(endpoint) = discovery::resolve(explicit)? else {
+      return Ok(None);
+    };
+    Ok(Some(Self::from_grpc(GrpcClient::connect(endpoint).await.map_err(|error| ContextError::Connect(error.to_string()))?)))
+  }
+
   async fn resolve_context(mut context: AuvContext) -> Result<Self, ContextError> {
+    validate_context_selectors(&context)?;
     if context.config_profile.is_some() {
       return Self::resolve_context_with_profiles(context, &profile::ProfileStore::from_env()?).await;
     }
@@ -177,12 +208,16 @@ impl Client {
       let mut local = match discovery::resolve(None)? {
         Some(endpoint) => {
           let endpoint_display = endpoint.to_string();
-          Some((endpoint_display, GrpcClient::connect(endpoint).await?))
+          Some((endpoint_display, GrpcClient::connect(endpoint).await.map_err(|error| ContextError::Connect(error.to_string()))?))
         }
         None => None,
       };
       let local_devices = match local.as_mut() {
-        Some((_, client)) => client.devices().list_devices().await.map_err(ContextError::RemoteDeviceList)?,
+        Some((_, client)) => client
+          .devices()
+          .list_devices()
+          .await
+          .map_err(|status| ContextError::RemoteDeviceList(crate::error::ClientError::from_status("ListDevices", status)))?,
         None => Vec::new(),
       };
       let local_matches = matching_devices(&context, &local_devices);
@@ -227,7 +262,7 @@ impl Client {
         endpoint
       }
     };
-    let grpc = GrpcClient::connect(endpoint).await?;
+    let grpc = GrpcClient::connect(endpoint).await.map_err(|error| ContextError::Connect(error.to_string()))?;
     Ok(Self {
       grpc,
       context: Some(context),
@@ -241,10 +276,10 @@ impl Client {
     let mut matches = Vec::<(String, String, Self)>::new();
     if let Some(endpoint) = discovery::resolve(None)? {
       let endpoint_display = endpoint.to_string();
-      let grpc = GrpcClient::connect(endpoint).await?;
+      let grpc = GrpcClient::connect(endpoint).await.map_err(|error| ContextError::Connect(error.to_string()))?;
       let runs = grpc.runs().list_runs().await.map_err(|status| ContextError::RunLookup {
         location: "local daemon".to_string(),
-        status,
+        error: crate::error::ClientError::from_status("ListRuns", status),
       })?;
       for canonical_run_id in matching_run_ids(&run_id, &runs) {
         let mut local_context = context.clone();
@@ -275,7 +310,7 @@ impl Client {
       let location = format!("paired profile {:?}", configured.config_profile());
       let runs = remote.grpc.runs().list_runs().await.map_err(|status| ContextError::RunLookup {
         location: location.clone(),
-        status,
+        error: crate::error::ClientError::from_status("ListRuns", status),
       })?;
       for canonical_run_id in matching_run_ids(&run_id, &runs) {
         if let Some(remote_context) = remote.context.as_mut() {
@@ -295,6 +330,7 @@ impl Client {
   }
 
   async fn resolve_context_with_profiles(mut context: AuvContext, profiles: &profile::ProfileStore) -> Result<Self, ContextError> {
+    validate_context_selectors(&context)?;
     let profile = profiles.resolve(&context)?;
     if let Some(endpoint) = context.daemon_endpoint.as_deref() {
       let selected = profile::validate_remote_endpoint(endpoint)?;
@@ -309,8 +345,13 @@ impl Client {
       endpoint: profile.endpoint().clone(),
       device_credential: profile.device_credential().to_string(),
     })
-    .await?;
-    let devices = grpc.devices().list_devices().await.map_err(ContextError::RemoteDeviceList)?;
+    .await
+    .map_err(|error| ContextError::PairedConnect(error.to_string()))?;
+    let devices = grpc
+      .devices()
+      .list_devices()
+      .await
+      .map_err(|status| ContextError::RemoteDeviceList(crate::error::ClientError::from_status("ListDevices", status)))?;
     let canonical = devices
       .into_iter()
       .find(|device| device.r#ref.as_ref().is_some_and(|reference| reference.device_id == profile.device_id()))
@@ -338,23 +379,26 @@ impl Client {
     Ok(self)
   }
 
+  /// Creates or attaches to a Run using shared placement policy.
   pub async fn run(&self, options: RunOptions) -> Result<RunClient, PlacementError> {
     // TODO(distributed-run-authority): one Run currently owns one daemon
     // transport; see the accepted aggregated API design before adding peers.
     let grpc = self.grpc.clone();
-    let devices = grpc.devices().list_devices().await?;
+    let devices = grpc.devices().list_devices().await.map_err(|status| crate::error::ClientError::from_status("ListDevices", status))?;
     let context = self.context.clone().unwrap_or_default();
     let run_id = match &options.selection {
-      RunSelection::Auto => context.run_id.clone(),
+      RunSelection::Auto => {
+        context.run_id.as_deref().map(RunSelector::parse).transpose().map_err(|error| PlacementError::Selection(error.to_string()))?
+      }
       RunSelection::Existing(run_id) => Some(run_id.clone()),
       RunSelection::New => None,
     };
     let existing = match run_id {
-      Some(run_id) => {
-        let runs = grpc.runs().list_runs().await?;
+      Some(run_selector) => {
+        let runs = grpc.runs().list_runs().await.map_err(|status| crate::error::ClientError::from_status("ListRuns", status))?;
         let run_id =
-          resolve_resource_id("Run", &run_id, runs.iter().filter_map(|run| run.r#ref.as_ref().map(|reference| reference.run_id.as_str())))?;
-        Some(grpc.runs().get_run(run_id).await?)
+          resolve_run_id(&run_selector, runs.iter().filter_map(|run| run.r#ref.as_ref().map(|reference| reference.run_id.as_str())))?;
+        Some(grpc.runs().get_run(run_id).await.map_err(|status| crate::error::ClientError::from_status("GetRun", status))?)
       }
       None => None,
     };
@@ -386,7 +430,8 @@ impl Client {
               devices: vec![device_ref],
               labels: options.labels,
             })
-            .await?,
+            .await
+            .map_err(|status| crate::error::ClientError::from_status("CreateRun", status))?,
           true,
         )
       }
@@ -398,10 +443,18 @@ impl Client {
         device.r#ref.as_ref().is_some_and(|reference| run.devices.iter().any(|candidate| candidate.device_id == reference.device_id))
       })
       .collect();
+    let resource = crate::runs::Run::try_from(run.clone()).map_err(|error| PlacementError::Selection(error.to_string()))?;
+    let device = selected_device
+      .clone()
+      .map(crate::devices::Device::try_from)
+      .transpose()
+      .map_err(|error| PlacementError::Selection(error.to_string()))?;
     Ok(RunClient {
       client: self.clone(),
       run,
+      resource,
       selected_device,
+      device,
       run_devices,
       owned,
     })
@@ -413,11 +466,12 @@ impl Client {
     self.runner_with(RunOptions::default(), options).await
   }
 
+  /// Creates or attaches to a Run and routes a Runner with explicit options.
   pub async fn runner_with(&self, run_options: RunOptions, runner_options: RunnerOptions) -> Result<RunnerExecution, PlacementError> {
     let run = self.run(run_options).await?;
     match run.runner(runner_options).await {
       Ok(runner) => Ok(RunnerExecution { run, runner }),
-      Err(primary) if run.is_owned() => match run.finish_if_owned(proto::RunOutcome::Canceled).await {
+      Err(primary) if run.is_owned() => match run.finish_if_owned(crate::runs::RunOutcome::Canceled).await {
         Ok(_) => Err(primary),
         Err(cleanup) => Err(PlacementError::Cleanup {
           primary: primary.to_string(),
@@ -429,11 +483,14 @@ impl Client {
   }
 }
 
+/// A high-level Run handle that tracks whether it owns cleanup.
 #[derive(Debug)]
 pub struct RunClient {
   client: Client,
   run: proto::Run,
+  resource: crate::runs::Run,
   selected_device: Option<proto::Device>,
+  device: Option<crate::devices::Device>,
   run_devices: Vec<proto::Device>,
   owned: bool,
 }
@@ -443,6 +500,7 @@ pub struct RunClient {
 // forwarding owns a bounded cleanup deadline; normal paths must call
 // `finish_if_owned` or `RunnerExecution::finish` explicitly.
 
+/// A routed Runner together with its Run lifecycle owner.
 #[derive(Debug)]
 pub struct RunnerExecution {
   run: RunClient,
@@ -450,64 +508,83 @@ pub struct RunnerExecution {
 }
 
 impl RunnerExecution {
-  pub fn run(&self) -> &proto::Run {
+  /// Returns the associated typed Run resource.
+  pub fn run(&self) -> &crate::runs::Run {
     self.run.resource()
   }
 
+  /// Returns display capabilities.
   pub fn displays(&self) -> runner::DisplaysClient {
     self.runner.displays()
   }
 
+  /// Returns window capabilities.
   pub fn windows(&self) -> runner::WindowsClient {
     self.runner.windows()
   }
 
+  /// Returns input-delivery capabilities.
   pub fn input(&self) -> runner::InputClient {
     self.runner.input()
   }
 
+  /// Returns overlay presentation capabilities.
   pub fn overlay(&self) -> runner::OverlayClient {
     self.runner.overlay()
   }
 
+  /// Returns macOS-specific capabilities.
   pub fn macos(&self) -> runner::MacosClient {
     self.runner.macos()
   }
 
+  /// Runs OCR on an existing capture through this Runner.
   pub async fn recognize_text(
     &self,
-    capture: auv_api_proto::auv::api::driver::v1::CapturedFrame,
-    region: Option<auv_api_proto::auv::api::image::v1::NormalizedRect>,
+    capture: auv_driver::Capture,
+    region: Option<runner::NormalizedRegion>,
     custom_words: Vec<String>,
     recognition_languages: Vec<String>,
-  ) -> Result<auv_api_proto::auv::api::driver::v1::RecognizeTextResponse, tonic::Status> {
+  ) -> Result<auv_driver::TextRecognition, runner::CapabilityError> {
     self.runner.recognize_text(capture, region, custom_words, recognition_languages).await
   }
 
-  pub async fn finish(self, outcome: proto::RunOutcome) -> Result<proto::Run, PlacementError> {
+  /// Completes an implicitly owned Run and returns its terminal resource.
+  pub async fn finish(self, outcome: crate::runs::RunOutcome) -> Result<crate::runs::Run, PlacementError> {
     self.run.finish_if_owned(outcome).await
   }
 }
 
 impl RunClient {
-  pub fn resource(&self) -> &proto::Run {
-    &self.run
+  /// Returns the typed Run resource.
+  pub fn resource(&self) -> &crate::runs::Run {
+    &self.resource
   }
 
-  pub fn device(&self) -> Option<&proto::Device> {
-    self.selected_device.as_ref()
+  /// Returns the selected Device, when placement resolved one.
+  pub fn device(&self) -> Option<&crate::devices::Device> {
+    self.device.as_ref()
   }
 
+  /// Returns whether this handle created and therefore owns the Run.
   pub fn is_owned(&self) -> bool {
     self.owned
   }
 
+  /// Constrains subsequent Runner placement to a caller-local Device.
   pub fn local(mut self) -> Result<Self, PlacementError> {
     self.client = self.client.local()?;
     self.selected_device = select_default_device(&self.run_devices, PlacementConstraint::LocalOnly, Some(&self.run.devices))?;
+    self.device = self
+      .selected_device
+      .clone()
+      .map(crate::devices::Device::try_from)
+      .transpose()
+      .map_err(|error| PlacementError::Selection(error.to_string()))?;
     Ok(self)
   }
 
+  /// Routes a Runner within this Run.
   pub async fn runner(&self, options: RunnerOptions) -> Result<runner::RunnerClient, PlacementError> {
     let run_id = self
       .run
@@ -525,21 +602,22 @@ impl RunClient {
       return Err(PlacementError::Selection("local Runner placement requires one caller-local Device in the Run".to_string()));
     }
     let device_id = selected_device.as_ref().map(required_device_ref).transpose()?.map(|device| device.device_id);
-    Ok(runner::RunnerClient::new(
+    runner::RunnerClient::new(
       self.client.grpc.clone(),
       auv_api_client::RunnerRoute {
         device_id,
         run_id: Some(run_id),
-        runner_class: options.runner_class,
+        runner_class: options.runner_class.to_string(),
       },
-    )?)
+    )
+    .map_err(Into::into)
   }
 
   /// Stops only Runs created implicitly by this high-level client. Attached
   /// Runs remain open for later operations.
-  pub async fn finish_if_owned(mut self, outcome: proto::RunOutcome) -> Result<proto::Run, PlacementError> {
+  pub async fn finish_if_owned(mut self, outcome: crate::runs::RunOutcome) -> Result<crate::runs::Run, PlacementError> {
     if !self.owned {
-      return Ok(self.run);
+      return Ok(self.resource);
     }
     let run_id = self
       .run
@@ -548,10 +626,27 @@ impl RunClient {
       .map(|run| run.run_id.clone())
       .filter(|run_id| !run_id.is_empty())
       .ok_or_else(|| PlacementError::Selection("Run omitted its canonical ref".to_string()))?;
-    self.run = self.client.grpc.runs().stop_run(run_id, outcome).await?;
+    self.run = self
+      .client
+      .grpc
+      .runs()
+      .stop_run(run_id, outcome.into())
+      .await
+      .map_err(|status| crate::error::ClientError::from_status("StopRun", status))?;
+    self.resource = crate::runs::Run::try_from(self.run.clone()).map_err(|error| PlacementError::Selection(error.to_string()))?;
     self.owned = false;
-    Ok(self.run)
+    Ok(self.resource)
   }
+}
+
+fn validate_context_selectors(context: &AuvContext) -> Result<(), ContextError> {
+  if let Some(device_id) = context.device_id.as_deref() {
+    DeviceSelector::parse_id(device_id)?;
+  }
+  if let Some(run_id) = context.run_id.as_deref() {
+    RunSelector::parse(run_id)?;
+  }
+  Ok(())
 }
 
 fn context_device_selector(context: &AuvContext) -> Option<DeviceSelector> {
@@ -565,30 +660,37 @@ fn context_device_selector(context: &AuvContext) -> Option<DeviceSelector> {
 }
 
 fn matching_devices<'a>(context: &AuvContext, devices: &'a [proto::Device]) -> Vec<&'a proto::Device> {
+  let selector = match (&context.device_id, &context.device_name) {
+    (Some(id), Some(name)) => Some(DeviceSelector::by_id_and_name(id, name.clone())),
+    (Some(id), None) => Some(DeviceSelector::by_id(id)),
+    (None, Some(name)) => Some(DeviceSelector::by_name(name.clone())),
+    (None, None) => None,
+  };
   devices
     .iter()
     .filter(|device| {
-      context
-        .device_id
+      selector
         .as_ref()
-        .is_none_or(|id| device.r#ref.as_ref().is_some_and(|reference| crate::resource_id_matches(&reference.device_id, id)))
+        .is_none_or(|selector| device.r#ref.as_ref().is_some_and(|reference| selector.matches_wire(&reference.device_id, &device.name)))
     })
-    .filter(|device| context.device_name.as_ref().is_none_or(|name| device.name == *name))
     .collect()
 }
 
 fn matching_run_ids(selector: &str, runs: &[proto::Run]) -> Vec<String> {
+  let Ok(selector) = RunSelector::parse(selector) else {
+    return Vec::new();
+  };
   runs
     .iter()
     .filter_map(|run| run.r#ref.as_ref().map(|reference| reference.run_id.as_str()))
-    .filter(|run_id| crate::resource_id_matches(run_id, selector))
+    .filter(|run_id| selector.matches_wire(run_id))
     .map(str::to_string)
     .collect()
 }
 
 fn context_matches_canonical_device(context: &AuvContext, device: &proto::Device) -> Result<(), ContextError> {
   if let Some(id) = context.device_id.as_deref()
-    && device.r#ref.as_ref().is_none_or(|reference| !crate::resource_id_matches(&reference.device_id, id))
+    && device.r#ref.as_ref().is_none_or(|reference| !DeviceSelector::by_id(id).matches_wire(&reference.device_id, &device.name))
   {
     return Err(ContextError::CanonicalDeviceMissing(id.to_string()));
   }
@@ -622,12 +724,14 @@ fn select_device(
   allowed: Option<&[proto::DeviceRef]>,
 ) -> Result<proto::Device, PlacementError> {
   let candidates = devices.iter().filter(|device| is_allowed(device, allowed)).collect::<Vec<_>>();
-  let by_id = match selector.id.as_deref() {
+  let by_id = match selector.id() {
     Some(id) => {
       let matches = candidates
         .iter()
         .copied()
-        .filter(|device| device.r#ref.as_ref().is_some_and(|reference| crate::resource_id_matches(&reference.device_id, id)))
+        .filter(|device| {
+          device.r#ref.as_ref().is_some_and(|reference| DeviceSelector::by_id(id).matches_wire(&reference.device_id, &device.name))
+        })
         .collect::<Vec<_>>();
       match matches.as_slice() {
         [] => return Err(PlacementError::Selection(format!("unknown or Run-ineligible Device ID {id:?}"))),
@@ -637,7 +741,7 @@ fn select_device(
     }
     None => None,
   };
-  let by_name = match selector.name.as_deref() {
+  let by_name = match selector.name() {
     Some(name) => {
       let matches = candidates.iter().copied().filter(|device| device.name == name).collect::<Vec<_>>();
       match matches.as_slice() {
@@ -671,12 +775,12 @@ fn select_device(
   Ok(selected.clone())
 }
 
-fn resolve_resource_id<'a>(kind: &str, selector: &str, candidates: impl Iterator<Item = &'a str>) -> Result<String, PlacementError> {
-  let matches = candidates.filter(|candidate| crate::resource_id_matches(candidate, selector)).collect::<Vec<_>>();
+fn resolve_run_id<'a>(selector: &RunSelector, candidates: impl Iterator<Item = &'a str>) -> Result<String, PlacementError> {
+  let matches = candidates.filter(|candidate| selector.matches_wire(candidate)).collect::<Vec<_>>();
   match matches.as_slice() {
-    [] => Err(PlacementError::Selection(format!("unknown {kind} ID {selector:?}"))),
+    [] => Err(PlacementError::Selection(format!("unknown Run ID {:?}", selector.as_str()))),
     [candidate] => Ok((*candidate).to_string()),
-    _ => Err(PlacementError::Selection(format!("{kind} ID prefix {selector:?} is ambiguous"))),
+    _ => Err(PlacementError::Selection(format!("Run ID prefix {:?} is ambiguous", selector.as_str()))),
   }
 }
 

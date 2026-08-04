@@ -4,16 +4,126 @@
 //! public hierarchy is independent of whether the daemon reaches a local child
 //! process or a paired remote Device.
 
+use auv_api_client::protocol::grpc::Client as GrpcClient;
 use auv_api_proto::auv::api::driver::macos::v1 as macos_proto;
 use auv_api_proto::auv::api::driver::v1 as proto;
-use auv_api_proto::auv::api::image::v1::NormalizedRect;
 
-use auv_api_client::protocol::grpc::Client as GrpcClient;
+use crate::error::ClientError;
+
+/// Message-size policy for Runner RPCs that carry raw image frames.
+///
+/// Tonic defaults decoded responses to 4 MiB, which is smaller than one
+/// ordinary desktop RGBA capture. Runner servers already use this project-wide
+/// limit; core and extension-owned generated clients must apply the same value.
+pub const IMAGE_RPC_MESSAGE_SIZE_LIMIT: usize = auv_api_proto::GRPC_MESSAGE_SIZE_UNLIMITED;
+
+/// Protocol-neutral failure from a routed Runner capability operation.
+#[derive(Debug, thiserror::Error)]
+pub enum CapabilityError {
+  /// The routed daemon client request failed.
+  #[error(transparent)]
+  Client(#[from] ClientError),
+  /// A domain input cannot be represented by the capability request.
+  #[error("Runner request is invalid: {0}")]
+  InvalidArgument(String),
+  /// The capability response violates its typed domain contract.
+  #[error("Runner response is invalid: {0}")]
+  InvalidResponse(String),
+}
+
+fn capability_status(status: tonic::Status) -> CapabilityError {
+  ClientError::from_status("Runner capability RPC", status).into()
+}
+
+impl CapabilityError {
+  /// Returns the protocol-neutral transport category when the failure came
+  /// from the remote capability service.
+  pub fn client_kind(&self) -> Option<crate::error::ClientErrorKind> {
+    match self {
+      Self::Client(error) => Some(error.kind()),
+      Self::InvalidArgument(_) | Self::InvalidResponse(_) => None,
+    }
+  }
+}
+
+/// A normalized rectangle whose coordinates are relative to an image.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NormalizedRegion {
+  /// Horizontal origin in normalized coordinates.
+  pub x: f64,
+  /// Vertical origin in normalized coordinates.
+  pub y: f64,
+  /// Normalized width.
+  pub width: f64,
+  /// Normalized height.
+  pub height: f64,
+}
+
+/// Selects a display by its canonical driver ID or exact name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DisplaySelector {
+  /// Select by canonical driver display identity.
+  Id(String),
+  /// Select by exact display name.
+  Name(String),
+}
+
+/// Typed result of finding text on a display.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DisplayTextRecognition {
+  /// Display used for recognition.
+  pub display: auv_driver::Display,
+  /// Query matches.
+  pub matches: auv_driver::OcrMatches,
+  /// Source capture used as evidence.
+  pub capture: auv_driver::Capture,
+}
+
+/// Typed result of finding text in a resolved window.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WindowTextRecognition {
+  /// Resolved source window.
+  pub window: auv_driver::Window,
+  /// Query matches.
+  pub matches: auv_driver::OcrMatches,
+  /// Source capture used as evidence.
+  pub capture: auv_driver::Capture,
+}
+
+/// Typed capture of a resolved window.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WindowCapture {
+  /// Resolved source window.
+  pub window: auv_driver::Window,
+  /// Captured pixels and bounds.
+  pub capture: auv_driver::Capture,
+}
+
+/// Typed result of a delivered screen-point click.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScreenPointClick {
+  /// Delivered screen point.
+  pub point: auv_driver::Point,
+  /// Typed input-delivery evidence.
+  pub action: auv_driver::InputActionResult,
+}
+
+/// Typed result of a delivered window-local click.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WindowPointClick {
+  /// Resolved target window.
+  pub window: auv_driver::Window,
+  /// Delivered window-local point.
+  pub point: auv_driver::WindowPoint,
+  /// Typed input-delivery evidence.
+  pub action: auv_driver::InputActionResult,
+}
 
 // Placement is selected by `Client`/`RunClient` before this route-bound
 // hierarchy is constructed. `Client::local()` is the explicit local-only
 // constraint; ordinary placement may resolve either a local or paired Device.
 
+/// Capability client routed to one RunnerClass within a Run.
 #[derive(Clone, Debug)]
 pub struct RunnerClient {
   client: GrpcClient,
@@ -21,9 +131,9 @@ pub struct RunnerClient {
 }
 
 impl RunnerClient {
-  pub(crate) fn new(client: GrpcClient, route: auv_api_client::RunnerRoute) -> Result<Self, tonic::Status> {
+  pub(crate) fn new(client: GrpcClient, route: auv_api_client::RunnerRoute) -> Result<Self, CapabilityError> {
     if route.runner_class.trim().is_empty() {
-      return Err(tonic::Status::invalid_argument("Runner route must include runner_class"));
+      return Err(CapabilityError::InvalidArgument("Runner route must include runner_class".to_string()));
     }
     Ok(Self { client, route })
   }
@@ -31,34 +141,43 @@ impl RunnerClient {
   /// Builds the routed transport for an application-owned generated protobuf
   /// client while keeping daemon lifecycle resources out of that application's
   /// messages and metadata.
-  pub fn transport(&self) -> Result<auv_api_client::RoutedTransport, tonic::Status> {
-    self.client.routed_transport(self.route.clone())
+  pub fn extension_transport(&self) -> Result<auv_api_client::RoutedTransport, CapabilityError> {
+    self.client.routed_transport(self.route.clone()).map_err(capability_status)
   }
 
+  fn transport(&self) -> Result<auv_api_client::RoutedTransport, CapabilityError> {
+    self.extension_transport()
+  }
+
+  /// Returns display observation and capture capabilities.
   pub fn displays(&self) -> DisplaysClient {
     DisplaysClient {
       runner: self.clone(),
     }
   }
 
+  /// Returns window observation and input capabilities.
   pub fn windows(&self) -> WindowsClient {
     WindowsClient {
       runner: self.clone(),
     }
   }
 
+  /// Returns global input-delivery capabilities.
   pub fn input(&self) -> InputClient {
     InputClient {
       runner: self.clone(),
     }
   }
 
+  /// Returns visual overlay capabilities.
   pub fn overlay(&self) -> OverlayClient {
     OverlayClient {
       runner: self.clone(),
     }
   }
 
+  /// Returns macOS-specific capabilities.
   pub fn macos(&self) -> MacosClient {
     MacosClient {
       runner: self.clone(),
@@ -68,54 +187,61 @@ impl RunnerClient {
   /// Runs OCR against a capture already obtained from this Runner.
   pub async fn recognize_text(
     &self,
-    capture: proto::CapturedFrame,
-    region: Option<NormalizedRect>,
+    capture: auv_driver::Capture,
+    region: Option<NormalizedRegion>,
     custom_words: Vec<String>,
     recognition_languages: Vec<String>,
-  ) -> Result<proto::RecognizeTextResponse, tonic::Status> {
-    Ok(
-      proto::text_recognition_service_client::TextRecognitionServiceClient::new(self.transport()?)
-        .recognize_text(proto::RecognizeTextRequest {
-          capture: Some(capture),
-          region,
-          custom_words,
-          recognition_languages,
-        })
-        .await?
-        .into_inner(),
-    )
+  ) -> Result<auv_driver::TextRecognition, CapabilityError> {
+    let response = proto::text_recognition_service_client::TextRecognitionServiceClient::new(self.transport()?)
+      .max_decoding_message_size(IMAGE_RPC_MESSAGE_SIZE_LIMIT)
+      .max_encoding_message_size(IMAGE_RPC_MESSAGE_SIZE_LIMIT)
+      .recognize_text(proto::RecognizeTextRequest {
+        capture: Some(capture_to_proto(capture)?),
+        region: region.map(normalized_region_to_proto),
+        custom_words,
+        recognition_languages,
+      })
+      .await
+      .map_err(capability_status)?
+      .into_inner();
+    text_recognition_from_proto(response)
   }
 }
 
+/// Visual overlay operations for one routed Runner.
 #[derive(Clone, Debug)]
 pub struct OverlayClient {
   runner: RunnerClient,
 }
 
 impl OverlayClient {
+  /// Shows or replaces the current overlay.
   pub async fn show(
     &self,
     overlay: &auv_driver_overlay_common::Overlay,
     options: auv_driver_overlay_common::ShowOptions,
-  ) -> Result<(), tonic::Status> {
+  ) -> Result<(), CapabilityError> {
     proto::overlay_service_client::OverlayServiceClient::new(self.runner.transport()?)
       .show_overlay(proto::ShowOverlayRequest {
         overlay: Some(overlay_to_proto(overlay)?),
         options: Some(overlay_options_to_proto(options)?),
       })
-      .await?;
+      .await
+      .map_err(capability_status)?;
     Ok(())
   }
 
-  pub async fn remove(&self) -> Result<(), tonic::Status> {
+  /// Removes the current overlay.
+  pub async fn remove(&self) -> Result<(), CapabilityError> {
     proto::overlay_service_client::OverlayServiceClient::new(self.runner.transport()?)
       .remove_overlay(proto::RemoveOverlayRequest {})
-      .await?;
+      .await
+      .map_err(capability_status)?;
     Ok(())
   }
 }
 
-fn overlay_to_proto(value: &auv_driver_overlay_common::Overlay) -> Result<proto::Overlay, tonic::Status> {
+fn overlay_to_proto(value: &auv_driver_overlay_common::Overlay) -> Result<proto::Overlay, CapabilityError> {
   use auv_driver_overlay_common::Layer;
   let layers = value
     .layers()
@@ -154,11 +280,11 @@ fn overlay_to_proto(value: &auv_driver_overlay_common::Overlay) -> Result<proto:
       };
       Ok(proto::OverlayLayer { layer: Some(layer) })
     })
-    .collect::<Result<Vec<_>, tonic::Status>>()?;
+    .collect::<Result<Vec<_>, CapabilityError>>()?;
   Ok(proto::Overlay { layers })
 }
 
-fn cursor_image_to_proto(value: &auv_driver_overlay_common::layers::CursorImage) -> Result<proto::CursorImage, tonic::Status> {
+fn cursor_image_to_proto(value: &auv_driver_overlay_common::layers::CursorImage) -> Result<proto::CursorImage, CapabilityError> {
   use auv_driver_overlay_common::layers::{BuiltInCursor, CursorImage};
   let image = match value {
     CursorImage::BuiltIn { variant } => proto::cursor_image::Image::BuiltIn(match variant {
@@ -167,7 +293,7 @@ fn cursor_image_to_proto(value: &auv_driver_overlay_common::layers::CursorImage)
       BuiltInCursor::You => proto::BuiltInCursor::You as i32,
     }),
     CursorImage::Svg { source } if source.len() <= 256 * 1024 => proto::cursor_image::Image::Svg(source.clone()),
-    CursorImage::Svg { .. } => return Err(tonic::Status::invalid_argument("cursor SVG exceeds 256 KiB")),
+    CursorImage::Svg { .. } => return Err(CapabilityError::InvalidArgument("cursor SVG exceeds 256 KiB".to_string())),
   };
   Ok(proto::CursorImage { image: Some(image) })
 }
@@ -221,10 +347,10 @@ fn status_style_to_proto(value: auv_driver_overlay_common::style::StatusStyle) -
   }
 }
 
-fn overlay_options_to_proto(value: auv_driver_overlay_common::ShowOptions) -> Result<proto::ShowOptions, tonic::Status> {
-  let duration = |value: std::time::Duration| -> Result<prost_types::Duration, tonic::Status> {
+fn overlay_options_to_proto(value: auv_driver_overlay_common::ShowOptions) -> Result<proto::ShowOptions, CapabilityError> {
+  let duration = |value: std::time::Duration| -> Result<prost_types::Duration, CapabilityError> {
     Ok(prost_types::Duration {
-      seconds: i64::try_from(value.as_secs()).map_err(|_| tonic::Status::invalid_argument("overlay duration is too large"))?,
+      seconds: i64::try_from(value.as_secs()).map_err(|_| CapabilityError::InvalidArgument("overlay duration is too large".to_string()))?,
       nanos: value.subsec_nanos() as i32,
     })
   };
@@ -243,211 +369,266 @@ fn overlay_options_to_proto(value: auv_driver_overlay_common::ShowOptions) -> Re
   })
 }
 
+/// Display observation and capture operations.
 #[derive(Clone, Debug)]
 pub struct DisplaysClient {
   runner: RunnerClient,
 }
 
 impl DisplaysClient {
-  pub async fn list(&self) -> Result<Vec<proto::Display>, tonic::Status> {
-    Ok(
-      proto::display_service_client::DisplayServiceClient::new(self.runner.transport()?)
-        .list_displays(proto::ListDisplaysRequest {})
-        .await?
-        .into_inner()
-        .displays,
-    )
+  /// Lists observed displays.
+  pub async fn list(&self) -> Result<auv_driver::ObservedDisplays, CapabilityError> {
+    let displays = proto::display_service_client::DisplayServiceClient::new(self.runner.transport()?)
+      .list_displays(proto::ListDisplaysRequest {})
+      .await
+      .map_err(capability_status)?
+      .into_inner()
+      .displays;
+    Ok(auv_driver::ObservedDisplays {
+      displays: displays.into_iter().map(display_from_proto).collect::<Result<_, _>>()?,
+    })
   }
 
-  pub async fn capture(&self, selector: Option<proto::DisplaySelector>) -> Result<proto::CaptureDisplayResponse, tonic::Status> {
-    Ok(
-      proto::capture_service_client::CaptureServiceClient::new(self.runner.transport()?)
-        .capture_display(proto::CaptureDisplayRequest { selector })
-        .await?
-        .into_inner(),
-    )
+  /// Captures one selected or primary display.
+  pub async fn capture(&self, selector: Option<DisplaySelector>) -> Result<auv_driver::DisplayCapture, CapabilityError> {
+    let response = proto::capture_service_client::CaptureServiceClient::new(self.runner.transport()?)
+      .max_decoding_message_size(IMAGE_RPC_MESSAGE_SIZE_LIMIT)
+      .max_encoding_message_size(IMAGE_RPC_MESSAGE_SIZE_LIMIT)
+      .capture_display(proto::CaptureDisplayRequest {
+        selector: selector.map(display_selector_to_proto),
+      })
+      .await
+      .map_err(capability_status)?
+      .into_inner();
+    Ok(auv_driver::DisplayCapture {
+      display: display_from_proto(required(response.display, "CaptureDisplay response omitted Display")?)?,
+      capture: capture_from_proto(required(response.capture, "CaptureDisplay response omitted CapturedFrame")?)?,
+    })
   }
 
+  /// Captures a screen-coordinate region on one display.
   pub async fn capture_region(
     &self,
-    region: proto::ScreenRect,
-    selector: Option<proto::DisplaySelector>,
-  ) -> Result<proto::CaptureRegionResponse, tonic::Status> {
-    Ok(
-      proto::capture_service_client::CaptureServiceClient::new(self.runner.transport()?)
-        .capture_region(proto::CaptureRegionRequest {
-          region: Some(region),
-          selector,
-        })
-        .await?
-        .into_inner(),
-    )
+    region: auv_driver::Rect,
+    selector: Option<DisplaySelector>,
+  ) -> Result<auv_driver::RegionCapture, CapabilityError> {
+    let response = proto::capture_service_client::CaptureServiceClient::new(self.runner.transport()?)
+      .max_decoding_message_size(IMAGE_RPC_MESSAGE_SIZE_LIMIT)
+      .max_encoding_message_size(IMAGE_RPC_MESSAGE_SIZE_LIMIT)
+      .capture_region(proto::CaptureRegionRequest {
+        region: Some(rect_to_proto(region)),
+        selector: selector.map(display_selector_to_proto),
+      })
+      .await
+      .map_err(capability_status)?
+      .into_inner();
+    Ok(auv_driver::RegionCapture {
+      display: display_from_proto(required(response.display, "CaptureRegion response omitted Display")?)?,
+      capture: capture_from_proto(required(response.capture, "CaptureRegion response omitted CapturedFrame")?)?,
+    })
   }
 
+  /// Finds text using default recognition options.
   pub async fn find_text(
     &self,
-    selector: Option<proto::DisplaySelector>,
+    selector: Option<DisplaySelector>,
     query: impl Into<String>,
-  ) -> Result<proto::FindDisplayTextResponse, tonic::Status> {
+  ) -> Result<DisplayTextRecognition, CapabilityError> {
     self.find_text_with(selector, query, FindTextOptions::default()).await
   }
 
+  /// Finds text using explicit recognition options.
   pub async fn find_text_with(
     &self,
-    selector: Option<proto::DisplaySelector>,
+    selector: Option<DisplaySelector>,
     query: impl Into<String>,
     options: FindTextOptions,
-  ) -> Result<proto::FindDisplayTextResponse, tonic::Status> {
-    Ok(
-      proto::text_recognition_service_client::TextRecognitionServiceClient::new(self.runner.transport()?)
-        .find_display_text(proto::FindDisplayTextRequest {
-          selector,
-          query: query.into(),
-          region: options.region,
-          custom_words: options.custom_words,
-          recognition_languages: options.recognition_languages,
-        })
-        .await?
-        .into_inner(),
-    )
+  ) -> Result<DisplayTextRecognition, CapabilityError> {
+    let response = proto::text_recognition_service_client::TextRecognitionServiceClient::new(self.runner.transport()?)
+      .max_decoding_message_size(IMAGE_RPC_MESSAGE_SIZE_LIMIT)
+      .max_encoding_message_size(IMAGE_RPC_MESSAGE_SIZE_LIMIT)
+      .find_display_text(proto::FindDisplayTextRequest {
+        selector: selector.map(display_selector_to_proto),
+        query: query.into(),
+        region: options.region.map(normalized_region_to_proto),
+        custom_words: options.custom_words,
+        recognition_languages: options.recognition_languages,
+      })
+      .await
+      .map_err(capability_status)?
+      .into_inner();
+    Ok(DisplayTextRecognition {
+      display: display_from_proto(required(response.display, "FindDisplayText response omitted Display")?)?,
+      matches: ocr_matches_from_proto(response.matches)?,
+      capture: capture_from_proto(required(response.capture, "FindDisplayText response omitted source capture")?)?,
+    })
   }
 }
 
+/// Window inventory and resolution operations.
 #[derive(Clone, Debug)]
 pub struct WindowsClient {
   runner: RunnerClient,
 }
 
 impl WindowsClient {
-  pub async fn list(&self) -> Result<Vec<proto::Window>, tonic::Status> {
-    Ok(
-      proto::window_service_client::WindowServiceClient::new(self.runner.transport()?)
-        .list_windows(proto::ListWindowsRequest {})
-        .await?
-        .into_inner()
-        .windows,
-    )
+  /// Lists observed windows.
+  pub async fn list(&self) -> Result<Vec<auv_driver::Window>, CapabilityError> {
+    let windows = proto::window_service_client::WindowServiceClient::new(self.runner.transport()?)
+      .list_windows(proto::ListWindowsRequest {})
+      .await
+      .map_err(capability_status)?
+      .into_inner()
+      .windows;
+    windows.into_iter().map(window_from_proto).collect()
   }
 
-  pub async fn resolve(&self, selector: proto::WindowSelector) -> Result<WindowClient, tonic::Status> {
+  /// Resolves one window and returns a route-bound child client.
+  pub async fn resolve(&self, selector: auv_driver::WindowSelector) -> Result<WindowClient, CapabilityError> {
     let window = proto::window_service_client::WindowServiceClient::new(self.runner.transport()?)
       .resolve_window(proto::ResolveWindowRequest {
-        selector: Some(selector),
+        selector: Some(window_selector_to_proto(selector)?),
       })
-      .await?
+      .await
+      .map_err(capability_status)?
       .into_inner()
       .window
-      .ok_or_else(|| tonic::Status::data_loss("ResolveWindow response omitted Window"))?;
+      .ok_or_else(|| CapabilityError::InvalidResponse("ResolveWindow response omitted Window".to_string()))?;
     let window_ref = window
       .r#ref
       .clone()
       .filter(|window_ref| !window_ref.window_id.trim().is_empty())
-      .ok_or_else(|| tonic::Status::internal("ResolveWindow response omitted WindowRef"))?;
+      .ok_or_else(|| CapabilityError::InvalidResponse("ResolveWindow response omitted WindowRef".to_string()))?;
+    let resource = window_from_proto(window)?;
     Ok(WindowClient {
       runner: self.runner.clone(),
-      window,
+      window: resource,
       window_ref,
     })
   }
 }
 
+/// Capability client bound to one resolved WindowRef.
 #[derive(Clone, Debug)]
 pub struct WindowClient {
   runner: RunnerClient,
-  window: proto::Window,
+  window: auv_driver::Window,
   window_ref: proto::WindowRef,
 }
 
 impl WindowClient {
-  pub fn resource(&self) -> &proto::Window {
+  /// Returns the resolved typed Window.
+  pub fn resource(&self) -> &auv_driver::Window {
     &self.window
   }
 
-  pub fn reference(&self) -> &proto::WindowRef {
-    &self.window_ref
+  /// Returns the stable WindowRef retained by this child client.
+  pub fn reference(&self) -> &auv_driver::WindowRef {
+    &self.window.reference
   }
 
-  pub async fn capture(&self) -> Result<proto::CaptureWindowResponse, tonic::Status> {
-    Ok(
-      proto::capture_service_client::CaptureServiceClient::new(self.runner.transport()?)
-        .capture_window(proto::CaptureWindowRequest {
-          window: Some(self.window_ref.clone()),
-        })
-        .await?
-        .into_inner(),
-    )
+  /// Captures the resolved window.
+  pub async fn capture(&self) -> Result<WindowCapture, CapabilityError> {
+    let response = proto::capture_service_client::CaptureServiceClient::new(self.runner.transport()?)
+      .max_decoding_message_size(IMAGE_RPC_MESSAGE_SIZE_LIMIT)
+      .max_encoding_message_size(IMAGE_RPC_MESSAGE_SIZE_LIMIT)
+      .capture_window(proto::CaptureWindowRequest {
+        window: Some(self.window_ref.clone()),
+      })
+      .await
+      .map_err(capability_status)?
+      .into_inner();
+    Ok(WindowCapture {
+      window: window_from_proto(required(response.window, "CaptureWindow response omitted Window")?)?,
+      capture: capture_from_proto(required(response.capture, "CaptureWindow response omitted CapturedFrame")?)?,
+    })
   }
 
-  pub async fn find_text(&self, query: impl Into<String>) -> Result<proto::FindWindowTextResponse, tonic::Status> {
+  /// Finds text using default recognition options.
+  pub async fn find_text(&self, query: impl Into<String>) -> Result<WindowTextRecognition, CapabilityError> {
     self.find_text_with(query, FindTextOptions::default()).await
   }
 
-  pub async fn find_text_with(
-    &self,
-    query: impl Into<String>,
-    options: FindTextOptions,
-  ) -> Result<proto::FindWindowTextResponse, tonic::Status> {
-    Ok(
-      proto::text_recognition_service_client::TextRecognitionServiceClient::new(self.runner.transport()?)
-        .find_window_text(proto::FindWindowTextRequest {
-          window: Some(self.window_ref.clone()),
-          query: query.into(),
-          region: options.region,
-          custom_words: options.custom_words,
-          recognition_languages: options.recognition_languages,
-        })
-        .await?
-        .into_inner(),
-    )
+  /// Finds text using explicit recognition options.
+  pub async fn find_text_with(&self, query: impl Into<String>, options: FindTextOptions) -> Result<WindowTextRecognition, CapabilityError> {
+    let response = proto::text_recognition_service_client::TextRecognitionServiceClient::new(self.runner.transport()?)
+      .max_decoding_message_size(IMAGE_RPC_MESSAGE_SIZE_LIMIT)
+      .max_encoding_message_size(IMAGE_RPC_MESSAGE_SIZE_LIMIT)
+      .find_window_text(proto::FindWindowTextRequest {
+        window: Some(self.window_ref.clone()),
+        query: query.into(),
+        region: options.region.map(normalized_region_to_proto),
+        custom_words: options.custom_words,
+        recognition_languages: options.recognition_languages,
+      })
+      .await
+      .map_err(capability_status)?
+      .into_inner();
+    Ok(WindowTextRecognition {
+      window: window_from_proto(required(response.window, "FindWindowText response omitted Window")?)?,
+      matches: ocr_matches_from_proto(response.matches)?,
+      capture: capture_from_proto(required(response.capture, "FindWindowText response omitted source capture")?)?,
+    })
   }
 
-  pub async fn click(
-    &self,
-    point: proto::WindowPoint,
-    options: Option<proto::ClickOptions>,
-  ) -> Result<proto::ClickWindowPointResponse, tonic::Status> {
-    Ok(
-      proto::input_service_client::InputServiceClient::new(self.runner.transport()?)
-        .click_window_point(proto::ClickWindowPointRequest {
-          window: Some(self.window_ref.clone()),
-          point: Some(point),
-          options,
-        })
-        .await?
-        .into_inner(),
-    )
+  /// Delivers a click in window-local coordinates.
+  pub async fn click(&self, point: auv_driver::WindowPoint, options: auv_driver::ClickOptions) -> Result<WindowPointClick, CapabilityError> {
+    let response = proto::input_service_client::InputServiceClient::new(self.runner.transport()?)
+      .click_window_point(proto::ClickWindowPointRequest {
+        window: Some(self.window_ref.clone()),
+        point: Some(proto::WindowPoint {
+          x: point.point().x,
+          y: point.point().y,
+        }),
+        options: Some(click_options_to_proto(options)?),
+      })
+      .await
+      .map_err(capability_status)?
+      .into_inner();
+    let point = required(response.point, "ClickWindowPoint response omitted WindowPoint")?;
+    Ok(WindowPointClick {
+      window: window_from_proto(required(response.window, "ClickWindowPoint response omitted Window")?)?,
+      point: auv_driver::WindowPoint::new(point.x, point.y),
+      action: input_action_result_from_proto(required(response.action, "ClickWindowPoint response omitted InputActionResult")?)?,
+    })
   }
 }
 
+/// Global input-delivery operations.
 #[derive(Clone, Debug)]
 pub struct InputClient {
   runner: RunnerClient,
 }
 
+/// macOS-specific capability groups.
 #[derive(Clone, Debug)]
 pub struct MacosClient {
   runner: RunnerClient,
 }
 
 impl MacosClient {
+  /// Returns permission inspection operations.
   pub fn permissions(&self) -> PermissionClient {
     PermissionClient {
       runner: self.runner.clone(),
     }
   }
 
+  /// Returns system-wide media-control operations.
   pub fn media(&self) -> MediaControlClient {
     MediaControlClient {
       runner: self.runner.clone(),
     }
   }
 
+  /// Returns application activation operations.
   pub fn applications(&self) -> ApplicationClient {
     ApplicationClient {
       runner: self.runner.clone(),
     }
   }
 
+  /// Returns accessibility operations.
   pub fn accessibility(&self) -> AccessibilityClient {
     AccessibilityClient {
       runner: self.runner.clone(),
@@ -455,28 +636,33 @@ impl MacosClient {
   }
 }
 
+/// macOS permission inspection operations.
 #[derive(Clone, Debug)]
 pub struct PermissionClient {
   runner: RunnerClient,
 }
 
+/// macOS system-wide media-control operations.
 #[derive(Clone, Debug)]
 pub struct MediaControlClient {
   runner: RunnerClient,
 }
 
+/// macOS application lifecycle operations.
 #[derive(Clone, Debug)]
 pub struct ApplicationClient {
   runner: RunnerClient,
 }
 
+/// macOS accessibility operations.
 #[derive(Clone, Debug)]
 pub struct AccessibilityClient {
   runner: RunnerClient,
 }
 
 impl AccessibilityClient {
-  pub async fn focus_text(&self, options: auv_driver::FocusTextOptions) -> Result<auv_driver::AxFocusResult, tonic::Status> {
+  /// Focuses a text element using typed accessibility selection.
+  pub async fn focus_text(&self, options: auv_driver::FocusTextOptions) -> Result<auv_driver::AxFocusResult, CapabilityError> {
     let selector = match options.selector {
       auv_driver::AxTextSelector::Query(query) => macos_proto::focus_text_request::Selector::Query(query),
       auv_driver::AxTextSelector::Path(path) => macos_proto::focus_text_request::Selector::Path(path),
@@ -487,16 +673,17 @@ impl AccessibilityClient {
         selector: Some(selector),
         expected_role: options.expected_role,
       })
-      .await?
+      .await
+      .map_err(capability_status)?
       .into_inner();
     ax_focus_result_from_proto(response)
   }
 }
 
-pub fn ax_focus_result_from_proto(response: macos_proto::FocusTextResponse) -> Result<auv_driver::AxFocusResult, tonic::Status> {
-  let result = response.result.ok_or_else(|| tonic::Status::data_loss("FocusText response omitted AxFocusResult"))?;
+fn ax_focus_result_from_proto(response: macos_proto::FocusTextResponse) -> Result<auv_driver::AxFocusResult, CapabilityError> {
+  let result = required(response.result, "FocusText response omitted AxFocusResult")?;
   if result.app.trim().is_empty() || result.path.trim().is_empty() || result.role.trim().is_empty() {
-    return Err(tonic::Status::data_loss("FocusText response omitted resolved AX identity"));
+    return Err(CapabilityError::InvalidResponse("FocusText response omitted resolved AX identity".to_string()));
   }
   Ok(auv_driver::AxFocusResult {
     app: result.app,
@@ -506,17 +693,17 @@ pub fn ax_focus_result_from_proto(response: macos_proto::FocusTextResponse) -> R
     title: result.title,
     value: result.value,
     query: result.query,
-    input_action_result: input_action_result_from_proto(
-      result.action.ok_or_else(|| tonic::Status::data_loss("FocusText response omitted InputActionResult"))?,
-    )?,
+    input_action_result: input_action_result_from_proto(required(result.action, "FocusText response omitted InputActionResult")?)?,
   })
 }
 
-fn input_action_result_from_proto(action: proto::InputActionResult) -> Result<auv_driver::InputActionResult, tonic::Status> {
-  fn path(value: i32) -> Result<auv_driver::InputDeliveryPath, tonic::Status> {
+/// Converts the Driver Runner wire result into the shared typed input-delivery
+/// contract used by app-owned operations.
+fn input_action_result_from_proto(action: proto::InputActionResult) -> Result<auv_driver::InputActionResult, CapabilityError> {
+  fn path(value: i32) -> Result<auv_driver::InputDeliveryPath, CapabilityError> {
     use proto::InputDeliveryPath as Wire;
-    Ok(match Wire::try_from(value).map_err(|_| tonic::Status::data_loss("unknown InputDeliveryPath"))? {
-      Wire::Unspecified => return Err(tonic::Status::data_loss("InputDeliveryPath was unspecified")),
+    Ok(match Wire::try_from(value).map_err(|_| CapabilityError::InvalidResponse("unknown InputDeliveryPath".to_string()))? {
+      Wire::Unspecified => return Err(CapabilityError::InvalidResponse("InputDeliveryPath was unspecified".to_string())),
       Wire::Noop => auv_driver::InputDeliveryPath::Noop,
       Wire::AxPress => auv_driver::InputDeliveryPath::AxPress,
       Wire::AxFocus => auv_driver::InputDeliveryPath::AxFocus,
@@ -532,10 +719,10 @@ fn input_action_result_from_proto(action: proto::InputActionResult) -> Result<au
       Wire::Unsupported => auv_driver::InputDeliveryPath::Unsupported,
     })
   }
-  fn disturbance(value: i32) -> Result<auv_driver::DisturbanceLevel, tonic::Status> {
+  fn disturbance(value: i32) -> Result<auv_driver::DisturbanceLevel, CapabilityError> {
     use proto::DisturbanceLevel as Wire;
-    Ok(match Wire::try_from(value).map_err(|_| tonic::Status::data_loss("unknown DisturbanceLevel"))? {
-      Wire::Unspecified => return Err(tonic::Status::data_loss("DisturbanceLevel was unspecified")),
+    Ok(match Wire::try_from(value).map_err(|_| CapabilityError::InvalidResponse("unknown DisturbanceLevel".to_string()))? {
+      Wire::Unspecified => return Err(CapabilityError::InvalidResponse("DisturbanceLevel was unspecified".to_string())),
       Wire::None => auv_driver::DisturbanceLevel::None,
       Wire::Temporary => auv_driver::DisturbanceLevel::Temporary,
       Wire::Foreground => auv_driver::DisturbanceLevel::Foreground,
@@ -555,7 +742,7 @@ fn input_action_result_from_proto(action: proto::InputActionResult) -> Result<au
           message: attempt.message,
         })
       })
-      .collect::<Result<Vec<_>, tonic::Status>>()?,
+      .collect::<Result<Vec<_>, CapabilityError>>()?,
     // TODO(input-action-result-wire-verification): the current protobuf shape
     // cannot carry semantic verification. Keep remote projections false until
     // an owner-approved producer/reader schema slice adds that evidence.
@@ -564,39 +751,41 @@ fn input_action_result_from_proto(action: proto::InputActionResult) -> Result<au
     focus_disturbance: disturbance(action.focus_disturbance)?,
     clipboard_disturbance: disturbance(action.clipboard_disturbance)?,
   };
-  action.validate().map_err(|error| tonic::Status::data_loss(error.to_string()))?;
+  action.validate().map_err(CapabilityError::InvalidResponse)?;
   Ok(action)
 }
 
 impl ApplicationClient {
+  /// Activates one application and returns explicit foreground verification.
   pub async fn activate_bundle_id(
     &self,
     bundle_id: impl Into<String>,
-    settle: Option<prost_types::Duration>,
-  ) -> Result<auv_driver::ApplicationActivationResult, tonic::Status> {
+    settle: std::time::Duration,
+  ) -> Result<auv_driver::ApplicationActivationResult, CapabilityError> {
     let response = macos_proto::application_service_client::ApplicationServiceClient::new(self.runner.transport()?)
       .activate_bundle_id(macos_proto::ActivateBundleIdRequest {
         bundle_id: bundle_id.into(),
-        settle,
+        settle: Some(duration_to_proto(settle)?),
       })
-      .await?
+      .await
+      .map_err(capability_status)?
       .into_inner();
     activation_result_from_proto(response)
   }
 }
 
-pub fn activation_result_from_proto(
+fn activation_result_from_proto(
   response: macos_proto::ActivateBundleIdResponse,
-) -> Result<auv_driver::ApplicationActivationResult, tonic::Status> {
+) -> Result<auv_driver::ApplicationActivationResult, CapabilityError> {
   use macos_proto::application_activation_verification::Verification;
 
   if response.requested_bundle_id.trim().is_empty() {
-    return Err(tonic::Status::data_loss("ActivateBundleId response omitted requested_bundle_id"));
+    return Err(CapabilityError::InvalidResponse("ActivateBundleId response omitted requested_bundle_id".to_string()));
   }
   let verification = response
     .verification
     .and_then(|verification| verification.verification)
-    .ok_or_else(|| tonic::Status::data_loss("ActivateBundleId response omitted verification"))?;
+    .ok_or_else(|| CapabilityError::InvalidResponse("ActivateBundleId response omitted verification".to_string()))?;
   let verification = match verification {
     Verification::VerifiedForeground(value) if !value.observed_bundle_id.trim().is_empty() => {
       auv_driver::ApplicationActivationVerification::VerifiedForeground {
@@ -611,7 +800,7 @@ pub fn activation_result_from_proto(
     Verification::Unavailable(value) if !value.reason.trim().is_empty() => auv_driver::ApplicationActivationVerification::Unavailable {
       reason: value.reason,
     },
-    _ => return Err(tonic::Status::data_loss("ActivateBundleId response contained empty verification evidence")),
+    _ => return Err(CapabilityError::InvalidResponse("ActivateBundleId response contained empty verification evidence".to_string())),
   };
   Ok(auv_driver::ApplicationActivationResult {
     requested_bundle_id: response.requested_bundle_id,
@@ -620,68 +809,80 @@ pub fn activation_result_from_proto(
 }
 
 impl MediaControlClient {
-  pub async fn now_playing(&self) -> Result<auv_media_macos::NowPlayingState, tonic::Status> {
+  /// Reads the current system-wide now-playing state.
+  pub async fn now_playing(&self) -> Result<auv_media_macos::NowPlayingState, CapabilityError> {
     let response = macos_proto::media_control_service_client::MediaControlServiceClient::new(self.runner.transport()?)
       .get_now_playing(macos_proto::GetNowPlayingRequest {})
-      .await?
+      .await
+      .map_err(capability_status)?
       .into_inner();
     now_playing_from_proto(response)
   }
 
-  pub async fn play(&self) -> Result<auv_media_macos::output::MediaControlOutcome, tonic::Status> {
+  /// Requests playback and returns before/after evidence.
+  pub async fn play(&self) -> Result<auv_media_macos::output::MediaControlOutcome, CapabilityError> {
     let response = macos_proto::media_control_service_client::MediaControlServiceClient::new(self.runner.transport()?)
       .play(macos_proto::PlayRequest {})
-      .await?
+      .await
+      .map_err(capability_status)?
       .into_inner();
     media_control_outcome_from_proto(response.outcome, "play")
   }
 
-  pub async fn pause(&self) -> Result<auv_media_macos::output::MediaControlOutcome, tonic::Status> {
+  /// Requests pause and returns before/after evidence.
+  pub async fn pause(&self) -> Result<auv_media_macos::output::MediaControlOutcome, CapabilityError> {
     let response = macos_proto::media_control_service_client::MediaControlServiceClient::new(self.runner.transport()?)
       .pause(macos_proto::PauseRequest {})
-      .await?
+      .await
+      .map_err(capability_status)?
       .into_inner();
     media_control_outcome_from_proto(response.outcome, "pause")
   }
 
-  pub async fn toggle_play_pause(&self) -> Result<auv_media_macos::output::MediaControlOutcome, tonic::Status> {
+  /// Toggles playback and returns before/after evidence.
+  pub async fn toggle_play_pause(&self) -> Result<auv_media_macos::output::MediaControlOutcome, CapabilityError> {
     let response = macos_proto::media_control_service_client::MediaControlServiceClient::new(self.runner.transport()?)
       .toggle_play_pause(macos_proto::TogglePlayPauseRequest {})
-      .await?
+      .await
+      .map_err(capability_status)?
       .into_inner();
     media_control_outcome_from_proto(response.outcome, "toggle")
   }
 
-  pub async fn next_track(&self) -> Result<auv_media_macos::output::MediaControlOutcome, tonic::Status> {
+  /// Advances to the next track and returns before/after evidence.
+  pub async fn next_track(&self) -> Result<auv_media_macos::output::MediaControlOutcome, CapabilityError> {
     let response = macos_proto::media_control_service_client::MediaControlServiceClient::new(self.runner.transport()?)
       .next_track(macos_proto::NextTrackRequest {})
-      .await?
+      .await
+      .map_err(capability_status)?
       .into_inner();
     media_control_outcome_from_proto(response.outcome, "next")
   }
 
-  pub async fn previous_track(&self) -> Result<auv_media_macos::output::MediaControlOutcome, tonic::Status> {
+  /// Returns to the previous track and returns before/after evidence.
+  pub async fn previous_track(&self) -> Result<auv_media_macos::output::MediaControlOutcome, CapabilityError> {
     let response = macos_proto::media_control_service_client::MediaControlServiceClient::new(self.runner.transport()?)
       .previous_track(macos_proto::PreviousTrackRequest {})
-      .await?
+      .await
+      .map_err(capability_status)?
       .into_inner();
     media_control_outcome_from_proto(response.outcome, "previous")
   }
 }
 
-pub fn now_playing_from_proto(response: macos_proto::GetNowPlayingResponse) -> Result<auv_media_macos::NowPlayingState, tonic::Status> {
-  let state = response.state.ok_or_else(|| tonic::Status::data_loss("GetNowPlaying response omitted state"))?;
+fn now_playing_from_proto(response: macos_proto::GetNowPlayingResponse) -> Result<auv_media_macos::NowPlayingState, CapabilityError> {
+  let state = required(response.state, "GetNowPlaying response omitted state")?;
   now_playing_state_from_proto(state)
 }
 
-fn now_playing_state_from_proto(state: macos_proto::NowPlayingState) -> Result<auv_media_macos::NowPlayingState, tonic::Status> {
+fn now_playing_state_from_proto(state: macos_proto::NowPlayingState) -> Result<auv_media_macos::NowPlayingState, CapabilityError> {
   for (field, value) in [
     ("duration_seconds", state.duration_seconds),
     ("elapsed_seconds", state.elapsed_seconds),
     ("playback_rate", state.playback_rate),
   ] {
     if value.is_some_and(|value| !value.is_finite()) {
-      return Err(tonic::Status::data_loss(format!("GetNowPlaying returned non-finite {field}")));
+      return Err(CapabilityError::InvalidResponse(format!("GetNowPlaying returned non-finite {field}")));
     }
   }
   Ok(auv_media_macos::NowPlayingState {
@@ -703,12 +904,10 @@ fn now_playing_state_from_proto(state: macos_proto::NowPlayingState) -> Result<a
 fn media_control_outcome_from_proto(
   outcome: Option<macos_proto::MediaControlOutcome>,
   command: &'static str,
-) -> Result<auv_media_macos::output::MediaControlOutcome, tonic::Status> {
-  let outcome = outcome.ok_or_else(|| tonic::Status::data_loss("media control response omitted outcome"))?;
-  let before =
-    now_playing_state_from_proto(outcome.before.ok_or_else(|| tonic::Status::data_loss("media control outcome omitted before state"))?)?;
-  let after =
-    now_playing_state_from_proto(outcome.after.ok_or_else(|| tonic::Status::data_loss("media control outcome omitted after state"))?)?;
+) -> Result<auv_media_macos::output::MediaControlOutcome, CapabilityError> {
+  let outcome = required(outcome, "media control response omitted outcome")?;
+  let before = now_playing_state_from_proto(required(outcome.before, "media control outcome omitted before state")?)?;
+  let after = now_playing_state_from_proto(required(outcome.after, "media control outcome omitted after state")?)?;
   Ok(auv_media_macos::output::MediaControlOutcome {
     command,
     before: auv_media_macos::output::build_now_playing_output(&before),
@@ -718,16 +917,18 @@ fn media_control_outcome_from_proto(
 }
 
 impl PermissionClient {
-  pub async fn probe(&self) -> Result<auv_driver::PermissionProbe, tonic::Status> {
+  /// Probes the macOS permissions required by local driver capabilities.
+  pub async fn probe(&self) -> Result<auv_driver::PermissionProbe, CapabilityError> {
     let response = macos_proto::permission_service_client::PermissionServiceClient::new(self.runner.transport()?)
       .probe_permissions(macos_proto::ProbePermissionsRequest {})
-      .await?
+      .await
+      .map_err(capability_status)?
       .into_inner();
     permission_probe_from_proto(response)
   }
 }
 
-pub fn permission_probe_from_proto(response: macos_proto::ProbePermissionsResponse) -> Result<auv_driver::PermissionProbe, tonic::Status> {
+fn permission_probe_from_proto(response: macos_proto::ProbePermissionsResponse) -> Result<auv_driver::PermissionProbe, CapabilityError> {
   Ok(auv_driver::PermissionProbe {
     screen_recording: permission_status_from_proto(response.screen_recording, "screen_recording")?,
     screen_capture_kit: permission_status_from_proto(response.screen_capture_kit, "screen_capture_kit")?,
@@ -736,88 +937,317 @@ pub fn permission_probe_from_proto(response: macos_proto::ProbePermissionsRespon
   })
 }
 
-fn permission_status_from_proto(value: i32, field: &'static str) -> Result<auv_driver::PermissionStatus, tonic::Status> {
+fn permission_status_from_proto(value: i32, field: &'static str) -> Result<auv_driver::PermissionStatus, CapabilityError> {
   match macos_proto::PermissionStatus::try_from(value) {
     Ok(macos_proto::PermissionStatus::Granted) => Ok(auv_driver::PermissionStatus::Granted),
     Ok(macos_proto::PermissionStatus::Missing) => Ok(auv_driver::PermissionStatus::Missing),
     Ok(macos_proto::PermissionStatus::Unknown) => Ok(auv_driver::PermissionStatus::Unknown),
     Ok(macos_proto::PermissionStatus::Unspecified) | Err(_) => {
-      Err(tonic::Status::data_loss(format!("ProbePermissions returned invalid {field} status")))
+      Err(CapabilityError::InvalidResponse(format!("ProbePermissions returned invalid {field} status")))
     }
   }
 }
 
 impl InputClient {
-  pub async fn click_screen_point(
-    &self,
-    point: proto::ScreenPoint,
-    options: Option<proto::ScreenClickOptions>,
-  ) -> Result<proto::ClickScreenPointResponse, tonic::Status> {
-    Ok(
-      proto::input_service_client::InputServiceClient::new(self.runner.transport()?)
-        .click_screen_point(proto::ClickScreenPointRequest {
-          point: Some(point),
-          options,
-        })
-        .await?
-        .into_inner(),
-    )
+  /// Delivers a click in screen coordinates.
+  pub async fn click_screen_point(&self, point: auv_driver::Point, click: auv_driver::Click) -> Result<ScreenPointClick, CapabilityError> {
+    let response = proto::input_service_client::InputServiceClient::new(self.runner.transport()?)
+      .click_screen_point(proto::ClickScreenPointRequest {
+        point: Some(proto::ScreenPoint {
+          x: point.x,
+          y: point.y,
+        }),
+        options: Some(proto::ScreenClickOptions {
+          click: Some(click_to_proto(click)?),
+        }),
+      })
+      .await
+      .map_err(capability_status)?
+      .into_inner();
+    let point = required(response.point, "ClickScreenPoint response omitted ScreenPoint")?;
+    Ok(ScreenPointClick {
+      point: auv_driver::Point::new(point.x, point.y),
+      action: input_action_result_from_proto(required(response.action, "ClickScreenPoint response omitted InputActionResult")?)?,
+    })
   }
 
+  /// Types text using the supplied delivery policy.
   pub async fn type_text(
     &self,
     text: impl Into<String>,
-    options: Option<proto::TypeTextOptions>,
-  ) -> Result<proto::TypeTextResponse, tonic::Status> {
-    Ok(
-      proto::input_service_client::InputServiceClient::new(self.runner.transport()?)
-        .type_text(proto::TypeTextRequest {
-          text: text.into(),
-          options,
-        })
-        .await?
-        .into_inner(),
-    )
+    options: auv_driver::TypeTextOptions,
+  ) -> Result<auv_driver::InputActionResult, CapabilityError> {
+    let response = proto::input_service_client::InputServiceClient::new(self.runner.transport()?)
+      .type_text(proto::TypeTextRequest {
+        text: text.into(),
+        options: Some(type_text_options_to_proto(options)?),
+      })
+      .await
+      .map_err(capability_status)?
+      .into_inner();
+    input_action_result_from_proto(required(response.action, "TypeText response omitted InputActionResult")?)
   }
 
-  pub async fn paste_text(
-    &self,
-    text: impl Into<String>,
-    options: Option<proto::PasteTextOptions>,
-  ) -> Result<proto::PasteTextResponse, tonic::Status> {
-    Ok(
-      proto::input_service_client::InputServiceClient::new(self.runner.transport()?)
-        .paste_text(proto::PasteTextRequest {
-          text: text.into(),
-          options,
-        })
-        .await?
-        .into_inner(),
-    )
+  /// Pastes text using the supplied clipboard policy.
+  pub async fn paste_text(&self, options: auv_driver::PasteTextOptions) -> Result<auv_driver::InputActionResult, CapabilityError> {
+    let text = options.text.clone();
+    let response = proto::input_service_client::InputServiceClient::new(self.runner.transport()?)
+      .paste_text(proto::PasteTextRequest {
+        text,
+        options: Some(paste_text_options_to_proto(options)?),
+      })
+      .await
+      .map_err(capability_status)?
+      .into_inner();
+    input_action_result_from_proto(required(response.action, "PasteText response omitted InputActionResult")?)
   }
 
-  pub async fn press_key(
-    &self,
-    key: impl Into<String>,
-    settle: Option<prost_types::Duration>,
-  ) -> Result<proto::PressKeyResponse, tonic::Status> {
-    Ok(
-      proto::input_service_client::InputServiceClient::new(self.runner.transport()?)
-        .press_key(proto::PressKeyRequest {
-          key: key.into(),
-          settle,
-        })
-        .await?
-        .into_inner(),
-    )
+  /// Delivers one key press.
+  pub async fn press_key(&self, options: auv_driver::KeyPressOptions) -> Result<auv_driver::InputActionResult, CapabilityError> {
+    let response = proto::input_service_client::InputServiceClient::new(self.runner.transport()?)
+      .press_key(proto::PressKeyRequest {
+        key: options.key,
+        settle: Some(duration_to_proto(options.settle)?),
+      })
+      .await
+      .map_err(capability_status)?
+      .into_inner();
+    input_action_result_from_proto(required(response.action, "PressKey response omitted InputActionResult")?)
   }
 }
 
+/// Optional OCR configuration shared by display and window searches.
 #[derive(Clone, Debug, Default)]
 pub struct FindTextOptions {
-  pub region: Option<NormalizedRect>,
+  /// Optional normalized search region.
+  pub region: Option<NormalizedRegion>,
+  /// Extra recognition vocabulary.
   pub custom_words: Vec<String>,
+  /// Ordered recognition language identifiers.
   pub recognition_languages: Vec<String>,
+}
+
+fn required<T>(value: Option<T>, message: &'static str) -> Result<T, CapabilityError> {
+  value.ok_or_else(|| CapabilityError::InvalidResponse(message.to_string()))
+}
+
+fn duration_to_proto(value: std::time::Duration) -> Result<prost_types::Duration, CapabilityError> {
+  Ok(prost_types::Duration {
+    seconds: i64::try_from(value.as_secs())
+      .map_err(|_| CapabilityError::InvalidArgument("duration exceeds the protocol range".to_string()))?,
+    nanos: i32::try_from(value.subsec_nanos()).expect("subsecond nanoseconds fit i32"),
+  })
+}
+
+fn click_to_proto(value: auv_driver::Click) -> Result<proto::Click, CapabilityError> {
+  let (count, interval) = match value {
+    auv_driver::Click::Single => (1, None),
+    auv_driver::Click::Double { interval } => (2, Some(duration_to_proto(interval)?)),
+    auv_driver::Click::Repeated { count, interval } => (u32::from(count), Some(duration_to_proto(interval)?)),
+  };
+  if count > 1 && interval.as_ref().is_none_or(|value| value.seconds == 0 && value.nanos == 0) {
+    return Err(CapabilityError::InvalidArgument("repeated click interval must be positive".to_string()));
+  }
+  Ok(proto::Click { count, interval })
+}
+
+fn input_policy_to_proto(value: auv_driver::InputPolicy) -> proto::InputPolicy {
+  match value {
+    auv_driver::InputPolicy::BackgroundOnly => proto::InputPolicy::BackgroundOnly,
+    auv_driver::InputPolicy::BackgroundPreferred => proto::InputPolicy::BackgroundPreferred,
+    auv_driver::InputPolicy::ForegroundPreferred => proto::InputPolicy::ForegroundPreferred,
+  }
+}
+
+fn text_submit_to_proto(value: auv_driver::TextSubmit) -> proto::TextSubmit {
+  match value {
+    auv_driver::TextSubmit::No => proto::TextSubmit::None,
+    auv_driver::TextSubmit::Return => proto::TextSubmit::Return,
+    auv_driver::TextSubmit::Search => proto::TextSubmit::Search,
+    auv_driver::TextSubmit::Done => proto::TextSubmit::Done,
+    auv_driver::TextSubmit::Go => proto::TextSubmit::Go,
+  }
+}
+
+fn click_options_to_proto(value: auv_driver::ClickOptions) -> Result<proto::ClickOptions, CapabilityError> {
+  Ok(proto::ClickOptions {
+    policy: input_policy_to_proto(value.policy) as i32,
+    click: Some(click_to_proto(value.click)?),
+    window_strategy: match value.window_strategy {
+      auv_driver::WindowClickStrategy::ChromiumCompatible => proto::WindowClickStrategy::ChromiumCompatible,
+      auv_driver::WindowClickStrategy::PidTargeted => proto::WindowClickStrategy::PidTargeted,
+    } as i32,
+  })
+}
+
+fn type_text_options_to_proto(value: auv_driver::TypeTextOptions) -> Result<proto::TypeTextOptions, CapabilityError> {
+  Ok(proto::TypeTextOptions {
+    policy: input_policy_to_proto(value.policy) as i32,
+    replace_existing: value.replace_existing,
+    submit: text_submit_to_proto(value.submit) as i32,
+    inter_char_delay: Some(duration_to_proto(value.inter_char_delay)?),
+    allow_clipboard_fallback: value.allow_clipboard_fallback,
+    settle: Some(duration_to_proto(value.settle)?),
+  })
+}
+
+fn paste_text_options_to_proto(value: auv_driver::PasteTextOptions) -> Result<proto::PasteTextOptions, CapabilityError> {
+  Ok(proto::PasteTextOptions {
+    replace_existing: value.replace_existing,
+    submit: text_submit_to_proto(value.submit) as i32,
+    settle: Some(duration_to_proto(value.settle)?),
+  })
+}
+
+fn rect_to_proto(value: auv_driver::Rect) -> proto::ScreenRect {
+  proto::ScreenRect {
+    x: value.origin.x,
+    y: value.origin.y,
+    width: value.size.width,
+    height: value.size.height,
+  }
+}
+
+fn normalized_region_to_proto(value: NormalizedRegion) -> auv_api_proto::auv::api::image::v1::NormalizedRect {
+  auv_api_proto::auv::api::image::v1::NormalizedRect {
+    x: value.x,
+    y: value.y,
+    width: value.width,
+    height: value.height,
+  }
+}
+
+fn display_selector_to_proto(value: DisplaySelector) -> proto::DisplaySelector {
+  let selector = match value {
+    DisplaySelector::Id(display_id) => proto::display_selector::Selector::Display(proto::DisplayRef { display_id }),
+    DisplaySelector::Name(name) => proto::display_selector::Selector::Name(name),
+  };
+  proto::DisplaySelector {
+    selector: Some(selector),
+  }
+}
+
+fn window_selector_to_proto(value: auv_driver::WindowSelector) -> Result<proto::WindowSelector, CapabilityError> {
+  use auv_driver::TextMatcher;
+  use proto::window_selector::{Application, Window};
+
+  let app = value.app.ok_or_else(|| CapabilityError::InvalidArgument("Window selector must identify an application".to_string()))?;
+  let application = match (app.bundle, app.name, app.process_id, app.frontmost) {
+    (Some(TextMatcher::Exact(value)), None, None, false) => Application::ApplicationBundleId(value),
+    (None, Some(TextMatcher::Exact(value)), None, false) => Application::ApplicationName(value),
+    (None, None, Some(value), false) if value > 0 => Application::ProcessId(value),
+    (None, None, None, true) => Application::FrontmostApplication(true),
+    _ => {
+      return Err(CapabilityError::InvalidArgument(
+        "Window application selector must contain exactly one supported exact match".to_string(),
+      ));
+    }
+  };
+  let window = match (value.title, value.main_visible) {
+    (Some(TextMatcher::Exact(value)), false) => Window::TitleExact(value),
+    (Some(TextMatcher::Contains(value)), false) => Window::TitleContains(value),
+    (None, true) => Window::MainVisible(true),
+    _ => return Err(CapabilityError::InvalidArgument("Window selector must identify exactly one window".to_string())),
+  };
+  Ok(proto::WindowSelector {
+    application: Some(application),
+    window: Some(window),
+  })
+}
+
+fn display_from_proto(display: proto::Display) -> Result<auv_driver::Display, CapabilityError> {
+  let frame = required(display.frame, "Display omitted its screen frame")?;
+  Ok(auv_driver::Display {
+    id: display.display_id,
+    name: display.name,
+    frame: auv_driver::Rect::new(frame.x, frame.y, frame.width, frame.height),
+    coordinate_space: auv_driver::CoordinateSpace::Screen,
+    scale_factor: display.scale_factor,
+    is_primary: display.primary,
+    is_builtin: display.builtin,
+  })
+}
+
+fn window_from_proto(window: proto::Window) -> Result<auv_driver::Window, CapabilityError> {
+  let reference = required(window.r#ref, "Window omitted its reference")?;
+  let frame = required(window.frame, "Window omitted its screen frame")?;
+  Ok(auv_driver::Window {
+    reference: auv_driver::WindowRef {
+      id: reference.window_id,
+    },
+    title: window.title,
+    app_name: window.application_name,
+    app_bundle_id: window.application_bundle_id,
+    process_id: window.process_id,
+    frame: auv_driver::Rect::new(frame.x, frame.y, frame.width, frame.height),
+    coordinate_space: auv_driver::CoordinateSpace::Screen,
+    is_main: window.is_main,
+    is_visible: window.is_visible,
+  })
+}
+
+fn capture_from_proto(capture: proto::CapturedFrame) -> Result<auv_driver::Capture, CapabilityError> {
+  let image = required(capture.image, "CapturedFrame omitted its RGBA image")?;
+  let bounds = required(capture.bounds, "CapturedFrame omitted its screen bounds")?;
+  let image = image::RgbaImage::from_raw(image.width, image.height, image.data)
+    .ok_or_else(|| CapabilityError::InvalidResponse("CapturedFrame contains malformed RGBA8 data".to_string()))?;
+  Ok(auv_driver::Capture {
+    image,
+    bounds: auv_driver::Rect::new(bounds.x, bounds.y, bounds.width, bounds.height),
+    scale_factor: capture.scale_factor,
+    backend: capture.backend,
+    fallback_reason: capture.fallback_reason,
+  })
+}
+
+fn capture_to_proto(capture: auv_driver::Capture) -> Result<proto::CapturedFrame, CapabilityError> {
+  let width = capture.image.width();
+  let height = capture.image.height();
+  Ok(proto::CapturedFrame {
+    image: Some(auv_api_proto::auv::api::image::v1::RgbaFrame {
+      width,
+      height,
+      data: capture.image.into_raw(),
+    }),
+    bounds: Some(rect_to_proto(capture.bounds)),
+    scale_factor: capture.scale_factor,
+    backend: capture.backend,
+    fallback_reason: capture.fallback_reason,
+  })
+}
+
+fn ocr_matches_from_proto(matches: Vec<proto::TextMatch>) -> Result<auv_driver::OcrMatches, CapabilityError> {
+  Ok(auv_driver::OcrMatches {
+    matches: matches
+      .into_iter()
+      .map(|matched| {
+        let bounds = required(matched.bounds, "text match omitted its screen bounds")?;
+        Ok(auv_driver::OcrMatch {
+          text: matched.text,
+          confidence: matched.confidence,
+          bounds: auv_driver::Rect::new(bounds.x, bounds.y, bounds.width, bounds.height),
+        })
+      })
+      .collect::<Result<_, CapabilityError>>()?,
+  })
+}
+
+fn text_recognition_from_proto(response: proto::RecognizeTextResponse) -> Result<auv_driver::TextRecognition, CapabilityError> {
+  Ok(auv_driver::TextRecognition {
+    text: response.text,
+    regions: response
+      .regions
+      .into_iter()
+      .map(|region| {
+        let bounds = required(region.bounds, "recognized text omitted its bounds")?;
+        Ok(auv_driver::RecognizedText {
+          text: region.text,
+          bounds: auv_driver::Rect::new(bounds.x, bounds.y, bounds.width, bounds.height),
+          confidence: region.confidence,
+        })
+      })
+      .collect::<Result<_, CapabilityError>>()?,
+  })
 }
 
 #[cfg(test)]
