@@ -269,7 +269,14 @@ fn local_serve_and_devices_list_use_the_unix_daemon() {
   assert!(listed_table.status.success(), "stderr={}", stderr(&listed_table));
   let listed_table = stdout(&listed_table);
   assert!(listed_table.lines().next().is_some_and(|header| header.contains("DEVICE ID") && header.contains("STATUS")), "{listed_table}");
-  assert!(listed_table.contains("macos"), "{listed_table}");
+  // ROOT CAUSE:
+  //
+  // On Linux, this cross-platform test failed because it expected the macOS
+  // platform label even though the daemon correctly reported `linux`.
+  //
+  // Before the fix, only the macOS CI runner could satisfy the assertion. The
+  // fix checks the platform of the binary that started the local daemon.
+  assert!(listed_table.contains(std::env::consts::OS), "{listed_table}");
 
   interrupt(&daemon.0);
   daemon.0.wait().expect("wait for local daemon");
@@ -283,7 +290,7 @@ fn local_serve_and_devices_list_use_the_unix_daemon() {
 
 #[cfg(unix)]
 #[test]
-fn local_daemon_routes_driver_grpc_without_claims_or_leases() {
+fn local_daemon_routes_runner_grpc_without_claims_or_leases() {
   let directory = tempfile::tempdir().expect("temporary daemon directory");
   let socket = directory.path().join("auv.sock");
   let store = directory.path().join("store");
@@ -317,12 +324,21 @@ fn local_daemon_routes_driver_grpc_without_claims_or_leases() {
         runner_class: "auv.core.local".to_string(),
       })
       .expect("route transport");
-    let displays = auv_api_proto::auv::api::driver::v1::display_service_client::DisplayServiceClient::new(transport)
-      .list_displays(auv_api_proto::auv::api::driver::v1::ListDisplaysRequest {})
+    // ROOT CAUSE:
+    //
+    // In a headless Linux runner, a routed DisplayService request failed after
+    // routing succeeded because no Wayland compositor was available.
+    //
+    // Before the fix, this routing test also required a graphical session. The
+    // fix verifies the same opaque runner transport through its health service.
+    let health = tonic_health::pb::health_client::HealthClient::new(transport)
+      .check(tonic_health::pb::HealthCheckRequest {
+        service: String::new(),
+      })
       .await
-      .expect("opaque routed DisplayService call")
+      .expect("opaque routed health call")
       .into_inner();
-    assert!(!displays.displays.is_empty());
+    assert_eq!(health.status, tonic_health::pb::health_check_response::ServingStatus::Serving as i32);
   });
 
   let deadline = Instant::now() + Duration::from_secs(2);
@@ -342,6 +358,17 @@ fn local_daemon_routes_driver_grpc_without_claims_or_leases() {
   daemon.0.wait().expect("wait for local daemon");
 }
 
+// https://github.com/moeru-ai/auv/actions/runs/31052479884/job/92462591348
+// ROOT CAUSE:
+//
+// On Windows, this pairing test cannot construct its required caller-local
+// listener because that trust boundary is currently a Unix-domain socket.
+//
+// Before the fix, Windows attempted to parse the Unix endpoint. The fix limits
+// this topology test to platforms that implement its local transport.
+// TODO(windows-local-pairing-test): Add Windows coverage when an owner-approved
+// local authenticated transport can create pairing tokens beside remote TCP.
+#[cfg(unix)]
 #[test]
 fn device_trust_name_requires_a_unique_paired_device() {
   let directory = tempfile::tempdir().expect("temporary pairing directory");
