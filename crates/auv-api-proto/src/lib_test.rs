@@ -113,6 +113,33 @@ fn every_discoverable_method_declares_a_non_unspecified_effect() {
 }
 
 #[test]
+fn daemon_json_uses_proto_enum_well_known_and_uint64_shapes() {
+  use crate::auv::api::daemon::v1::{Runner, RunnerLifecycle, RunnerPhase};
+
+  let runner = Runner {
+    lifecycle: RunnerLifecycle::UnlessShutdown as i32,
+    phase: RunnerPhase::Ready as i32,
+    created_at: Some(prost_types::Timestamp {
+      seconds: 0,
+      nanos: 0,
+    }),
+    active_operations: u64::MAX,
+    ..Default::default()
+  };
+  let json = serde_json::to_value(&runner).unwrap();
+  assert_eq!(json["lifecycle"], "RUNNER_LIFECYCLE_UNLESS_SHUTDOWN");
+  assert_eq!(json["phase"], "RUNNER_PHASE_READY");
+  assert_eq!(json["createdAt"], "1970-01-01T00:00:00+00:00");
+  assert_eq!(json["activeOperations"], u64::MAX.to_string());
+
+  let decoded: Runner = serde_json::from_value(json).unwrap();
+  assert_eq!(decoded.lifecycle, runner.lifecycle);
+  assert_eq!(decoded.phase, runner.phase);
+  assert_eq!(decoded.created_at, runner.created_at);
+  assert_eq!(decoded.active_operations, runner.active_operations);
+}
+
+#[test]
 fn overlay_service_is_two_typed_mutations() {
   let encoded = descriptor_set_for_service("auv.api.driver.v1.OverlayService").expect("OverlayService exists");
   let pool = DescriptorPool::decode(encoded.as_slice()).expect("overlay descriptor closure");

@@ -5,7 +5,9 @@
 //! - `server`: listener binding, request serving, and control routing.
 //! - `runner_transport`: inherited private IPC for daemon-owned Runners.
 
+mod authentication;
 pub mod control;
+mod middleware;
 mod protocol;
 mod rest;
 pub mod runner_transport;

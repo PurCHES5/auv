@@ -15,7 +15,7 @@ use tonic::body::Body as TonicBody;
 use tonic::{Code, Status};
 use tower::ServiceExt as _;
 
-use super::RequestAuth;
+use crate::authentication;
 use crate::control::{Control, OperationPermit, RunnerRoute};
 use crate::protocol::grpc::status::map_control_error;
 
@@ -26,12 +26,11 @@ pub(crate) const ROUTE_RUNNER_CLASS_METADATA: &str = "auv-runner-class";
 #[derive(Clone)]
 pub(crate) struct RunnerGrpcProxy {
   daemon: Arc<dyn Control>,
-  auth: RequestAuth,
 }
 
 impl RunnerGrpcProxy {
-  pub(crate) fn new(daemon: Arc<dyn Control>, auth: RequestAuth) -> Self {
-    Self { daemon, auth }
+  pub(crate) fn new(daemon: Arc<dyn Control>) -> Self {
+    Self { daemon }
   }
 
   pub(crate) async fn forward(&self, mut request: Request<AxumBody>) -> Response<TonicBody> {
@@ -45,7 +44,7 @@ impl RunnerGrpcProxy {
     require_grpc_request(request)?;
     let (service, method) = grpc_method(request.uri().path())?;
     reject_daemon_namespace(service)?;
-    let caller = self.auth.authenticate_http(request)?;
+    let caller = authentication::http_caller(request)?.clone();
     let route = runner_route(request.headers())?;
     let operation = self.daemon.admit_routed_channel(&caller, route, service, method).await.map_err(map_control_error)?;
 
@@ -53,6 +52,8 @@ impl RunnerGrpcProxy {
     request.headers_mut().remove(ROUTE_DEVICE_METADATA);
     request.headers_mut().remove(ROUTE_RUN_METADATA);
     request.headers_mut().remove(ROUTE_RUNNER_CLASS_METADATA);
+    // The Device bearer authenticates to AUV and is never Runner metadata.
+    request.headers_mut().remove(header::AUTHORIZATION);
 
     let forwarded = std::mem::replace(request, Request::new(AxumBody::empty())).map(TonicBody::new);
     let response =
@@ -100,7 +101,10 @@ fn require_grpc_request(request: &Request<AxumBody>) -> Result<(), Status> {
   if request.method() != Method::POST {
     return Err(Status::unimplemented("proxied Runner gRPC methods require POST"));
   }
-  let content_type = request.headers().get(header::CONTENT_TYPE).and_then(|value| value.to_str().ok()).unwrap_or_default();
+  let Some(content_type) = request.headers().get(header::CONTENT_TYPE) else {
+    return Err(Status::new(Code::Unimplemented, "unknown HTTP resource"));
+  };
+  let content_type = content_type.to_str().map_err(|error| Status::invalid_argument(error.to_string()))?;
   if !content_type.starts_with("application/grpc") {
     return Err(Status::new(Code::Unimplemented, "unknown HTTP resource"));
   }
@@ -111,9 +115,10 @@ fn require_grpc_request(request: &Request<AxumBody>) -> Result<(), Status> {
 }
 
 fn grpc_method(path: &str) -> Result<(&str, &str), Status> {
-  let mut segments = path.strip_prefix('/').unwrap_or(path).split('/');
-  let service = segments.next().unwrap_or_default();
-  let method = segments.next().unwrap_or_default();
+  let path = path.strip_prefix('/').ok_or_else(|| Status::unimplemented("unknown gRPC method path"))?;
+  let mut segments = path.split('/');
+  let service = segments.next().ok_or_else(|| Status::unimplemented("unknown gRPC method path"))?;
+  let method = segments.next().ok_or_else(|| Status::unimplemented("unknown gRPC method path"))?;
   if service.is_empty() || method.is_empty() || segments.next().is_some() {
     return Err(Status::unimplemented("unknown gRPC method path"));
   }

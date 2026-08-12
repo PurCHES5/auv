@@ -1,315 +1,143 @@
-//! Protobuf-over-HTTP resource routes backed by the shared control plane.
+//! Generated daemon JSON routes and dynamic Protobuf runner invocation.
 
 use std::sync::Arc;
 
-use auv_api_proto::auv::api::daemon::v1 as daemon_proto;
 use axum::Router;
 use axum::body::{Body, to_bytes};
+use axum::extract::ws::WebSocketUpgrade;
 use axum::extract::{Path, State};
-use axum::http::{HeaderValue, Request, StatusCode, header};
+use axum::http::{HeaderValue, Method, Request, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use prost::Message;
+use http_body_util::BodyExt as _;
 use tonic::{Code, Status};
 
-use crate::control::{CallerId, Control, ControlError};
-use crate::protocol::domain;
-use crate::server::RequestAuth;
+use crate::authentication::Authenticator;
+use crate::control::Control;
+use crate::middleware::authentication;
+use crate::protocol::grpc::daemon::v1::{
+  DeviceServiceGrpc, DiscoveryServiceGrpc, PairingServiceGrpc, RunServiceGrpc, RunnerClassServiceGrpc, RunnerServiceGrpc,
+};
 
 const PROTOBUF_CONTENT_TYPE: &str = "application/protobuf";
+const INVOKE_PATH: &str = "/apis/auv/runtime/v1/invoke";
+
+// NOTICE(tonic-rest-codegen): the generator also emits a combined router. This
+// adapter uses service routers so dynamic invoke routes can share their state.
+#[allow(dead_code)]
+mod generated {
+  include!(concat!(env!("OUT_DIR"), "/daemon_rest.rs"));
+}
 
 #[derive(Clone)]
 struct RestState {
   daemon: Arc<dyn Control>,
-  auth: RequestAuth,
+  authenticator: Authenticator,
 }
 
-pub(crate) fn router(daemon: Arc<dyn Control>, auth: RequestAuth) -> Router {
-  // TODO(rest-transcoding-v1): these handwritten routes explicitly map the
-  // shared Rust domain model to protobuf. Replace the transport mapping with
-  // google.api.http + Protovalidate + OpenAPI generation when that Buf
-  // dependency/toolchain slice is owner-approved.
-  // TODO(websocket-events): no WebSocket route is exposed until a concrete
-  // non-video event consumer defines ordering, cursor, gap recovery, and
-  // cancellation semantics. Video/frame streaming is a separate future slice.
+pub(crate) fn router(daemon: Arc<dyn Control>, authenticator: Authenticator) -> Router {
+  let pairing = Arc::new(PairingServiceGrpc::new(authenticator.pairing()));
+  let discovery = Arc::new(DiscoveryServiceGrpc::new(Arc::clone(&daemon)));
+  let devices = Arc::new(DeviceServiceGrpc::new(Arc::clone(&daemon)));
+  let runs = Arc::new(RunServiceGrpc::new(Arc::clone(&daemon)));
+  let runners = Arc::new(RunnerServiceGrpc::new(Arc::clone(&daemon)));
+  let runner_classes = Arc::new(RunnerClassServiceGrpc::new(Arc::clone(&daemon)));
+
+  // TODO(websocket-events): durable event subscriptions still need ordering,
+  // cursor, and gap-recovery semantics. The invoke socket below is scoped to
+  // one live Runner operation and does not define that separate event model.
   Router::new()
-    .route("/apis", get(list_api_namespaces))
-    .route("/apis/auv", get(get_auv_api_namespace))
-    .route("/apis/auv/{group}/{version}", get(get_auv_api_group_version))
-    .route("/apis/auv/daemon/v1/devices", get(list_devices))
-    .route("/apis/auv/daemon/v1/devices/{device_id}", get(get_device))
-    .route("/apis/auv/runtime/v1/runs", post(create_run).get(list_runs))
-    .route("/apis/auv/runtime/v1/runs/{run_id}", get(get_run))
-    .route("/apis/auv/runtime/v1/runs/{run_id}/stop", post(stop_run))
-    .route("/apis/auv/runtime/v1/runners", post(create_runner).get(list_runners))
-    .route("/apis/auv/runtime/v1/runners/{runner_id}", get(get_runner).delete(delete_runner))
-    .route("/apis/auv/runtime/v1/runnerclasses", get(list_runner_classes))
-    .route("/apis/auv/runtime/v1/runnerclasses/{runner_class}", get(get_runner_class))
-    .with_state(RestState { daemon, auth })
+    .route("/apis/auv/runtime/v1/invoke/{service}/{method}", post(invoke_unary))
+    .route(INVOKE_PATH, get(invoke_websocket))
+    .with_state(RestState {
+      daemon,
+      authenticator,
+    })
+    .merge(generated::pairing_service_rest_router(pairing))
+    .merge(generated::discovery_service_rest_router(discovery))
+    .merge(generated::device_service_rest_router(devices))
+    .merge(generated::run_service_rest_router(runs))
+    .merge(generated::runner_service_rest_router(runners))
+    .merge(generated::runner_class_service_rest_router(runner_classes))
 }
 
-async fn list_api_namespaces(
+async fn invoke_websocket(State(state): State<RestState>, upgrade: WebSocketUpgrade) -> Response {
+  upgrade.on_upgrade(move |socket| crate::protocol::websocket::serve(socket, state.daemon, state.authenticator)).into_response()
+}
+
+async fn invoke_unary(
   State(state): State<RestState>,
+  Path((service, method)): Path<(String, String)>,
   request: Request<Body>,
-) -> Result<Protobuf<daemon_proto::ListApiNamespacesResponse>, RestError> {
-  let _caller = authenticate(&state, &request)?;
-  Ok(Protobuf(daemon_proto::ListApiNamespacesResponse {
-    namespaces: vec![daemon_proto::ApiNamespace {
-      name: "auv".to_string(),
-    }],
-  }))
-}
+) -> Result<ProtobufBytes, RestError> {
+  let (mut parts, body) = request.into_parts();
 
-async fn get_auv_api_namespace(
-  State(state): State<RestState>,
-  request: Request<Body>,
-) -> Result<Protobuf<daemon_proto::GetApiNamespaceResponse>, RestError> {
-  let _caller = authenticate(&state, &request)?;
-  Ok(Protobuf(daemon_proto::GetApiNamespaceResponse {
-    namespace: "auv".to_string(),
-    groups: vec![
-      daemon_proto::ApiGroup {
-        name: "daemon".to_string(),
-        versions: vec!["v1".to_string()],
-      },
-      daemon_proto::ApiGroup {
-        name: "runtime".to_string(),
-        versions: vec!["v1".to_string()],
-      },
-    ],
-  }))
-}
+  let protobuf = to_bytes(body, usize::MAX).await.map_err(|error| RestError::new(StatusCode::BAD_REQUEST, "invalid_body", error.to_string()))?;
+  let mut grpc_body = Vec::with_capacity(5 + protobuf.len());
+  grpc_body.push(0);
+  let length = u32::try_from(protobuf.len()).map_err(|_| RestError::new(StatusCode::PAYLOAD_TOO_LARGE, "request_too_large", "Protobuf request exceeds the gRPC frame length"))?;
 
-async fn get_auv_api_group_version(
-  State(state): State<RestState>,
-  Path((group, version)): Path<(String, String)>,
-  request: Request<Body>,
-) -> Result<Protobuf<daemon_proto::GetApiGroupVersionResponse>, RestError> {
-  let _caller = authenticate(&state, &request)?;
-  let resources = match (group.as_str(), version.as_str()) {
-    ("daemon", "v1") => vec![api_resource(
-      "devices",
-      "Device",
-      &[
-        daemon_proto::ApiResourceOperation::List,
-        daemon_proto::ApiResourceOperation::Get,
-      ],
-    )],
-    ("runtime", "v1") => {
-      let mut runner_operations = vec![
-        daemon_proto::ApiResourceOperation::List,
-        daemon_proto::ApiResourceOperation::Get,
-      ];
-      if !state.daemon.list_runner_classes(None)?.is_empty() {
-        runner_operations.extend([
-          daemon_proto::ApiResourceOperation::Create,
-          daemon_proto::ApiResourceOperation::Delete,
-        ]);
-      }
-      let mut run_operations = vec![
-        daemon_proto::ApiResourceOperation::List,
-        daemon_proto::ApiResourceOperation::Get,
-      ];
-      run_operations.extend([
-        daemon_proto::ApiResourceOperation::Create,
-        daemon_proto::ApiResourceOperation::Delete,
-      ]);
-      vec![
-        api_resource("runners", "Runner", &runner_operations),
-        api_resource(
-          "runnerclasses",
-          "RunnerClass",
-          &[
-            daemon_proto::ApiResourceOperation::List,
-            daemon_proto::ApiResourceOperation::Get,
-          ],
-        ),
-        api_resource("runs", "Run", &run_operations),
-      ]
-    }
-    _ => return Err(RestError::new(StatusCode::NOT_FOUND, "not_found", "unknown AUV API group or version")),
-  };
-  Ok(Protobuf(daemon_proto::GetApiGroupVersionResponse {
-    namespace: "auv".to_string(),
-    group,
-    version,
-    resources,
-  }))
-}
+  grpc_body.extend_from_slice(&length.to_be_bytes());
+  grpc_body.extend_from_slice(&protobuf);
 
-fn api_resource(name: &str, kind: &str, operations: &[daemon_proto::ApiResourceOperation]) -> daemon_proto::ApiResource {
-  daemon_proto::ApiResource {
-    name: name.to_string(),
-    kind: kind.to_string(),
-    operations: operations.iter().map(|operation| *operation as i32).collect(),
+  parts.method = axum::http::Method::POST;
+  parts.uri = format!("/{service}/{method}")
+    .parse()
+    .map_err(|error| RestError::new(StatusCode::BAD_REQUEST, "invalid_argument", format!("invalid gRPC method path: {error}")))?;
+  parts.headers.remove(header::CONTENT_LENGTH);
+  parts.headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/grpc"));
+  parts.headers.insert(header::TE, HeaderValue::from_static("trailers"));
+
+  let request = Request::from_parts(parts, Body::from(grpc_body));
+  let proxy = crate::server::runner_grpc_proxy::RunnerGrpcProxy::new(Arc::clone(&state.daemon));
+  let response = proxy.forward(request).await;
+  let (parts, body) = response.into_parts();
+  let collected = body.collect().await.map_err(RestError::from)?;
+
+  let grpc_status = parts
+    .headers
+    .get("grpc-status")
+    .or_else(|| collected.trailers().and_then(|trailers| trailers.get("grpc-status")))
+    .ok_or_else(|| RestError::new(StatusCode::BAD_GATEWAY, "invalid_grpc", "Runner response omitted grpc-status"))?
+    .to_str()
+    .map_err(|error| RestError::new(StatusCode::BAD_GATEWAY, "invalid_grpc", error.to_string()))?
+    .parse::<i32>()
+    .map_err(|error| RestError::new(StatusCode::BAD_GATEWAY, "invalid_grpc", error.to_string()))?;
+
+  if grpc_status != 0 {
+    let message = parts
+      .headers
+      .get("grpc-message")
+      .or_else(|| collected.trailers().and_then(|trailers| trailers.get("grpc-message")))
+      .and_then(|value| value.to_str().ok())
+      .unwrap_or("Runner operation failed");
+    return Err(RestError::from(Status::new(Code::from_i32(grpc_status), message)));
   }
-}
 
-async fn list_devices(
-  State(state): State<RestState>,
-  request: Request<Body>,
-) -> Result<Protobuf<daemon_proto::ListDevicesResponse>, RestError> {
-  let _caller = authenticate(&state, &request)?;
-  let devices = state.daemon.list_devices()?.into_iter().map(domain::device).collect();
-  Ok(Protobuf(daemon_proto::ListDevicesResponse { devices }))
-}
-
-async fn get_device(
-  State(state): State<RestState>,
-  Path(device_id): Path<String>,
-  request: Request<Body>,
-) -> Result<Protobuf<daemon_proto::GetDeviceResponse>, RestError> {
-  let _caller = authenticate(&state, &request)?;
-  let device = state
-    .daemon
-    .get_device(&device_id)?
-    .ok_or_else(|| RestError::new(StatusCode::NOT_FOUND, "not_found", format!("unknown Device: {device_id}")))?;
-  Ok(Protobuf(daemon_proto::GetDeviceResponse {
-    device: Some(domain::device(device)),
-  }))
-}
-
-async fn create_run(State(state): State<RestState>, request: Request<Body>) -> Result<Protobuf<daemon_proto::CreateRunResponse>, RestError> {
-  let caller = authenticate(&state, &request)?;
-  let request = domain::create_run(decode_protobuf_body(request).await?)?;
-  let run = state.daemon.create_run(&caller, request)?;
-  Ok(Protobuf(daemon_proto::CreateRunResponse {
-    run: Some(domain::run(run)),
-  }))
-}
-
-async fn list_runs(State(state): State<RestState>, request: Request<Body>) -> Result<Protobuf<daemon_proto::ListRunsResponse>, RestError> {
-  let caller = authenticate(&state, &request)?;
-  let runs = state.daemon.list_runs(&caller)?.into_iter().map(domain::run).collect();
-  Ok(Protobuf(daemon_proto::ListRunsResponse { runs }))
-}
-
-async fn get_run(
-  State(state): State<RestState>,
-  Path(run_id): Path<String>,
-  request: Request<Body>,
-) -> Result<Protobuf<daemon_proto::GetRunResponse>, RestError> {
-  let caller = authenticate(&state, &request)?;
-  let run = state.daemon.get_run(&caller, &run_id)?;
-  Ok(Protobuf(daemon_proto::GetRunResponse {
-    run: Some(domain::run(run)),
-  }))
-}
-
-async fn stop_run(
-  State(state): State<RestState>,
-  Path(run_id): Path<String>,
-  request: Request<Body>,
-) -> Result<Protobuf<daemon_proto::StopRunResponse>, RestError> {
-  let caller = authenticate(&state, &request)?;
-  let request = decode_protobuf_body::<daemon_proto::StopRunRequest>(request).await?;
-  if request.run.as_ref().is_some_and(|run| run.run_id != run_id) {
-    return Err(RestError::new(StatusCode::BAD_REQUEST, "invalid_argument", "path Run and request Run differ"));
+  let bytes = collected.to_bytes();
+  if bytes.len() < 5 || bytes[0] != 0 {
+    return Err(RestError::new(StatusCode::BAD_GATEWAY, "invalid_grpc", "Runner returned an invalid unary gRPC frame"));
   }
-  let outcome = daemon_proto::RunOutcome::try_from(request.outcome)
-    .map_err(|_| RestError::new(StatusCode::BAD_REQUEST, "invalid_argument", "Run outcome is unknown"))?;
-  let outcome = domain::run_outcome(outcome)?;
-  let run = state.daemon.stop_run(&caller, &run_id, outcome).await?;
-  Ok(Protobuf(daemon_proto::StopRunResponse {
-    run: Some(domain::run(run)),
-  }))
-}
 
-async fn create_runner(
-  State(state): State<RestState>,
-  request: Request<Body>,
-) -> Result<Protobuf<daemon_proto::CreateRunnerResponse>, RestError> {
-  let _caller = authenticate(&state, &request)?;
-  let request = domain::create_runner(decode_protobuf_body(request).await?)?;
-  let runner = state.daemon.create_runner(request).await?;
-  Ok(Protobuf(daemon_proto::CreateRunnerResponse {
-    runner: Some(domain::runner(runner)),
-  }))
-}
-
-async fn list_runners(
-  State(state): State<RestState>,
-  request: Request<Body>,
-) -> Result<Protobuf<daemon_proto::ListRunnersResponse>, RestError> {
-  let _caller = authenticate(&state, &request)?;
-  let runners = state.daemon.list_runners()?.into_iter().map(domain::runner).collect();
-  Ok(Protobuf(daemon_proto::ListRunnersResponse { runners }))
-}
-
-async fn list_runner_classes(
-  State(state): State<RestState>,
-  request: Request<Body>,
-) -> Result<Protobuf<daemon_proto::ListRunnerClassesResponse>, RestError> {
-  let _caller = authenticate(&state, &request)?;
-  let runner_classes = state.daemon.list_runner_classes(None)?.into_iter().map(domain::runner_class).collect();
-  Ok(Protobuf(daemon_proto::ListRunnerClassesResponse { runner_classes }))
-}
-
-async fn get_runner_class(
-  State(state): State<RestState>,
-  Path(runner_class): Path<String>,
-  request: Request<Body>,
-) -> Result<Protobuf<daemon_proto::GetRunnerClassResponse>, RestError> {
-  let _caller = authenticate(&state, &request)?;
-  let runner_class = state.daemon.get_runner_class(None, &runner_class)?;
-  Ok(Protobuf(daemon_proto::GetRunnerClassResponse {
-    runner_class: Some(domain::runner_class(runner_class)),
-  }))
-}
-
-async fn get_runner(
-  State(state): State<RestState>,
-  Path(runner_id): Path<String>,
-  request: Request<Body>,
-) -> Result<Protobuf<daemon_proto::GetRunnerResponse>, RestError> {
-  let _caller = authenticate(&state, &request)?;
-  let runner = state.daemon.get_runner(&runner_id)?;
-  Ok(Protobuf(daemon_proto::GetRunnerResponse {
-    runner: Some(domain::runner(runner)),
-  }))
-}
-
-async fn delete_runner(
-  State(state): State<RestState>,
-  Path(runner_id): Path<String>,
-  request: Request<Body>,
-) -> Result<Protobuf<daemon_proto::DeleteRunnerResponse>, RestError> {
-  let _caller = authenticate(&state, &request)?;
-  let runner = state.daemon.delete_runner(&runner_id, auv::runners::StopRunner::default()).await?;
-  Ok(Protobuf(daemon_proto::DeleteRunnerResponse {
-    runner: Some(domain::runner(runner)),
-  }))
-}
-
-fn authenticate(state: &RestState, request: &Request<Body>) -> Result<CallerId, RestError> {
-  state.auth.authenticate_http(request).map_err(RestError::from)
-}
-
-async fn decode_protobuf_body<M: Message + Default>(request: Request<Body>) -> Result<M, RestError> {
-  let content_type = request.headers().get(header::CONTENT_TYPE).and_then(|value| value.to_str().ok()).unwrap_or_default();
-  if content_type.split(';').next() != Some(PROTOBUF_CONTENT_TYPE) {
-    return Err(RestError::new(StatusCode::UNSUPPORTED_MEDIA_TYPE, "unsupported_media_type", "request body must use application/protobuf"));
+  let length = u32::from_be_bytes(bytes[1..5].try_into().expect("five-byte gRPC prefix was checked")) as usize;
+  if bytes.len() != length + 5 {
+    return Err(RestError::new(StatusCode::BAD_GATEWAY, "invalid_grpc", "Runner returned more or less than one unary response"));
   }
-  // No AUV-specific request ceiling is imposed here. Listener operators may
-  // add a transport policy when they actually need one; otherwise allocation
-  // and transport failures surface from Axum/the operating system.
-  let bytes = to_bytes(request.into_body(), usize::MAX)
-    .await
-    .map_err(|error| RestError::new(StatusCode::BAD_REQUEST, "invalid_body", error.to_string()))?;
-  M::decode(bytes).map_err(|error| RestError::new(StatusCode::BAD_REQUEST, "invalid_protobuf", error.to_string()))
+
+  Ok(ProtobufBytes(bytes.slice(5..)))
 }
 
-struct Protobuf<M>(M);
+struct ProtobufBytes(bytes::Bytes);
 
-impl<M: Message> IntoResponse for Protobuf<M> {
+impl IntoResponse for ProtobufBytes {
   fn into_response(self) -> Response {
-    let mut response = self.0.encode_to_vec().into_response();
+    let mut response = self.0.into_response();
     response.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static(PROTOBUF_CONTENT_TYPE));
     response
   }
 }
 
-struct RestError {
+pub(crate) struct RestError {
   status: StatusCode,
   code: &'static str,
   detail: String,
@@ -322,6 +150,47 @@ impl RestError {
       code,
       detail: detail.into(),
     }
+  }
+}
+
+/// Preserves the connection identity and authentication metadata when a
+/// generated Axum handler calls the existing Tonic service implementation.
+pub(crate) fn build_tonic_request<T, E>(body: T, headers: &axum::http::HeaderMap, extension: Option<E>) -> tonic::Request<T>
+where
+  E: Clone + Send + Sync + 'static,
+{
+  let mut request = tonic::Request::new(body);
+  if let Some(extension) = extension {
+    request.extensions_mut().insert(extension);
+  }
+  for name in [
+    "authorization",
+    "user-agent",
+    "x-forwarded-for",
+    "x-real-ip",
+  ] {
+    let Some(value) = headers.get(name).and_then(|value| value.to_str().ok()) else {
+      continue;
+    };
+    let Ok(key) = name.parse::<tonic::metadata::MetadataKey<tonic::metadata::Ascii>>() else {
+      continue;
+    };
+    if let Ok(value) = value.parse() {
+      request.metadata_mut().insert(key, value);
+    }
+  }
+  request
+}
+
+/// Registers the authentication requirements owned by the REST routes.
+pub(crate) fn register_authentication(builder: &mut authentication::Builder) {
+  builder.websocket_open(Method::GET, INVOKE_PATH);
+  // NOTICE(tonic-rest-public-methods): tonic-rest 0.1.5 emits public REST
+  // paths without their HTTP methods. All current generated public methods
+  // use POST. Ask the generator for method/path pairs before adding a public
+  // method that uses another HTTP verb.
+  for &path in generated::PUBLIC_REST_PATHS {
+    builder.public(Method::POST, path);
   }
 }
 
@@ -339,21 +208,6 @@ impl From<Status> for RestError {
       _ => (StatusCode::INTERNAL_SERVER_ERROR, "internal"),
     };
     Self::new(http_status, code, status.message())
-  }
-}
-
-impl From<ControlError> for RestError {
-  fn from(error: ControlError) -> Self {
-    use ControlError as DaemonError;
-    match error {
-      DaemonError::Identity(_) => Self::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", error.to_string()),
-      DaemonError::InvalidArgument(_) => Self::new(StatusCode::BAD_REQUEST, "invalid_argument", error.to_string()),
-      DaemonError::UnknownDevice(_) => Self::new(StatusCode::BAD_REQUEST, "invalid_argument", error.to_string()),
-      DaemonError::UnknownRun(_) => Self::new(StatusCode::NOT_FOUND, "not_found", error.to_string()),
-      DaemonError::UnknownRunner(_) => Self::new(StatusCode::NOT_FOUND, "not_found", error.to_string()),
-      DaemonError::RunnerProviderUnavailable(_) => Self::new(StatusCode::NOT_IMPLEMENTED, "unimplemented", error.to_string()),
-      DaemonError::RunnerOperation(_) => Self::new(StatusCode::SERVICE_UNAVAILABLE, "unavailable", error.to_string()),
-    }
   }
 }
 

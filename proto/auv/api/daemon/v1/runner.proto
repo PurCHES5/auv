@@ -5,19 +5,51 @@ syntax = "proto3";
 package auv.api.daemon.v1;
 
 import "auv/api/daemon/v1/resource.proto";
+import "google/api/annotations.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 
 service RunnerService {
-  rpc CreateRunner(CreateRunnerRequest) returns (CreateRunnerResponse);
-  rpc ListRunners(ListRunnersRequest) returns (ListRunnersResponse);
-  rpc GetRunner(GetRunnerRequest) returns (GetRunnerResponse);
-  rpc DeleteRunner(DeleteRunnerRequest) returns (DeleteRunnerResponse);
+  rpc CreateRunner(CreateRunnerRequest) returns (CreateRunnerResponse) {
+    option (google.api.http) = {
+      post: "/apis/auv/runtime/v1/runners"
+      body: "*"
+    };
+  }
+  rpc ListRunners(ListRunnersRequest) returns (ListRunnersResponse) {
+    option (google.api.http) = {get: "/apis/auv/runtime/v1/runners"};
+  }
+  // NOTICE(tonic-rest-path): typed RunnerRef path projection is deferred until
+  // the generator supports arbitrary nested resource-reference messages.
+  rpc GetRunner(GetRunnerRequest) returns (GetRunnerResponse) {
+    option (google.api.http) = {
+      post: "/apis/auv/runtime/v1/runners:get"
+      body: "*"
+    };
+  }
+  rpc DeleteRunner(DeleteRunnerRequest) returns (DeleteRunnerResponse) {
+    option (google.api.http) = {
+      post: "/apis/auv/runtime/v1/runners:delete"
+      body: "*"
+    };
+  }
 }
 
 service RunnerClassService {
-  rpc ListRunnerClasses(ListRunnerClassesRequest) returns (ListRunnerClassesResponse);
-  rpc GetRunnerClass(GetRunnerClassRequest) returns (GetRunnerClassResponse);
+  // The optional DeviceRef cannot be represented by Axum's flat query
+  // extractor without losing the typed request boundary.
+  rpc ListRunnerClasses(ListRunnerClassesRequest) returns (ListRunnerClassesResponse) {
+    option (google.api.http) = {
+      post: "/apis/auv/runtime/v1/runnerclasses:list"
+      body: "*"
+    };
+  }
+  rpc GetRunnerClass(GetRunnerClassRequest) returns (GetRunnerClassResponse) {
+    option (google.api.http) = {
+      post: "/apis/auv/runtime/v1/runnerclasses:get"
+      body: "*"
+    };
+  }
 }
 
 message RunnerClass {

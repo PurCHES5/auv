@@ -6,6 +6,62 @@ pub const FILE_DESCRIPTOR_SET: &[u8] = tonic::include_file_descriptor_set!("auv.
 /// AUV-specific capture or protobuf admission policy.
 pub const GRPC_MESSAGE_SIZE_UNLIMITED: usize = usize::MAX;
 
+fn is_false(value: &bool) -> bool {
+  !*value
+}
+
+pub(crate) mod json {
+  tonic_rest::define_enum_serde!(api_resource_operation, crate::auv::api::daemon::v1::ApiResourceOperation);
+  tonic_rest::define_enum_serde!(device_platform, crate::auv::api::daemon::v1::DevicePlatform);
+  tonic_rest::define_enum_serde!(run_phase, crate::auv::api::daemon::v1::RunPhase);
+  tonic_rest::define_enum_serde!(run_outcome, crate::auv::api::daemon::v1::RunOutcome);
+  tonic_rest::define_enum_serde!(runner_lifecycle, crate::auv::api::daemon::v1::RunnerLifecycle);
+  tonic_rest::define_enum_serde!(runner_phase, crate::auv::api::daemon::v1::RunnerPhase);
+
+  pub fn is_zero_i32(value: &i32) -> bool {
+    *value == 0
+  }
+
+  pub fn is_zero_u64(value: &u64) -> bool {
+    *value == 0
+  }
+
+  pub mod u64_string {
+    use serde::de::{self, Visitor};
+    use serde::{Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(value: &u64, serializer: S) -> Result<S::Ok, S::Error> {
+      serializer.serialize_str(&value.to_string())
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
+      struct U64Visitor;
+
+      impl Visitor<'_> for U64Visitor {
+        type Value = u64;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+          formatter.write_str("an unsigned 64-bit integer or decimal string")
+        }
+
+        fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
+          Ok(value)
+        }
+
+        fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
+          u64::try_from(value).map_err(E::custom)
+        }
+
+        fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+          value.parse().map_err(E::custom)
+        }
+      }
+
+      deserializer.deserialize_any(U64Visitor)
+    }
+  }
+}
+
 /// Builds the minimal descriptor closure that owns the named gRPC service.
 ///
 /// Runner reflection must publish only services that the process actually
@@ -102,6 +158,14 @@ pub mod auv {
     pub mod image {
       pub mod v1 {
         tonic::include_proto!("auv.api.image.v1");
+      }
+    }
+
+    pub mod transport {
+      pub mod websocket {
+        pub mod v1 {
+          tonic::include_proto!("auv.api.transport.websocket.v1");
+        }
       }
     }
   }

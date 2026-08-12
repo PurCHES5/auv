@@ -4,16 +4,42 @@ syntax = "proto3";
 
 package auv.api.daemon.v1;
 
+import "google/api/annotations.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 
 // PairingService manages bootstrap tokens and paired Device credentials.
 service PairingService {
-  rpc CreatePairingToken(CreatePairingTokenRequest) returns (CreatePairingTokenResponse);
-  rpc PairDevice(PairDeviceRequest) returns (PairDeviceResponse);
-  rpc RevokeDeviceCredential(RevokeDeviceCredentialRequest) returns (RevokeDeviceCredentialResponse);
-  rpc SetPairedDeviceEnabled(SetPairedDeviceEnabledRequest) returns (SetPairedDeviceEnabledResponse);
-  rpc UnpairDevice(UnpairDeviceRequest) returns (UnpairDeviceResponse);
+  rpc CreatePairingToken(CreatePairingTokenRequest) returns (CreatePairingTokenResponse) {
+    option (google.api.http) = {
+      post: "/apis/auv/daemon/v1/pairing/tokens"
+      body: "*"
+    };
+  }
+  rpc PairDevice(PairDeviceRequest) returns (PairDeviceResponse) {
+    option (google.api.http) = {
+      post: "/apis/auv/daemon/v1/pairing/devices"
+      body: "*"
+    };
+  }
+  rpc RevokeDeviceCredential(RevokeDeviceCredentialRequest) returns (RevokeDeviceCredentialResponse) {
+    option (google.api.http) = {
+      post: "/apis/auv/daemon/v1/pairing/credentials/revoke"
+      body: "*"
+    };
+  }
+  rpc SetPairedDeviceEnabled(SetPairedDeviceEnabledRequest) returns (SetPairedDeviceEnabledResponse) {
+    option (google.api.http) = {
+      post: "/apis/auv/daemon/v1/pairing/devices/enabled"
+      body: "*"
+    };
+  }
+  rpc UnpairDevice(UnpairDeviceRequest) returns (UnpairDeviceResponse) {
+    option (google.api.http) = {
+      post: "/apis/auv/daemon/v1/pairing/devices/unpair"
+      body: "*"
+    };
+  }
 }
 
 message CreatePairingTokenRequest {

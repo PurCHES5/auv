@@ -5,13 +5,33 @@ syntax = "proto3";
 package auv.api.daemon.v1;
 
 import "auv/api/daemon/v1/resource.proto";
+import "google/api/annotations.proto";
 import "google/protobuf/timestamp.proto";
 
 service RunService {
-  rpc CreateRun(CreateRunRequest) returns (CreateRunResponse);
-  rpc ListRuns(ListRunsRequest) returns (ListRunsResponse);
-  rpc GetRun(GetRunRequest) returns (GetRunResponse);
-  rpc StopRun(StopRunRequest) returns (StopRunResponse);
+  rpc CreateRun(CreateRunRequest) returns (CreateRunResponse) {
+    option (google.api.http) = {
+      post: "/apis/auv/runtime/v1/runs"
+      body: "*"
+    };
+  }
+  rpc ListRuns(ListRunsRequest) returns (ListRunsResponse) {
+    option (google.api.http) = {get: "/apis/auv/runtime/v1/runs"};
+  }
+  // NOTICE(tonic-rest-path): typed RunRef path projection is deferred until
+  // the generator supports arbitrary nested resource-reference messages.
+  rpc GetRun(GetRunRequest) returns (GetRunResponse) {
+    option (google.api.http) = {
+      post: "/apis/auv/runtime/v1/runs:get"
+      body: "*"
+    };
+  }
+  rpc StopRun(StopRunRequest) returns (StopRunResponse) {
+    option (google.api.http) = {
+      post: "/apis/auv/runtime/v1/runs:stop"
+      body: "*"
+    };
+  }
 }
 
 enum RunPhase {

@@ -37,8 +37,10 @@ tower = { version = "0.5", features = ["util"] }
 uuid.workspace = true
 
 [dev-dependencies]
+futures-util.workspace = true
 prost = "0.14"
 reqwest = { version = "0.13", default-features = false, features = ["http2", "rustls"] }
 tempfile.workspace = true
 tokio-stream = { version = "0.1", features = ["net"] }
 tonic-reflection = "0.14"
+tokio-tungstenite = "0.29"

@@ -1,15 +1,22 @@
 //! API discovery service adapter.
 
+use std::sync::Arc;
+
 use auv_api_proto::auv::api::daemon::v1 as proto;
 use auv_api_proto::auv::api::daemon::v1::discovery_service_server::DiscoveryService;
 use tonic::{Request, Response, Status};
 
+use crate::control::Control;
+use crate::protocol::grpc::status::map_control_error;
+
 #[derive(Clone)]
-pub(crate) struct DiscoveryServiceGrpc;
+pub(crate) struct DiscoveryServiceGrpc {
+  daemon: Arc<dyn Control>,
+}
 
 impl DiscoveryServiceGrpc {
-  pub(crate) fn new() -> Self {
-    Self
+  pub(crate) fn new(daemon: Arc<dyn Control>) -> Self {
+    Self { daemon }
   }
 }
 
@@ -71,12 +78,17 @@ impl DiscoveryService for DiscoveryServiceGrpc {
           proto::ApiResourceOperation::Get,
         ];
         let mut runners = read.to_vec();
+        if !self.daemon.list_runner_classes(None).map_err(map_control_error)?.is_empty() {
+          runners.extend([
+            proto::ApiResourceOperation::Create,
+            proto::ApiResourceOperation::Delete,
+          ]);
+        }
         let mut runs = read.to_vec();
-        runners.extend([
+        runs.extend([
           proto::ApiResourceOperation::Create,
           proto::ApiResourceOperation::Delete,
         ]);
-        runs.push(proto::ApiResourceOperation::Create);
         vec![
           api_resource("runners", "Runner", &runners),
           api_resource("runnerclasses", "RunnerClass", &read),

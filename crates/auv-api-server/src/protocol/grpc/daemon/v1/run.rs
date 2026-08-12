@@ -6,7 +6,7 @@ use auv_api_proto::auv::api::daemon::v1 as proto;
 use auv_api_proto::auv::api::daemon::v1::run_service_server::RunService;
 use tonic::{Request, Response, Status};
 
-use super::caller;
+use crate::authentication;
 use crate::control::Control;
 use crate::protocol::domain;
 use crate::protocol::grpc::status::map_control_error;
@@ -25,7 +25,7 @@ impl RunServiceGrpc {
 #[tonic::async_trait]
 impl RunService for RunServiceGrpc {
   async fn create_run(&self, request: Request<proto::CreateRunRequest>) -> Result<Response<proto::CreateRunResponse>, Status> {
-    let caller = caller(&request)?;
+    let caller = authentication::caller(&request)?.clone();
     let request = domain::create_run(request.into_inner()).map_err(map_control_error)?;
     let run = self.daemon.create_run(&caller, request).map_err(map_control_error)?;
     Ok(Response::new(proto::CreateRunResponse {
@@ -34,13 +34,13 @@ impl RunService for RunServiceGrpc {
   }
 
   async fn list_runs(&self, request: Request<proto::ListRunsRequest>) -> Result<Response<proto::ListRunsResponse>, Status> {
-    let caller = caller(&request)?;
-    let runs = self.daemon.list_runs(&caller).map_err(map_control_error)?.into_iter().map(domain::run).collect();
+    let caller = authentication::caller(&request)?;
+    let runs = self.daemon.list_runs(caller).map_err(map_control_error)?.into_iter().map(domain::run).collect();
     Ok(Response::new(proto::ListRunsResponse { runs }))
   }
 
   async fn get_run(&self, request: Request<proto::GetRunRequest>) -> Result<Response<proto::GetRunResponse>, Status> {
-    let caller = caller(&request)?;
+    let caller = authentication::caller(&request)?.clone();
     let request = request.into_inner();
     let run_id =
       request.run.map(|run| run.run_id).filter(|run_id| !run_id.is_empty()).ok_or_else(|| Status::invalid_argument("run is required"))?;
@@ -51,7 +51,7 @@ impl RunService for RunServiceGrpc {
   }
 
   async fn stop_run(&self, request: Request<proto::StopRunRequest>) -> Result<Response<proto::StopRunResponse>, Status> {
-    let caller = caller(&request)?;
+    let caller = authentication::caller(&request)?.clone();
     let request = request.into_inner();
     let outcome = proto::RunOutcome::try_from(request.outcome).map_err(|_| Status::invalid_argument("Run outcome is unknown"))?;
     let run_id =

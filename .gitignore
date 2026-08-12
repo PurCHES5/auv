@@ -73,6 +73,7 @@ node_modules
 dist
 dist-ssr
 *.local
+.vitest-attachments/
 
 .eslintcache
 .alintcache
@@ -108,4 +109,5 @@ CONTRIBUTING.local.md
 codex.md
 
 # Protobuf
+proto/vendor/
 gen/

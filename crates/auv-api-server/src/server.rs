@@ -1,12 +1,17 @@
 //! AUV daemon API server lifecycle and listener orchestration.
 
-mod runner_grpc_proxy;
+pub(crate) mod runner_grpc_proxy;
 
 use std::fmt;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::authentication::Authenticator;
+use crate::control::{Control, Pairing};
+use crate::protocol::grpc::daemon::v1::{
+  DeviceServiceGrpc, DiscoveryServiceGrpc, PairingServiceGrpc, RunServiceGrpc, RunnerClassServiceGrpc, RunnerServiceGrpc,
+};
 use auv_api_proto::auv::api::daemon::v1::device_service_server::DeviceServiceServer;
 use auv_api_proto::auv::api::daemon::v1::discovery_service_server::DiscoveryServiceServer;
 use auv_api_proto::auv::api::daemon::v1::pairing_service_server::PairingServiceServer;
@@ -16,16 +21,9 @@ use auv_api_proto::auv::api::daemon::v1::runner_service_server::RunnerServiceSer
 use tokio::net::TcpListener;
 #[cfg(unix)]
 use tokio::net::UnixListener;
-use tokio_stream::wrappers::TcpListenerStream;
 #[cfg(unix)]
 use tokio_stream::wrappers::UnixListenerStream;
 use tokio_util::sync::CancellationToken;
-use tonic::{Request, Status};
-
-use crate::control::{CallerId, Control, Pairing, PairingError};
-use crate::protocol::grpc::daemon::v1::{
-  DeviceServiceGrpc, DiscoveryServiceGrpc, PairingServiceGrpc, RunServiceGrpc, RunnerClassServiceGrpc, RunnerServiceGrpc,
-};
 
 /// Default loopback host for a local TCP listener.
 pub const DEFAULT_API_HOST: &str = "127.0.0.1";
@@ -133,7 +131,7 @@ pub struct Server {
 
 struct BoundListenerState {
   listener: BoundListener,
-  auth: RequestAuth,
+  authenticator: Authenticator,
 }
 
 impl Server {
@@ -150,10 +148,14 @@ impl Server {
     let mut endpoints = Vec::with_capacity(configured.len());
     let mut listeners = Vec::with_capacity(configured.len());
     for endpoint in configured {
-      let (listener, endpoint, auth) = bind_listener(endpoint, pairing.clone()).await?;
+      let (listener, endpoint, authenticator) = bind_listener(endpoint, pairing.clone()).await?;
       endpoints.push(endpoint);
-      listeners.push(BoundListenerState { listener, auth });
+      listeners.push(BoundListenerState {
+        listener,
+        authenticator,
+      });
     }
+
     let mut parent_endpoint = {
       #[cfg(unix)]
       {
@@ -168,6 +170,7 @@ impl Server {
       }
     }
     .map(ToString::to_string);
+
     if parent_endpoint.is_none()
       && let Some(path) = config.internal_runner_parent
     {
@@ -178,10 +181,11 @@ impl Server {
         host: DEFAULT_API_HOST.to_string(),
         port: 0,
       };
-      let (listener, endpoint, auth) = bind_listener(endpoint, pairing).await?;
+
+      let (listener, endpoint, authenticator) = bind_listener(endpoint, pairing).await?;
       parent_endpoint = Some(endpoint.to_string());
       endpoints.push(endpoint);
-      listeners.push(BoundListenerState { listener, auth });
+      listeners.push(BoundListenerState { listener, authenticator });
     }
     let daemon = factory(parent_endpoint)?;
     Ok(Self {
@@ -259,42 +263,50 @@ impl Server {
 }
 
 async fn serve_listener(listener: BoundListenerState, daemon: Arc<dyn Control>, shutdown: CancellationToken) -> Result<(), String> {
-  let pairing_service = PairingServiceGrpc::new(listener.auth.clone());
-  let discovery_service = DiscoveryServiceGrpc::new();
+  let authenticator = listener.authenticator;
+  let pairing_service = PairingServiceGrpc::new(authenticator.pairing());
+  let discovery_service = DiscoveryServiceGrpc::new(Arc::clone(&daemon));
   let device_service = DeviceServiceGrpc::new(Arc::clone(&daemon));
   let runner_service = RunnerServiceGrpc::new(Arc::clone(&daemon));
   let runner_class_service = RunnerClassServiceGrpc::new(Arc::clone(&daemon));
   let run_service = RunServiceGrpc::new(Arc::clone(&daemon));
-  let mut server = tonic::transport::Server::builder();
-  // PairDevice is the token-authenticated enrollment operation. The two
-  // administrative pairing RPCs authenticate inside their handlers, so this
-  // service intentionally cannot share the listener-wide bearer interceptor.
   let grpc_routes = tonic::service::Routes::new(PairingServiceServer::new(pairing_service))
-    .add_service(DiscoveryServiceServer::with_interceptor(discovery_service, listener.auth.clone()))
-    .add_service(DeviceServiceServer::with_interceptor(device_service, listener.auth.clone()))
-    .add_service(RunnerServiceServer::with_interceptor(runner_service, listener.auth.clone()))
-    .add_service(RunnerClassServiceServer::with_interceptor(runner_class_service, listener.auth.clone()))
-    .add_service(RunServiceServer::with_interceptor(run_service, listener.auth.clone()))
+    .add_service(DiscoveryServiceServer::new(discovery_service))
+    .add_service(DeviceServiceServer::new(device_service))
+    .add_service(RunnerServiceServer::new(runner_service))
+    .add_service(RunnerClassServiceServer::new(runner_class_service))
+    .add_service(RunServiceServer::new(run_service))
     .into_axum_router()
     .fallback({
-      let proxy = runner_grpc_proxy::RunnerGrpcProxy::new(Arc::clone(&daemon), listener.auth.clone());
+      let proxy = runner_grpc_proxy::RunnerGrpcProxy::new(Arc::clone(&daemon));
       move |request| {
         let proxy = proxy.clone();
         async move { proxy.forward(request).await }
       }
     });
-  let routes = crate::rest::router(Arc::clone(&daemon), listener.auth).fallback_service(grpc_routes);
+
+
+  let mut authentication = crate::middleware::authentication::Builder::new();
+  crate::rest::register_authentication(&mut authentication);
+  authentication.public_grpc::<PairingServiceServer<PairingServiceGrpc>>("PairDevice");
+  let authentication = authentication.build(authenticator.clone());
+
+  let routes = crate::rest::router(Arc::clone(&daemon), authenticator)
+    .fallback_service(grpc_routes)
+    .layer(axum::middleware::from_fn_with_state(authentication, crate::middleware::authentication::authenticate))
+    .layer(tower_http::cors::CorsLayer::permissive());
+
   match listener.listener {
-    BoundListener::Tcp(listener) => server
-      .add_routes(routes.into())
-      .serve_with_incoming_shutdown(TcpListenerStream::new(listener), shutdown.cancelled_owned())
+    BoundListener::Tcp(listener) => axum::serve(listener, routes.into_make_service())
+      .with_graceful_shutdown(shutdown.cancelled_owned())
       .await
       .map_err(|error| format!("API server failed: {error}")),
     #[cfg(unix)]
     BoundListener::Unix {
       listener,
       cleanup: _cleanup,
-    } => server
+    } => tonic::transport::Server::builder()
+      .accept_http1(true)
       .add_routes(routes.into())
       .serve_with_incoming_shutdown(UnixListenerStream::new(listener), shutdown.cancelled_owned())
       .await
@@ -325,7 +337,7 @@ async fn shutdown_when_daemon_idle(daemon: Arc<dyn Control>, shutdown: Cancellat
 async fn bind_listener(
   endpoint: ListenEndpoint,
   pairing: Option<Arc<dyn Pairing>>,
-) -> Result<(BoundListener, BoundEndpoint, RequestAuth), String> {
+) -> Result<(BoundListener, BoundEndpoint, Authenticator), String> {
   Ok(match endpoint {
     ListenEndpoint::Tcp { host, port } => {
       let bind_addr = resolve_loopback_bind_addr(&host, port).await?;
@@ -335,7 +347,7 @@ async fn bind_listener(
       (
         BoundListener::Tcp(listener),
         BoundEndpoint::Tcp(local_address),
-        RequestAuth::local(
+        Authenticator::local(
           #[cfg(unix)]
           None,
           pairing,
@@ -347,13 +359,13 @@ async fn bind_listener(
       let listener = TcpListener::bind(bind_addr).await.map_err(|error| format!("failed to bind remote API server {bind_addr}: {error}"))?;
       let local_address = listener.local_addr().map_err(|error| format!("failed to read remote API server address: {error}"))?;
       let pairing = pairing.ok_or_else(|| "remote API listener requires pairing".to_string())?;
-      (BoundListener::Tcp(listener), BoundEndpoint::Remote(local_address), RequestAuth::paired_bearer(pairing))
+      (BoundListener::Tcp(listener), BoundEndpoint::Remote(local_address), Authenticator::paired_bearer(pairing))
     }
     #[cfg(unix)]
     ListenEndpoint::Unix { path } => {
       let (listener, cleanup) = bind_unix(&path)?;
       let owner_uid = cleanup.owner_uid;
-      (BoundListener::Unix { listener, cleanup }, BoundEndpoint::Unix(path), RequestAuth::local(Some(owner_uid), pairing))
+      (BoundListener::Unix { listener, cleanup }, BoundEndpoint::Unix(path), Authenticator::local(Some(owner_uid), pairing))
     }
   })
 }
@@ -449,111 +461,5 @@ impl Drop for UnixSocketCleanup {
     if metadata.dev() == self.device && metadata.ino() == self.inode {
       let _ = std::fs::remove_file(&self.path);
     }
-  }
-}
-
-/// Authentication mode attached to a listener. Remote requests can never fall
-/// through to local-owner authentication.
-#[derive(Clone)]
-pub enum RequestAuth {
-  /// Caller-local authentication, optionally with pairing administration.
-  Local {
-    #[cfg(unix)]
-    /// Unix user permitted to access the listener, when enforced.
-    allowed_unix_uid: Option<u32>,
-    /// Optional pairing backend exposed to the local owner.
-    pairing: Option<Arc<dyn Pairing>>,
-  },
-  /// Authentication requiring an active paired Device bearer.
-  PairedBearer {
-    /// Pairing backend used to authenticate the bearer.
-    pairing: Arc<dyn Pairing>,
-  },
-}
-
-impl RequestAuth {
-  /// Creates authentication policy for a caller-local listener.
-  pub fn local(#[cfg(unix)] allowed_unix_uid: Option<u32>, pairing: Option<Arc<dyn Pairing>>) -> Self {
-    Self::Local {
-      #[cfg(unix)]
-      allowed_unix_uid,
-      pairing,
-    }
-  }
-
-  /// Creates authentication policy requiring an active paired bearer.
-  pub fn paired_bearer(pairing: Arc<dyn Pairing>) -> Self {
-    Self::PairedBearer { pairing }
-  }
-
-  pub(crate) fn authenticate<T>(&self, request: &Request<T>) -> Result<CallerId, Status> {
-    match self {
-      Self::Local { .. } => self.authenticate_extensions(request.extensions()),
-      Self::PairedBearer { pairing } => {
-        authenticate_bearer(pairing.as_ref(), request.metadata().get("authorization").and_then(|value| value.to_str().ok()))
-      }
-    }
-  }
-
-  pub(crate) fn authenticate_extensions(&self, extensions: &axum::http::Extensions) -> Result<CallerId, Status> {
-    match self {
-      Self::Local {
-        #[cfg(unix)]
-        allowed_unix_uid,
-        pairing: _,
-      } => {
-        #[cfg(unix)]
-        if let Some(allowed_uid) = allowed_unix_uid {
-          let peer_uid = extensions
-            .get::<tonic::transport::server::UdsConnectInfo>()
-            .and_then(|info| info.peer_cred.as_ref())
-            .map(tokio::net::unix::UCred::uid);
-          if peer_uid != Some(*allowed_uid) {
-            return Err(Status::permission_denied("Unix peer credentials do not match the API server owner"));
-          }
-        }
-        Ok(CallerId::local_owner())
-      }
-      Self::PairedBearer { .. } => Err(Status::unauthenticated("paired Device bearer required")),
-    }
-  }
-
-  pub(crate) fn authenticate_http<T>(&self, request: &axum::http::Request<T>) -> Result<CallerId, Status> {
-    match self {
-      Self::Local { .. } => self.authenticate_extensions(request.extensions()),
-      Self::PairedBearer { pairing } => {
-        authenticate_bearer(pairing.as_ref(), request.headers().get(axum::http::header::AUTHORIZATION).and_then(|value| value.to_str().ok()))
-      }
-    }
-  }
-
-  pub(crate) fn pairing(&self) -> Option<Arc<dyn Pairing>> {
-    match self {
-      Self::Local { pairing, .. } => pairing.clone(),
-      Self::PairedBearer { pairing } => Some(pairing.clone()),
-    }
-  }
-}
-
-impl tonic::service::Interceptor for RequestAuth {
-  fn call(&mut self, mut request: Request<()>) -> Result<Request<()>, Status> {
-    let caller = self.authenticate(&request)?;
-    request.extensions_mut().insert(caller);
-    Ok(request)
-  }
-}
-
-fn authenticate_bearer(pairing: &dyn Pairing, authorization: Option<&str>) -> Result<CallerId, Status> {
-  let credential = authorization
-    .and_then(|value| value.strip_prefix("Bearer "))
-    .filter(|value| !value.is_empty())
-    .ok_or_else(|| Status::unauthenticated("paired Device bearer required"))?;
-  pairing.authenticate_bearer(credential).map_err(map_pairing_auth_error)
-}
-
-fn map_pairing_auth_error(error: PairingError) -> Status {
-  match error {
-    PairingError::Unauthenticated => Status::unauthenticated("Device bearer is not an active paired credential"),
-    _ => Status::internal("paired-device authentication store failed"),
   }
 }

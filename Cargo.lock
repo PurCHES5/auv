@@ -411,9 +411,12 @@ dependencies = [
  "prost-reflect",
  "prost-types",
  "protoc-bin-vendored",
+ "serde",
+ "serde_json",
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
+ "tonic-rest",
 ]
 
 [[package]]
@@ -423,17 +426,23 @@ dependencies = [
  "auv",
  "auv-api-proto",
  "axum",
+ "bytes",
+ "futures-util",
  "http-body",
+ "http-body-util",
  "libc",
  "prost",
  "prost-types",
+ "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
  "tokio-util",
  "tonic",
+ "tonic-rest-build",
  "tower",
+ "tower-http",
 ]
 
 [[package]]
@@ -581,6 +590,7 @@ dependencies = [
  "auv-api-proto",
  "auv-api-server",
  "fs2",
+ "futures-util",
  "getrandom 0.3.4",
  "hex",
  "http",
@@ -597,6 +607,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
+ "tokio-tungstenite",
  "tokio-util",
  "tonic",
  "tonic-health",
@@ -1049,6 +1060,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "31b698c5f9a010f6573133b09e0de5408834d0c82f8d7475a89fc1867a71cd90"
 dependencies = [
  "axum-core",
+ "base64",
  "bytes",
  "form_urlencoded",
  "futures-util",
@@ -1067,8 +1079,10 @@ dependencies = [
  "serde_json",
  "serde_path_to_error",
  "serde_urlencoded",
+ "sha1",
  "sync_wrapper",
  "tokio",
+ "tokio-tungstenite",
  "tower",
  "tower-layer",
  "tower-service",
@@ -6299,6 +6313,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-tungstenite"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f72a05e828585856dacd553fba484c242c46e391fb0e58917c942ee9202915c"
+dependencies = [
+ "futures-util",
+ "log",
+ "tokio",
+ "tungstenite",
+]
+
+[[package]]
 name = "tokio-util"
 version = "0.7.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6470,6 +6496,44 @@ dependencies = [
  "tokio-stream",
  "tonic",
  "tonic-prost",
+]
+
+[[package]]
+name = "tonic-rest"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d21df5cc8e8344d01384905da29d4e4c8b6c10ae4ac7970fb06d8d7e9d72776"
+dependencies = [
+ "axum",
+ "chrono",
+ "futures",
+ "http",
+ "prost-types",
+ "serde",
+ "serde_json",
+ "tonic",
+]
+
+[[package]]
+name = "tonic-rest-build"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad4fc25541f83c5fe716aa0c9cbc5dd25d39f7670674fc11ecd14dfd3c6d8802"
+dependencies = [
+ "prost",
+ "prost-build",
+ "prost-types",
+ "thiserror 2.0.18",
+ "tonic-rest-core",
+]
+
+[[package]]
+name = "tonic-rest-core"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e970637ff7875cab010e612e95dd4848e5bdadcd5ddc168f1a5e810ebf4f731e"
+dependencies = [
+ "prost",
 ]
 
 [[package]]

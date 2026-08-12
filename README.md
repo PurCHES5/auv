@@ -10,7 +10,7 @@
       srcset="./docs/assets/logo-short-height-light.svg"
       media="(prefers-color-scheme: light), (prefers-color-scheme: no-preference)"
     />
-    <img width="30%" src="./docs/assets/logo-short-height-light.svg" />
+    <img width="30%" src="./docs/assets/logo-short-height-light.svg" alt="logo of auv" />
   </picture>
 </p>
 
@@ -315,7 +315,7 @@ evidence notes live under `docs/ai/references/`.
 Special thanks to all contributors for their contributions to auv ❤️
 
 <a href="https://github.com/moeru-ai/auv/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=moeru-ai/auv" />
+  <img src="https://contrib.rocks/image?repo=moeru-ai/auv" alt="AUV contributors" />
 </a>
 
 ## Star History

@@ -10,6 +10,7 @@ words:
   - apeira
   - Balatro
   - bbox
+  - bufbuild
   - clippy
   - conv
   - cust
@@ -17,12 +18,14 @@ words:
   - dotenv
   - fsrs
   - graphiti
+  - guiiai
   - haru
   - hnsw
   - iden
   - insel
   - kwaa
   - locomo
+  - Logg
   - mediaremote
   - moeru
   - msvc
@@ -49,6 +52,8 @@ words:
   - serde
   - sonarjs
   - sqlx
+  - tinyexec
+  - tutils
   - ultralytics
   - utoipa
   - uuidv

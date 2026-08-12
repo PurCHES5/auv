@@ -15,15 +15,24 @@ repository.workspace = true
 [dependencies]
 auv = { path = "../auv" }
 auv-api-proto = { path = "../auv-api-proto" }
-axum = "0.8"
+axum = { version = "0.8", features = ["http2", "ws"] }
+bytes.workspace = true
+futures-util.workspace = true
 prost = "0.14"
 prost-types = "0.14"
+serde.workspace = true
 serde_json.workspace = true
 tokio = { version = "1", features = ["macros", "net", "process", "rt-multi-thread", "sync", "time"] }
 tokio-stream = { version = "0.1", features = ["net"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 tonic = { version = "0.14", features = ["transport"] }
 http-body = "1"
+http-body-util = "0.1"
 tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["cors"] }
 libc = "0.2"
 thiserror.workspace = true
+
+[build-dependencies]
+auv-api-proto = { path = "../auv-api-proto" }
+tonic-rest-build = "=0.1.5"

@@ -15,8 +15,13 @@ repository.workspace = true
 prost = "0.14"
 prost-reflect = "0.16"
 prost-types = "0.14"
+serde.workspace = true
 tonic = "0.14"
 tonic-prost = "0.14"
+tonic-rest = "=0.1.5"
+
+[dev-dependencies]
+serde_json.workspace = true
 
 [build-dependencies]
 protoc-bin-vendored = "3"
