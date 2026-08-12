@@ -2,9 +2,10 @@
 
 Generated Fetch bindings for the daemon-owned AUV REST API.
 
-Run `pnpm generate` in this package to regenerate the Swagger document from
-Protobuf and then regenerate this package with Hey API. Files under `src/gen`
-are generated and must not be edited by hand.
+Run `buf generate` from `proto` to regenerate the Protobuf-ES and Swagger
+artifacts together. Then run `pnpm generate` in this package to regenerate the
+client from that Swagger document with Hey API. Files under `src/gen` are
+generated and must not be edited by hand.
 
 Dynamic Runner invocation and WebSocket streaming are runtime-described
 protocols and are intentionally owned by `auv-js`, not this package.

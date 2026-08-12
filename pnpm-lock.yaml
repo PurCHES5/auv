@@ -239,9 +239,6 @@ importers:
 
   proto/sdk/js:
     devDependencies:
-      '@bufbuild/buf':
-        specifier: 'catalog:'
-        version: 1.72.0
       '@hey-api/openapi-ts':
         specifier: 'catalog:'
         version: 0.99.0(magicast@0.5.3)(typescript@6.0.3)

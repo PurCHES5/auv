@@ -16,9 +16,6 @@
   "files": [
     "dist"
   ],
-  "engines": {
-    "node": ">=20"
-  },
   "publishConfig": {
     "exports": {
       ".": {
@@ -37,7 +34,6 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
-    "@bufbuild/buf": "catalog:",
     "@hey-api/openapi-ts": "catalog:",
     "@pnpm/find-workspace-dir": "catalog:",
     "tinyexec": "catalog:",

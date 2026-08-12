@@ -10,13 +10,6 @@ if (root === undefined)
   throw new Error('@auv-js/api-client generation is not inside a pnpm workspace')
 
 const protoDirectory = join(root, 'proto')
-// TODO(api-client-ci): enforce a clean regeneration diff when repository CI
-// gains a generated-artifact check; local generation is deterministic today.
-await x('buf', ['generate', '--template', 'buf.gen.openapi.yaml'], {
-  nodeOptions: { cwd: protoDirectory },
-  throwOnError: true,
-})
-
 await x('openapi-ts', [
   '-i',
   join(protoDirectory, 'openapi', 'auv-daemon.swagger.json'),
