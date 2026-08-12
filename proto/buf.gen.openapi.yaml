@@ -6,6 +6,9 @@ inputs:
 plugins:
   # NOTICE(openapi-generator): openapiv2 is the stable grpc-gateway generator.
   # Revisit OpenAPI v3 after protoc-gen-openapiv3 leaves alpha.
+  # TODO(openapi-auth-contract): bearer security and RFC 9457 error schemas are
+  # intentionally deferred until the protobuf annotations can express the
+  # listener-wide default and PairDevice exception without a second route list.
   - remote: buf.build/grpc-ecosystem/openapiv2:v2.30.0
     out: openapi
     opt:

@@ -111,3 +111,5 @@ codex.md
 # Protobuf
 proto/vendor/
 gen/
+!proto/sdk/js/src/gen/
+!proto/sdk/js/src/gen/**
