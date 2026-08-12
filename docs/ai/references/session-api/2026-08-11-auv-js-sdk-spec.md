@@ -226,6 +226,16 @@ same `Transport` contract. Platform-specific package entry points may be used
 to keep Node-only Unix-socket code out of browser module graphs; that packaging
 choice does not change the `connect` contract.
 
+Generated daemon resource bindings use ProtoJSON request and response bodies.
+The dynamic routed invoke endpoint keeps Protobuf payloads opaque because its
+extension-owned input and output types are selected at runtime. WebSocket invoke
+uses one serialized `ClientMessage` or `ServerMessage` per WebSocket binary
+message. These application messages own the `Open`/`Ready`, input/output,
+half-close/cancel, and terminal `End` lifecycle; they do not model WebSocket
+protocol frames. `Input.payload` and `Output.payload` carry the same opaque
+method-specific Protobuf bytes as dynamic HTTP invoke, without a gRPC message
+prefix.
+
 ### Accepted pairing flow
 
 Creating a token and consuming it are separate operations. A local owner or an
@@ -389,15 +399,15 @@ transport factories do not pretend to be cancellable merely to add a parameter.
 
 ## Testing Decisions
 
-- The primary behavioral seam is the public `auv-js` function/client API over a
-  recording transport. Tests assert public results, normalized errors,
-  dispatched typed requests, routing context, cancellation, and resource
-  cleanup rather than private helper calls.
+- Fast protocol-mapping tests use the public `auv-js` function/client API over
+  a recording transport. The invoke integration seam starts a real `auv`
+  daemon, enrolls a Device, authenticates with its credential, and reaches a
+  real routed Runner over HTTP and WebSocket.
 - The same operation scenarios run against the free-function form and verify
   that the client delegates with the bound connection and defaults. The client
   does not receive a duplicate behavior suite that would stabilize its
   internals.
-- Transport tests cover HTTP unary behavior, WebSocket framing and streaming,
+- Transport tests cover HTTP unary behavior, WebSocket application-message encoding and streaming,
   gRPC unary behavior and abort, and the shared gRPC implementation used by TCP
   and Unix sockets. The daemon integration suite exercises HTTP unary invoke
   and WebSocket streaming against the same live routed Runner.

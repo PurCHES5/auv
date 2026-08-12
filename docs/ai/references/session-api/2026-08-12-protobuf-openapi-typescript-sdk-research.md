@@ -53,9 +53,12 @@ implementation:
   RunnerClass with `google.api.http`;
 - uses exact-pinned `tonic-rest-build 0.1.5` to generate Axum JSON handlers
   which call the existing Tonic service adapters;
-- forwards UDS connection identity and HTTP authorization metadata into the
-  Tonic request, preserving the existing local-owner, public enrollment, and
-  paired-bearer policy;
+- authenticates each protected request in one listener middleware, then stores
+  `CallerId` in the request extensions;
+- forwards `CallerId` from Axum into generated Tonic requests, so REST and gRPC
+  adapters consume the same authenticated request context;
+- keeps WebSocket credential authentication in the `Open` frame because the
+  browser protocol does not send that credential in the HTTP request;
 - configures the Pairing messages for the ProtoJSON shapes used here, including
   camel-case names, original proto-name aliases, default-value omission,
   `Duration`, and `Timestamp`;
