@@ -262,7 +262,7 @@ BalatroBotLearning should not be used.
 The exact names remain provisional until implementation review.
 
 ```json
-{"jsonrpc":"2.0","method":"dataset.health","params":{},"id":1}
+{ "jsonrpc": "2.0", "method": "dataset.health", "params": {}, "id": 1 }
 ```
 
 Returns versions, active profile, render settings, and whether capture is
@@ -275,8 +275,8 @@ available.
   "params": {
     "sample_id": "base-000001",
     "cards": [
-      {"rank": "A", "suit": "S"},
-      {"rank": "2", "suit": "H"}
+      { "rank": "A", "suit": "S" },
+      { "rank": "2", "suit": "H" }
     ],
     "highlighted": [],
     "layout_seed": 17
@@ -310,7 +310,7 @@ The capture response should be produced from the
   "sample_id": "base-000001",
   "stage_token": "...",
   "frame_seq": 42,
-  "image": {"path": "frames/base-000001.png", "width": 1920, "height": 1080},
+  "image": { "path": "frames/base-000001.png", "width": 1920, "height": 1080 },
   "state": "SELECTING_HAND",
   "cards": [
     {
@@ -321,8 +321,8 @@ The capture response should be produced from the
       "suit": "S",
       "hidden": false,
       "highlighted": false,
-      "target_transform": {"x": 0, "y": 0, "w": 0, "h": 0},
-      "visible_transform": {"x": 0, "y": 0, "w": 0, "h": 0}
+      "target_transform": { "x": 0, "y": 0, "w": 0, "h": 0 },
+      "visible_transform": { "x": 0, "y": 0, "w": 0, "h": 0 }
     }
   ]
 }

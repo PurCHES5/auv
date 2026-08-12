@@ -18,9 +18,13 @@ the canonical local/remote operation interface and `auv-daemon` as the long-live
 `auv-api-client` and `auv-api-server` become protocol boundaries. MCP remains in
 `auv-cli`.
 
-Count: **16**
+Count: **20**
 
+- [`2026-08-12-protobuf-openapi-typescript-sdk-research.md`](2026-08-12-protobuf-openapi-typescript-sdk-research.md) — primary-source comparison and implemented 20-operation daemon Rust/OpenAPI generation; the Hey API/JavaScript slice remains deferred.
 - [`2026-08-04-live-pairing-administration-decision.md`](2026-08-04-live-pairing-administration-decision.md) — accepted live administration and shared authenticated authority.
+- [`2026-08-11-auv-js-sdk-spec.md`](2026-08-11-auv-js-sdk-spec.md) — implemented function-first JavaScript SDK, HTTP/WebSocket and Node transport, pairing, typed invoke, and AbortSignal contract.
+- [`2026-08-11-browser-remote-control-protocol-research.md`](2026-08-11-browser-remote-control-protocol-research.md) — primary-source comparison of WebSocket, RDP, VNC/noVNC, Guacamole, WebRTC, and CDP for a browser AUV transport.
+- [`2026-08-11-moonlight-sunshine-pairing-research.md`](2026-08-11-moonlight-sunshine-pairing-research.md) — source-level trace of Moonlight/Sunshine client-originated PIN pairing, certificate exchange, persistence, mTLS authentication, and revocation.
 - [`2026-08-03-auv-facade-daemon-runner-architecture.md`](2026-08-03-auv-facade-daemon-runner-architecture.md) — accepted facade, daemon, opaque routing, extension, and Runner target.
 - [`2026-07-31-device-run-runner-aggregated-api-design.md`](2026-07-31-device-run-runner-aggregated-api-design.md)
 - [`2026-07-31-daemon-session-api-architecture.md`](2026-07-31-daemon-session-api-architecture.md)
