@@ -1,15 +1,15 @@
 {
-  "name": "@auv/alint-config",
-  "private": true,
+  "name": "@auv-js/alint-config",
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "private": true,
   "exports": {
     ".": {
       "import": "./src/index.ts"
     },
     "./package.json": "./package.json"
   },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "files": [
     "dist"
   ],

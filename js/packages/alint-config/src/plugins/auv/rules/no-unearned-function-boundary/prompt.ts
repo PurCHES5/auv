@@ -4,7 +4,7 @@ You are reviewing one Rust source file in the AUV project.
 Call report_findings exactly once. Report only function boundaries that can be removed without losing a meaningful decision or reusable contract. Use an empty findings array when there is no violation.
 
 Every finding message must stand alone in a terse terminal formatter. Name the function, cite the concrete mechanics in its body, explain why no meaningful contract would be lost, and end with a concrete inlining or consolidation recommendation. Never emit only a function name or a category label. Put the remediation in suggestion too.
-`.trim();
+`.trim()
 
 export const unearnedFunctionBoundaryPrompt = `
 Review the target for functions that give a name and call boundary to mechanics that are clearer at their use site.
@@ -249,4 +249,4 @@ Do not report:
 - loops that coordinate state mutation, deduplication, side effects, early exit, or collection-wide transformation
 
 Do not infer a violation only from a short body, a single return expression, or a low call count. For every finding, make the message follow this semantic shape: \`<function> only <specific mechanics>, which carries no <policy/contract>; <specific expression to inline or boundaries to consolidate>.\` Do not copy this wording mechanically, but include the evidence, reason, and remediation. If the proof that no meaningful contract is lost is uncertain, return no finding.
-`.trim();
+`.trim()

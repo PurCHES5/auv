@@ -4,7 +4,7 @@ You are reviewing one Rust source file.
 Call report_findings exactly once. Use an empty findings array when the file has no qualifying issue.
 
 Every finding message must stand alone in a terse terminal formatter. Name the function, identify the shallow decision and delegated call, explain what responsibility is missing, and end with a concrete remediation. Never emit only a function name or a category label. Put the remediation in suggestion too.
-`.trim();
+`.trim()
 
 export const vacantControlBoundaryPrompt = `
 Task:
@@ -50,4 +50,4 @@ Rule ownership:
 Treat the file path as context. If the path indicates an example, test, benchmark, build.rs, binary wrapper, platform adapter, or public API facade module, require stronger evidence before reporting. Do not report merely because such a boundary is thin.
 
 For every finding, make the message follow this semantic shape: \`<function> makes only <specific shallow decision> before delegating <specific behavior>, so it owns no <missing responsibility>; <concrete remediation>.\` Do not copy this wording mechanically, but include all four facts. When suggesting a fix, prefer either merging the delegated body into the caller-facing function or moving the delegated behavior behind a boundary that carries real policy. If uncertain, return no finding.
-`.trim();
+`.trim()
