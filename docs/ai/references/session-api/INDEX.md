@@ -20,7 +20,7 @@ the canonical local/remote operation interface and `auv-daemon` as the long-live
 
 Count: **20**
 
-- [`2026-08-12-protobuf-openapi-typescript-sdk-research.md`](2026-08-12-protobuf-openapi-typescript-sdk-research.md) — primary-source comparison and implemented 20-operation daemon Rust/OpenAPI generation; the Hey API/JavaScript slice remains deferred.
+- [`2026-08-12-protobuf-openapi-typescript-sdk-research.md`](2026-08-12-protobuf-openapi-typescript-sdk-research.md) — primary-source comparison and implemented 20-operation daemon Rust/OpenAPI generation plus the generated `@auv-js/api-client` package consumed by `auv-js`.
 - [`2026-08-04-live-pairing-administration-decision.md`](2026-08-04-live-pairing-administration-decision.md) — accepted live administration and shared authenticated authority.
 - [`2026-08-11-auv-js-sdk-spec.md`](2026-08-11-auv-js-sdk-spec.md) — implemented function-first JavaScript SDK, HTTP/WebSocket and Node transport, pairing, typed invoke, and AbortSignal contract.
 - [`2026-08-11-browser-remote-control-protocol-research.md`](2026-08-11-browser-remote-control-protocol-research.md) — primary-source comparison of WebSocket, RDP, VNC/noVNC, Guacamole, WebRTC, and CDP for a browser AUV transport.

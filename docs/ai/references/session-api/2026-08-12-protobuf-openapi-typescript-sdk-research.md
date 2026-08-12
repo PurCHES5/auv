@@ -46,8 +46,9 @@ production users to stay with the v2 generator for now.
 ## Implementation outcome
 
 The owner approved the Rust half of the experiment on 2026-08-12, first for
-PairingService and then for every daemon-owned unary service. The current
-implementation:
+PairingService and then for every daemon-owned unary service. On 2026-08-13,
+the owner approved the generated JavaScript package and its integration into
+`auv-js`. The current implementation:
 
 - annotates 20 RPCs across Discovery, Device, Pairing, Run, Runner, and
   RunnerClass with `google.api.http`;
@@ -64,19 +65,22 @@ implementation:
   `Duration`, and `Timestamp`;
 - generates `proto/openapi/auv-daemon.swagger.json`, containing 18 paths and
   20 operations, through exact-pinned grpc-gateway `openapiv2 v2.30.0`;
+- generates the independent `@auv-js/api-client` package under `proto/sdk/js`
+  through exact-pinned `@hey-api/openapi-ts 0.99.0`;
+- uses those generated operations for daemon-owned unary HTTP calls in
+  `auv-js`, while the same facade continues to use protobuf RPCs for gRPC and
+  Unix transports;
+- keeps AUV-owned conveniences such as `ttlMs`, `Date`, generated Device IDs,
+  selectors, enum validation, and narrowed resource results in `auv-js`;
 - verifies Discovery, Device, Pairing, Run, Runner, and RunnerClass JSON routes
   with daemon integration tests and verifies the
   unchanged gRPC path with both a real `auv serve` process and the `auv`
   pairing CLI.
 
-The JavaScript/Hey API slice was deliberately not changed. The next experiment
-can consume the checked-in Swagger artifact without rediscovering the server
-paths, but the AUV-owned convenience facade described below still applies.
-
 ## Current AUV shape
 
-The repository currently has three independent descriptions of part of the
-same protocol:
+The repository now has one source for daemon REST paths and two generated
+consumers:
 
 1. The daemon v1 proto files own all daemon-service HTTP paths through
    `google.api.http`.
@@ -84,11 +88,12 @@ same protocol:
    all six daemon services. Dynamic Runner invocation remains the separate
    protobuf/WebSocket transport because its services come from runtime
    descriptors rather than daemon-owned concrete Tonic implementations.
-3. `js/packages/auv-js/src/pairing.ts` still manually associates each RPC with an HTTP
-   method/path while using generated protobuf message descriptors for binary
-   encoding.
+3. `proto/sdk/js` turns that Swagger artifact into `@auv-js/api-client`.
+   `js/packages/auv-js/src/apis/auv-daemon` binds the generated operations to
+   the existing protobuf request/response descriptors and contains no daemon
+   REST path literals.
 
-One detail still matters for the next experiment: `pairing.ts` is not only
+One detail still matters: the pairing facade is not only
 transport boilerplate. It also maps `ttlMs` to
   `google.protobuf.Duration`, maps `Timestamp` to `Date`, generates a default
   device ID, and presents narrower return values. OpenAPI/Hey API can replace
@@ -240,20 +245,9 @@ It does not replace:
 
 Source: [Hey API get started](https://heyapi.dev/docs/openapi/typescript/get-started).
 
-## Remaining Hey API experiment
+## Implemented Hey API package
 
-The Rust runtime and OpenAPI steps are complete. The next owner-approved slice
-would:
-
-1. Feed the generated spec to an exact-pinned Hey API version. Keep its output
-   in a generated directory and do not hand-edit it.
-2. Keep a thin handwritten pairing facade over the generated client for
-   `ttlMs`, `Date`, random device IDs, selectors, and narrowed results.
-3. Add a live integration test which starts the real daemon, invokes every
-   pairing operation through the generated Fetch client, and checks both
-   success and error responses.
-
-Acceptance gates:
+The generated package and `auv-js` integration satisfy these gates:
 
 - server routes and generated client paths come from the same annotations;
 - local-owner, unauthenticated enrollment, and paired-bearer cases match the
@@ -264,7 +258,15 @@ Acceptance gates:
 - cancellation still reaches Fetch through `AbortSignal`;
 - no second app/domain execution path is introduced;
 - the browser bundle does not regain a Node-only gRPC dependency;
-- generation is reproducible and checked for a clean diff in CI.
+- generation is reproducible; CI clean-diff enforcement remains a candidate
+  follow-up when generated-artifact checks are added to the repository CI.
+
+Two OpenAPI contract gaps remain explicit: the Swagger document does not yet
+describe the listener-wide bearer default with the public `PairDevice`
+exception, and it does not describe RFC 9457 error responses. `auv-js` supplies
+the bearer header and preserves its structured `AuvHttpError` mapping. Adding
+those declarations is a separate schema-contract slice rather than a second
+route list.
 
 ## Recorded decision boundary
 
