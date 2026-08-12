@@ -240,10 +240,11 @@ executable, argv sequence, or stdout stream into an MCP tool automatically.
 
 `Plugin` refers specifically to this CLI role. A remotely callable service
 bundle is an extension-provided RunnerClass, not a plugin, even when the same
-package provides both. Future JavaScript or other scripting clients are a
-design use case for reflected extension services, not an approved SDK surface;
-names such as `connectPlugin` or `extension` remain provisional until the
-extension discovery and routing contracts are accepted.
+package provides both. `auv-js` is an approved JavaScript projection of the AUV
+operation interface: it routes typed capability calls through Device, optional
+Run, and RunnerClass context, and does not turn CLI plugins into remote APIs.
+Names such as `connectPlugin` or `extension` remain provisional until extension
+discovery contracts are accepted.
 
 Root Device and Run flags written before the plugin name are parent context.
 The root resolves them and supplies `AuvContext` as inline JSON in `AUV_CONTEXT`.
