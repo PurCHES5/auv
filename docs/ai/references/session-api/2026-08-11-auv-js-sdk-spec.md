@@ -481,6 +481,6 @@ to one routed operation: its Protobuf `Open`, input, half-close, cancel, output,
 and terminal status frames preserve typed payloads and explicit lifecycle
 without creating a second session resource.
 
-The implementation lives in `packages/auv-js`; browser-safe exports are kept
+The implementation lives in `js/packages/auv-js`; browser-safe exports are kept
 separate from the Node gRPC/Unix adapter, and all generated message code comes
 from the checked-in Protobuf schemas through Buf.

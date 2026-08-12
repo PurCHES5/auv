@@ -84,7 +84,7 @@ same protocol:
    all six daemon services. Dynamic Runner invocation remains the separate
    protobuf/WebSocket transport because its services come from runtime
    descriptors rather than daemon-owned concrete Tonic implementations.
-3. `packages/auv-js/src/pairing.ts` still manually associates each RPC with an HTTP
+3. `js/packages/auv-js/src/pairing.ts` still manually associates each RPC with an HTTP
    method/path while using generated protobuf message descriptors for binary
    encoding.
 
