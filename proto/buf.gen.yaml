@@ -7,13 +7,6 @@ inputs:
       - auv/api/driver/v1/input.proto
       - auv/api/transport/websocket/v1
 plugins:
-  # Rust generation is currently owned by crates/auv-api-proto/build.rs so
-  # Cargo can compile without requiring buf or protoc to be installed globally.
-  # Keep Buf generation as the explicit Rust SDK output path as well.
-  - local: protoc-gen-prost
-    out: gen/rust
-  - local: protoc-gen-tonic
-    out: gen/rust
   - local: ../js/packages/auv-js/node_modules/.bin/protoc-gen-es
     out: ../js/packages/auv-js/src/gen
     # Service descriptors retain google.api.http extensions at runtime, so the
