@@ -10,10 +10,11 @@ use std::sync::Arc;
 use crate::authentication::Authenticator;
 use crate::control::{Control, Pairing};
 use crate::protocol::grpc::daemon::v1::{
-  DeviceServiceGrpc, DiscoveryServiceGrpc, PairingServiceGrpc, RunServiceGrpc, RunnerClassServiceGrpc, RunnerServiceGrpc,
+  DeviceServiceGrpc, DiscoveryServiceGrpc, HealthServiceGrpc, PairingServiceGrpc, RunServiceGrpc, RunnerClassServiceGrpc, RunnerServiceGrpc,
 };
 use auv_api_proto::auv::api::daemon::v1::device_service_server::DeviceServiceServer;
 use auv_api_proto::auv::api::daemon::v1::discovery_service_server::DiscoveryServiceServer;
+use auv_api_proto::auv::api::daemon::v1::health_service_server::HealthServiceServer;
 use auv_api_proto::auv::api::daemon::v1::pairing_service_server::PairingServiceServer;
 use auv_api_proto::auv::api::daemon::v1::run_service_server::RunServiceServer;
 use auv_api_proto::auv::api::daemon::v1::runner_class_service_server::RunnerClassServiceServer;
@@ -185,7 +186,10 @@ impl Server {
       let (listener, endpoint, authenticator) = bind_listener(endpoint, pairing).await?;
       parent_endpoint = Some(endpoint.to_string());
       endpoints.push(endpoint);
-      listeners.push(BoundListenerState { listener, authenticator });
+      listeners.push(BoundListenerState {
+        listener,
+        authenticator,
+      });
     }
     let daemon = factory(parent_endpoint)?;
     Ok(Self {
@@ -266,12 +270,14 @@ async fn serve_listener(listener: BoundListenerState, daemon: Arc<dyn Control>, 
   let authenticator = listener.authenticator;
   let pairing_service = PairingServiceGrpc::new(authenticator.pairing());
   let discovery_service = DiscoveryServiceGrpc::new(Arc::clone(&daemon));
+  let health_service = HealthServiceGrpc;
   let device_service = DeviceServiceGrpc::new(Arc::clone(&daemon));
   let runner_service = RunnerServiceGrpc::new(Arc::clone(&daemon));
   let runner_class_service = RunnerClassServiceGrpc::new(Arc::clone(&daemon));
   let run_service = RunServiceGrpc::new(Arc::clone(&daemon));
   let grpc_routes = tonic::service::Routes::new(PairingServiceServer::new(pairing_service))
     .add_service(DiscoveryServiceServer::new(discovery_service))
+    .add_service(HealthServiceServer::new(health_service))
     .add_service(DeviceServiceServer::new(device_service))
     .add_service(RunnerServiceServer::new(runner_service))
     .add_service(RunnerClassServiceServer::new(runner_class_service))
@@ -285,10 +291,10 @@ async fn serve_listener(listener: BoundListenerState, daemon: Arc<dyn Control>, 
       }
     });
 
-
   let mut authentication = crate::middleware::authentication::Builder::new();
   crate::rest::register_authentication(&mut authentication);
   authentication.public_grpc::<PairingServiceServer<PairingServiceGrpc>>("PairDevice");
+  authentication.public_grpc::<HealthServiceServer<HealthServiceGrpc>>("Check");
   let authentication = authentication.build(authenticator.clone());
 
   let routes = crate::rest::router(Arc::clone(&daemon), authenticator)

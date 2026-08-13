@@ -16,7 +16,7 @@ use crate::authentication::Authenticator;
 use crate::control::Control;
 use crate::middleware::authentication;
 use crate::protocol::grpc::daemon::v1::{
-  DeviceServiceGrpc, DiscoveryServiceGrpc, PairingServiceGrpc, RunServiceGrpc, RunnerClassServiceGrpc, RunnerServiceGrpc,
+  DeviceServiceGrpc, DiscoveryServiceGrpc, HealthServiceGrpc, PairingServiceGrpc, RunServiceGrpc, RunnerClassServiceGrpc, RunnerServiceGrpc,
 };
 
 const PROTOBUF_CONTENT_TYPE: &str = "application/protobuf";
@@ -38,6 +38,7 @@ struct RestState {
 pub(crate) fn router(daemon: Arc<dyn Control>, authenticator: Authenticator) -> Router {
   let pairing = Arc::new(PairingServiceGrpc::new(authenticator.pairing()));
   let discovery = Arc::new(DiscoveryServiceGrpc::new(Arc::clone(&daemon)));
+  let health = Arc::new(HealthServiceGrpc);
   let devices = Arc::new(DeviceServiceGrpc::new(Arc::clone(&daemon)));
   let runs = Arc::new(RunServiceGrpc::new(Arc::clone(&daemon)));
   let runners = Arc::new(RunnerServiceGrpc::new(Arc::clone(&daemon)));
@@ -55,6 +56,7 @@ pub(crate) fn router(daemon: Arc<dyn Control>, authenticator: Authenticator) -> 
     })
     .merge(generated::pairing_service_rest_router(pairing))
     .merge(generated::discovery_service_rest_router(discovery))
+    .merge(generated::health_service_rest_router(health))
     .merge(generated::device_service_rest_router(devices))
     .merge(generated::run_service_rest_router(runs))
     .merge(generated::runner_service_rest_router(runners))
@@ -72,10 +74,12 @@ async fn invoke_unary(
 ) -> Result<ProtobufBytes, RestError> {
   let (mut parts, body) = request.into_parts();
 
-  let protobuf = to_bytes(body, usize::MAX).await.map_err(|error| RestError::new(StatusCode::BAD_REQUEST, "invalid_body", error.to_string()))?;
+  let protobuf =
+    to_bytes(body, usize::MAX).await.map_err(|error| RestError::new(StatusCode::BAD_REQUEST, "invalid_body", error.to_string()))?;
   let mut grpc_body = Vec::with_capacity(5 + protobuf.len());
   grpc_body.push(0);
-  let length = u32::try_from(protobuf.len()).map_err(|_| RestError::new(StatusCode::PAYLOAD_TOO_LARGE, "request_too_large", "Protobuf request exceeds the gRPC frame length"))?;
+  let length = u32::try_from(protobuf.len())
+    .map_err(|_| RestError::new(StatusCode::PAYLOAD_TOO_LARGE, "request_too_large", "Protobuf request exceeds the gRPC frame length"))?;
 
   grpc_body.extend_from_slice(&length.to_be_bytes());
   grpc_body.extend_from_slice(&protobuf);
@@ -185,11 +189,12 @@ where
 /// Registers the authentication requirements owned by the REST routes.
 pub(crate) fn register_authentication(builder: &mut authentication::Builder) {
   builder.websocket_open(Method::GET, INVOKE_PATH);
-  // NOTICE(tonic-rest-public-methods): tonic-rest 0.1.5 emits public REST
-  // paths without their HTTP methods. All current generated public methods
-  // use POST. Ask the generator for method/path pairs before adding a public
-  // method that uses another HTTP verb.
+  // NOTICE(tonic-rest-public-methods): tonic-rest 0.1.5 emits public paths
+  // without their HTTP methods. The configured public RPCs currently use GET
+  // or POST, so register both; unmatched method/path pairs have no route. Ask
+  // the generator for exact method/path pairs before adding another HTTP verb.
   for &path in generated::PUBLIC_REST_PATHS {
+    builder.public(Method::GET, path);
     builder.public(Method::POST, path);
   }
 }

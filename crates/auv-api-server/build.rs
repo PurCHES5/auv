@@ -6,7 +6,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     .proto_root("auv_api_proto")
     .runtime_crate("crate::rest")
     .extension_type("crate::control::CallerId")
-    .public_methods(&["PairDevice"]);
+    .public_methods(&["Check", "PairDevice"]);
   let generated = tonic_rest_build::generate(auv_api_proto::FILE_DESCRIPTOR_SET, &config)?;
   std::fs::write(PathBuf::from(std::env::var("OUT_DIR")?).join("daemon_rest.rs"), generated)?;
   Ok(())

@@ -120,6 +120,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   }
   builder.compile_protos(
     &[
+      "../../proto/auv/api/daemon/v1/health.proto",
       "../../proto/auv/api/daemon/v1/discovery.proto",
       "../../proto/auv/api/daemon/v1/device.proto",
       "../../proto/auv/api/daemon/v1/pairing.proto",
@@ -144,6 +145,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     &["../../proto", "../../proto/vendor"],
   )?;
 
+  println!("cargo:rerun-if-changed=../../proto/auv/api/daemon/v1/health.proto");
   println!("cargo:rerun-if-changed=../../proto/auv/api/daemon/v1/discovery.proto");
   println!("cargo:rerun-if-changed=../../proto/auv/api/daemon/v1/device.proto");
   println!("cargo:rerun-if-changed=../../proto/auv/api/daemon/v1/pairing.proto");
