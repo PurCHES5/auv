@@ -1,6 +1,7 @@
 import { describe, expect, inject, it } from 'vitest'
 
-import { connect, createAuv } from '../../web/index'
+import { InputService } from '../../gen/auv/api/driver/v1/input_pb'
+import { connect, createAuv, invokeServerStream } from '../../web/index'
 
 const daemon = inject('auvBrowserDaemon')
 
@@ -23,7 +24,15 @@ describe('typed remote invoke from a browser', () => {
     }
   })
 
-  it.skipIf(!daemon.available)('invokes a real Driver capability through browser fetch', async () => {
+  // https://github.com/moeru-ai/auv/actions/runs/31709053172
+  // ROOT CAUSE:
+  //
+  // If hosted CI had no compositor, browser fetch reached the real Runner but
+  // Display enumeration failed because the ambient desktop did not exist.
+  //
+  // Before the fix, this test coupled routing evidence to display state. The
+  // fix sends caller-owned pixels through a headless-safe Driver capability.
+  it.skipIf(!daemon.available)('invokes a headless-safe real Driver capability through browser fetch', async () => {
     if (!daemon.available)
       throw new Error('browser daemon fixture is unavailable')
 
@@ -35,16 +44,34 @@ describe('typed remote invoke from a browser', () => {
 
     try {
       const auv = createAuv(connection).runner({ runnerClass: 'auv.core.local' })
-      const displays = await auv.displays.list()
-      expect(displays.length).toBeGreaterThan(0)
-      expect(displays.every(display => display.displayId.length > 0)).toBe(true)
+      const recognition = await auv.recognizeText({
+        backend: 'auv-js-integration',
+        bounds: { height: 16, width: 64, x: 0, y: 0 },
+        image: {
+          data: new Uint8Array(64 * 16 * 4).fill(255),
+          height: 16,
+          width: 64,
+        },
+        scaleFactor: 1,
+      })
+      expect(recognition.$typeName).toBe('auv.api.driver.v1.RecognizeTextResponse')
+      expect(recognition.text).toBe('')
+      expect(recognition.regions).toEqual([])
     }
     finally {
       await connection.close()
     }
   }, 600_000)
 
-  it.skipIf(!daemon.available)('streams a real Driver capability through browser WebSocket', async () => {
+  // https://github.com/moeru-ai/auv/actions/runs/31709053172
+  // ROOT CAUSE:
+  //
+  // If hosted CI lacked a compositor-backed input session, browser WebSocket
+  // routing succeeded but live mouse movement could not complete.
+  //
+  // Before the fix, the test required desktop input. The fix observes a typed
+  // validation error returned by the real Runner before OS interaction.
+  it.skipIf(!daemon.available)('routes a real Runner validation error through browser WebSocket', async () => {
     if (!daemon.available)
       throw new Error('browser daemon fixture is unavailable')
 
@@ -55,32 +82,21 @@ describe('typed remote invoke from a browser', () => {
     })
 
     try {
-      const auv = createAuv(connection).runner({ runnerClass: 'auv.core.local' })
-      const streamed = []
+      const method = InputService.method.moveMouse
+      const responses = await invokeServerStream(connection, {
+        input: method.input,
+        method: method.name,
+        output: method.output,
+        request: {},
+        runnerClass: 'auv.core.local',
+        service: method.parent.typeName,
+      })
 
-      for await (const item of await auv.input.moveMouse({
-        curve: {
-          segments: [{
-            control1: { x: 0, y: 0 },
-            control2: { x: 0, y: 0 },
-            end: { x: 0, y: 0 },
-          }],
-          start: { x: 0, y: 0 },
-        },
-        mapping: { height: 1, width: 1 },
-        options: {
-          duration: { nanos: 50_000_000, seconds: 0n },
-          sampleRateHz: 60,
-        },
-        start: { source: { case: 'current', value: {} } },
-      }))
-        streamed.push(item)
-
-      expect(streamed.length).toBeGreaterThan(1)
-      const events = streamed.map(item => item.event.case)
-      expect(events[0]).toBe('started')
-      expect(events).toContain('progress')
-      expect(events.at(-1)).toBe('completed')
+      await expect(responses[Symbol.asyncIterator]().next()).rejects.toMatchObject({
+        grpcStatus: 3,
+        name: 'AuvWebSocketError',
+        rpcCode: 3,
+      })
     }
     finally {
       await connection.close()

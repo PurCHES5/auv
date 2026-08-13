@@ -6,11 +6,13 @@ import {
   ListDisplaysRequestSchema,
   ListDisplaysResponseSchema,
 } from '../../gen/auv/api/driver/v1/display_pb'
+import { InputService } from '../../gen/auv/api/driver/v1/input_pb'
 import {
   AuvConfigurationError,
   connect,
   createAuv,
   createPairingToken,
+  invokeServerStream,
   invokeUnary,
   pairDevice,
 } from '../../node/index'
@@ -65,48 +67,64 @@ describe.skipIf(process.platform === 'win32')('invoke against an authenticated A
     await unauthenticated.close()
   })
 
-  it('pairs a Device and invokes a real Runner through the remote HTTP API', async () => {
+  // https://github.com/moeru-ai/auv/actions/runs/31709053172
+  // ROOT CAUSE:
+  //
+  // If hosted CI had no compositor or only one attached display, the routed
+  // Display request failed or its multi-display assertion rejected a valid
+  // environment even though remote Runner routing had succeeded.
+  //
+  // Before the fix, this test coupled routing evidence to ambient display
+  // state. The fix sends caller-owned pixels through the same real Runner.
+  it('pairs a Device and invokes a headless-safe real Runner capability through the remote HTTP API', async () => {
     const paired = await connect({ credential: enrollment.credential, endpoint: daemon.remoteEndpoint, transport: 'http' })
 
     {
       const auv = createAuv(paired).runner({ runnerClass: 'auv.core.local' })
-      const displays = await auv.displays.list()
-      expect(displays.every(display => display.displayId.length > 0)).toBe(true)
-      expect(displays.length).toBeGreaterThan(1)
+      const recognition = await auv.recognizeText({
+        backend: 'auv-js-integration',
+        bounds: { height: 16, width: 64, x: 0, y: 0 },
+        image: {
+          data: new Uint8Array(64 * 16 * 4).fill(255),
+          height: 16,
+          width: 64,
+        },
+        scaleFactor: 1,
+      })
+      expect(recognition.$typeName).toBe('auv.api.driver.v1.RecognizeTextResponse')
+      expect(recognition.text).toBe('')
+      expect(recognition.regions).toEqual([])
     }
 
     await paired.close()
   }, 600_000)
 
-  it('pairs a Device and invokes mouseMove to the remote HTTP API', async () => {
+  // https://github.com/moeru-ai/auv/actions/runs/31709053172
+  // ROOT CAUSE:
+  //
+  // If hosted CI lacked a compositor-backed input session, successful remote
+  // mouse movement could not run even though WebSocket routing was healthy.
+  //
+  // Before the fix, the test required live desktop input. The fix observes a
+  // typed validation error returned by the real Runner before OS interaction.
+  it('routes a real Runner validation error through the remote WebSocket API', async () => {
     const paired = await connect({ credential: enrollment.credential, endpoint: daemon.remoteEndpoint, transport: 'http' })
 
-    const auv = createAuv(paired).runner({ runnerClass: 'auv.core.local' })
-    const streamed = []
+    const method = InputService.method.moveMouse
+    const responses = await invokeServerStream(paired, {
+      input: method.input,
+      method: method.name,
+      output: method.output,
+      request: {},
+      runnerClass: 'auv.core.local',
+      service: method.parent.typeName,
+    })
 
-    for await (const item of await auv.input.moveMouse({
-      curve: {
-        segments: [{
-          control1: { x: 0, y: 0 },
-          control2: { x: 0, y: 0 },
-          end: { x: 0, y: 0 },
-        }],
-        start: { x: 0, y: 0 },
-      },
-      mapping: { height: 1, width: 1 },
-      options: {
-        duration: { nanos: 50_000_000, seconds: 0n },
-        sampleRateHz: 60,
-      },
-      start: { source: { case: 'current', value: {} } },
-    }))
-      streamed.push(item)
-
-    expect(streamed.length).toBeGreaterThan(1)
-    const events = streamed.map(item => item.event.case)
-    expect(events[0]).toBe('started')
-    expect(events).toContain('progress')
-    expect(events.at(-1)).toBe('completed')
+    await expect(responses[Symbol.asyncIterator]().next()).rejects.toMatchObject({
+      grpcStatus: 3,
+      name: 'AuvWebSocketError',
+      rpcCode: 3,
+    })
 
     await paired.close()
   })
