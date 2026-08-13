@@ -16,15 +16,44 @@ env:
 
 jobs:
   js:
-    runs-on: ubuntu-24.04
-    name: js checks ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04
+          - macos-14
+          - windows-2025
+    runs-on: ${{ matrix.os }}
+    name: js checks ${{ matrix.os }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
         with:
           submodules: recursive
 
+      - name: Set up Buf
+        uses: bufbuild/buf-action@v1
+        with:
+          version: "1.71.0"
+          setup_only: true
+
+      - name: Install yq
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install yq --version 4.53.3 --yes --no-progress
+
+      - name: Generate vendored Protobuf dependencies
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/generate-proto-vendor.ps1
+
+      - name: Generate vendored Protobuf dependencies
+        if: runner.os != 'Windows'
+        shell: bash
+        run: ./scripts/generate-proto-vendor
+
       - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -56,15 +85,18 @@ jobs:
           cache: pnpm
 
       - name: Inspect Node.js
-        run: |
-          which node
-          node --version
+        run: node --version
 
       - name: Install dependencies
         run: pnpm install
 
-      - name: Install Playwright browsers
+      - name: Install Playwright browser and Linux dependencies
+        if: runner.os == 'Linux'
         run: pnpm --filter auv-js exec playwright install --with-deps chromium
+
+      - name: Install Playwright browser
+        if: runner.os != 'Linux'
+        run: pnpm --filter auv-js exec playwright install chromium
 
       - name: Lint
         run: pnpm lint

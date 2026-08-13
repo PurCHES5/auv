@@ -5,7 +5,10 @@ import { connect, createAuv } from '../../web/index'
 const daemon = inject('auvBrowserDaemon')
 
 describe('typed remote invoke from a browser', () => {
-  it('rejects unauthenticated requests to the remote HTTP API', async () => {
+  it.skipIf(!daemon.available)('rejects unauthenticated requests to the remote HTTP API', async () => {
+    if (!daemon.available)
+      throw new Error('browser daemon fixture is unavailable')
+
     const connection = await connect({ endpoint: daemon.endpoint, transport: 'http' })
 
     try {
@@ -20,7 +23,10 @@ describe('typed remote invoke from a browser', () => {
     }
   })
 
-  it('invokes a real Driver capability through browser fetch', async () => {
+  it.skipIf(!daemon.available)('invokes a real Driver capability through browser fetch', async () => {
+    if (!daemon.available)
+      throw new Error('browser daemon fixture is unavailable')
+
     const connection = await connect({
       credential: daemon.credential,
       endpoint: daemon.endpoint,
@@ -38,7 +44,10 @@ describe('typed remote invoke from a browser', () => {
     }
   }, 600_000)
 
-  it('streams a real Driver capability through browser WebSocket', async () => {
+  it.skipIf(!daemon.available)('streams a real Driver capability through browser WebSocket', async () => {
+    if (!daemon.available)
+      throw new Error('browser daemon fixture is unavailable')
+
     const connection = await connect({
       credential: daemon.credential,
       endpoint: daemon.endpoint,
