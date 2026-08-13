@@ -63,9 +63,8 @@ application lifetime:
 ```ts
 import { join } from 'node:path'
 
-import { app } from 'electron'
-
 import { createAuv, startAuv } from 'auv-js/node'
+import { app } from 'electron'
 
 const daemon = await startAuv({
   binaryPath: join(process.resourcesPath, 'bin', 'auv'),
@@ -79,7 +78,7 @@ const auv = createAuv(connection)
 
 try {
   const devices = await auv.devices.list()
-  console.log(devices)
+  console.info(devices)
 }
 finally {
   await connection.close()
