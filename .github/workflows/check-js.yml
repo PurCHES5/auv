@@ -67,7 +67,8 @@ jobs:
             libxkbcommon-dev \
             libegl-dev \
             libleptonica-dev \
-            libtesseract-dev
+            libtesseract-dev \
+            tesseract-ocr-eng
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
