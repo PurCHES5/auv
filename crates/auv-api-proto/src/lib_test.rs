@@ -1,10 +1,10 @@
+use crate::FILE_DESCRIPTOR_SET;
 use crate::auv::api::daemon::v1::device_service_client::DeviceServiceClient;
 use crate::auv::api::daemon::v1::discovery_service_client::DiscoveryServiceClient;
 use crate::auv::api::daemon::v1::pairing_service_client::PairingServiceClient;
 use crate::auv::api::daemon::v1::run_service_client::RunServiceClient;
 use crate::auv::api::daemon::v1::runner_class_service_client::RunnerClassServiceClient;
 use crate::auv::api::daemon::v1::runner_service_client::RunnerServiceClient;
-use crate::{FILE_DESCRIPTOR_SET};
 use prost::Message;
 use prost_reflect::{DescriptorPool, Value};
 use prost_types::FileDescriptorSet;
