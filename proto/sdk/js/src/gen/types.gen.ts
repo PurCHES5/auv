@@ -28,6 +28,10 @@ export type V1ApiResource = {
  */
 export type V1ApiResourceOperation = 'API_RESOURCE_OPERATION_UNSPECIFIED' | 'API_RESOURCE_OPERATION_LIST' | 'API_RESOURCE_OPERATION_GET' | 'API_RESOURCE_OPERATION_CREATE' | 'API_RESOURCE_OPERATION_DELETE';
 
+export type V1CheckResponse = {
+    status?: V1HealthStatus;
+};
+
 export type V1CreatePairingTokenRequest = {
     /**
      * Omit ttl to create a token with no expiry. A token remains one-time even
@@ -159,6 +163,15 @@ export type V1GetRunnerRequest = {
 export type V1GetRunnerResponse = {
     runner?: V1Runner;
 };
+
+/**
+ * HealthStatus describes the daemon's ability to serve API calls.
+ *
+ * - HEALTH_STATUS_SERVING: TODO(health-detail-v1): degraded/component states are deferred because the
+ * daemon has no runtime-owned component status producer yet; add them when
+ * that state has an owner and a concrete caller.
+ */
+export type V1HealthStatus = 'HEALTH_STATUS_UNSPECIFIED' | 'HEALTH_STATUS_SERVING';
 
 export type V1ListApiNamespacesResponse = {
     namespaces?: Array<V1ApiNamespace>;
@@ -622,3 +635,19 @@ export type DiscoveryServiceGetApiGroupVersionResponses = {
 };
 
 export type DiscoveryServiceGetApiGroupVersionResponse = DiscoveryServiceGetApiGroupVersionResponses[keyof DiscoveryServiceGetApiGroupVersionResponses];
+
+export type HealthServiceCheckData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/health';
+};
+
+export type HealthServiceCheckResponses = {
+    /**
+     * A successful response.
+     */
+    200: V1CheckResponse;
+};
+
+export type HealthServiceCheckResponse = HealthServiceCheckResponses[keyof HealthServiceCheckResponses];

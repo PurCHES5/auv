@@ -13,6 +13,10 @@
       "description": "DiscoveryService describes the AUV-owned REST and gRPC API namespace."
     },
     {
+      "name": "HealthService",
+      "description": "HealthService reports whether this daemon listener can serve API calls."
+    },
+    {
       "name": "PairingService",
       "description": "PairingService manages bootstrap tokens and paired Device credentials."
     },
@@ -520,6 +524,22 @@
           "DiscoveryService"
         ]
       }
+    },
+    "/health": {
+      "get": {
+        "operationId": "HealthService_Check",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1CheckResponse"
+            }
+          }
+        },
+        "tags": [
+          "HealthService"
+        ]
+      }
     }
   },
   "definitions": {
@@ -574,6 +594,14 @@
       ],
       "default": "API_RESOURCE_OPERATION_UNSPECIFIED",
       "description": " - API_RESOURCE_OPERATION_DELETE: TODO(watch-v1): add WATCH only after collection resource versions,\n retention, reconnect, and stale-version behavior have an approved owner."
+    },
+    "v1CheckResponse": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "$ref": "#/definitions/v1HealthStatus"
+        }
+      }
     },
     "v1CreatePairingTokenRequest": {
       "type": "object",
@@ -827,6 +855,15 @@
           "$ref": "#/definitions/v1Runner"
         }
       }
+    },
+    "v1HealthStatus": {
+      "type": "string",
+      "enum": [
+        "HEALTH_STATUS_UNSPECIFIED",
+        "HEALTH_STATUS_SERVING"
+      ],
+      "default": "HEALTH_STATUS_UNSPECIFIED",
+      "description": "HealthStatus describes the daemon's ability to serve API calls.\n\n - HEALTH_STATUS_SERVING: TODO(health-detail-v1): degraded/component states are deferred because the\n daemon has no runtime-owned component status producer yet; add them when\n that state has an owner and a concrete caller."
     },
     "v1ListApiNamespacesResponse": {
       "type": "object",

@@ -3,8 +3,7 @@ inputs:
   - directory: .
     paths:
       - auv/api/daemon/v1
-      - auv/api/driver/v1/display.proto
-      - auv/api/driver/v1/input.proto
+      - auv/api/driver
       - auv/api/transport/websocket/v1
 plugins:
   - local: ../js/packages/auv-js/node_modules/.bin/protoc-gen-es
@@ -27,6 +26,7 @@ plugins:
     types:
       - auv.api.daemon.v1.DeviceService
       - auv.api.daemon.v1.DiscoveryService
+      - auv.api.daemon.v1.HealthService
       - auv.api.daemon.v1.PairingService
       - auv.api.daemon.v1.RunService
       - auv.api.daemon.v1.RunnerService
@@ -38,6 +38,7 @@ plugins:
       - disable_default_errors=true
       - Mauv/api/daemon/v1/device.proto=github.com/moeru-ai/auv/proto/auv/api/daemon/v1
       - Mauv/api/daemon/v1/discovery.proto=github.com/moeru-ai/auv/proto/auv/api/daemon/v1
+      - Mauv/api/daemon/v1/health.proto=github.com/moeru-ai/auv/proto/auv/api/daemon/v1
       - Mauv/api/daemon/v1/pairing.proto=github.com/moeru-ai/auv/proto/auv/api/daemon/v1
       - Mauv/api/daemon/v1/resource.proto=github.com/moeru-ai/auv/proto/auv/api/daemon/v1
       - Mauv/api/daemon/v1/run.proto=github.com/moeru-ai/auv/proto/auv/api/daemon/v1
