@@ -90,6 +90,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Generate Protobuf bindings
+        run: pnpm generate:proto
+
       - name: Install Playwright browser and Linux dependencies
         if: runner.os == 'Linux'
         run: pnpm --filter auv-js exec playwright install --with-deps chromium

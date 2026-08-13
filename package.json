@@ -5,6 +5,7 @@
   "packageManager": "pnpm@11.9.0",
   "scripts": {
     "build": "pnpm --filter @auv-js/api-client --filter \"./js/packages/*\" --if-present build",
+    "generate:proto": "cd proto && buf generate --template buf.gen.yaml",
     "lint:fix": "eslint --cache . --fix",
     "lint": "eslint --cache .",
     "test:run": "pnpm --filter @auv-js/api-client --filter \"./js/packages/*\" --if-present test:run",
