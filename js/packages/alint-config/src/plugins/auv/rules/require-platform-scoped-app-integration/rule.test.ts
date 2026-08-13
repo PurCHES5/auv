@@ -1,3 +1,5 @@
+import { resolve } from 'node:path'
+
 import { describe, expect, it, vi } from 'vitest'
 
 import auvPlugin from '../../index'
@@ -17,9 +19,18 @@ describe('require-platform-scoped-app-integration', () => {
     expect(auvPlugin.rules?.['require-platform-scoped-app-integration']).toBe(platformScopedAppIntegrationRule)
   })
 
+  // https://github.com/moeru-ai/auv/actions/runs/31741822367/job/94586817052
+  // ROOT CAUSE:
+  //
+  // If this test ran on Windows, the rule reported a native absolute path but
+  // the assertion expected a hard-coded POSIX path.
+  //
+  // Before the fix, the valid finding failed only on Windows. The fix derives
+  // the expectation with the same platform path semantics as the public report.
   it('reports a valid directory-level finding', async () => {
     const report = vi.fn()
     const recordUsage = vi.fn()
+    const cratePath = '/repo/crates/auv-example-app'
     const context = createContext({
       agent: async (request: { tools: Array<{ execute: (input: unknown) => unknown, name: string }> }) => {
         const submit = request.tools.find(tool => tool.name === 'submit_platform_review')
@@ -42,11 +53,11 @@ describe('require-platform-scoped-app-integration', () => {
       report,
     })
 
-    await runDirectoryRule(context, '/repo/crates/auv-example-app')
+    await runDirectoryRule(context, cratePath)
 
     expect(report).toHaveBeenCalledWith(expect.objectContaining({
       evidence: expect.objectContaining({ category: 'automation-placement', confidence: 'high' }),
-      filePath: '/repo/crates/auv-example-app/src/commands/search.rs',
+      filePath: resolve(cratePath, 'src/commands/search.rs'),
       loc: { start: { column: 0, line: 3 } },
     }))
     expect(recordUsage).toHaveBeenCalledWith(expect.objectContaining({ totalTokens: 14 }))
