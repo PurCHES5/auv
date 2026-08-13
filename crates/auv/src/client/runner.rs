@@ -584,6 +584,9 @@ impl WindowsClient {
 #[derive(Clone, Debug)]
 pub struct WindowClient {
   runner: RunnerClient,
+  // TODO(window-client-observation): This is the resolve-time observation,
+  // not current grounding. Stop retaining and exposing it once callers obtain
+  // window observations from the capability result that produced them.
   window: auv_driver::Window,
   window_ref: proto::WindowRef,
 }
