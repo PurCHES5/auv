@@ -3,15 +3,19 @@ import type { DescMessage, MessageShape } from '@bufbuild/protobuf'
 import type { AuvConnection } from '../../transport/connection'
 import type { OperationOptions } from '../../transport/types'
 import type { Device, GetDeviceOptions } from '../auv-daemon/devices'
+import type { HealthStatus } from '../auv-daemon/health'
 import type { CreatePairingTokenOptions, PairDeviceOptions, PairedDeviceOptions, PairingEnrollment, PairingToken, SetPairedDeviceEnabledOptions } from '../auv-daemon/pairing'
 import type { CreateRunnerOptions, DeleteRunnerOptions, GetRunnerClassOptions, GetRunnerOptions, ListRunnerClassesOptions, Runner, RunnerClass } from '../auv-daemon/runners'
 import type { CreateRunOptions, GetRunOptions, Run, StopRunOptions } from '../auv-daemon/runs'
+import type { RunnerClient, RunnerRouteOptions } from './driver'
 import type { InvokeDuplexOptions, InvokeServerStreamOptions, InvokeUnaryOptions } from './invoke'
 
 import { getDevice, listDevices } from '../auv-daemon/devices'
+import { checkHealth } from '../auv-daemon/health'
 import { createPairingToken, pairDevice, revokeDeviceCredential, setPairedDeviceEnabled, unpairDevice } from '../auv-daemon/pairing'
 import { createRunner, deleteRunner, getRunner, getRunnerClass, listRunnerClasses, listRunners } from '../auv-daemon/runners'
 import { createRun, getRun, listRuns, stopRun } from '../auv-daemon/runs'
+import { createRunnerClient } from './driver'
 import { invokeDuplex, invokeServerStream, invokeUnary } from './invoke'
 
 export interface AuvClient {
@@ -19,6 +23,9 @@ export interface AuvClient {
   readonly devices: {
     get: (options: GetDeviceOptions) => Promise<Device>
     list: (options?: OperationOptions) => Promise<readonly Device[]>
+  }
+  readonly health: {
+    check: (options?: OperationOptions) => Promise<HealthStatus>
   }
   readonly invoke: {
     duplex: <I extends DescMessage, O extends DescMessage>(options: InvokeDuplexOptions<I, O>) => ReturnType<typeof invokeDuplex<I, O>>
@@ -32,6 +39,8 @@ export interface AuvClient {
     setEnabled: (options: SetPairedDeviceEnabledOptions) => Promise<boolean>
     unpair: (options: PairedDeviceOptions) => Promise<boolean>
   }
+  /** Binds first-party Driver capabilities to one Runner route. */
+  readonly runner: (options: RunnerRouteOptions) => RunnerClient
   readonly runners: {
     create: (options: CreateRunnerOptions) => Promise<Runner>
     delete: (options: DeleteRunnerOptions) => Promise<Runner>
@@ -64,6 +73,9 @@ export function createAuv(connection: AuvConnection, options: CreateClientOption
       get: value => getDevice(connection, operation(value)),
       list: value => listDevices(connection, operation(value)),
     },
+    health: {
+      check: value => checkHealth(connection, operation(value)),
+    },
     invoke: {
       duplex: value => invokeDuplex(connection, operation(value)),
       serverStream: value => invokeServerStream(connection, operation(value)),
@@ -76,6 +88,7 @@ export function createAuv(connection: AuvConnection, options: CreateClientOption
       setEnabled: value => setPairedDeviceEnabled(connection, operation(value)),
       unpair: value => unpairDevice(connection, operation(value)),
     },
+    runner: value => createRunnerClient(connection, operation(value)),
     runners: {
       create: value => createRunner(connection, operation(value)),
       delete: value => deleteRunner(connection, operation(value)),

@@ -1,5 +1,3 @@
-import type { Result } from 'tinyexec'
-
 import type { AuvConnection } from '../node/index'
 
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -7,10 +5,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { Format, LogLevel, setGlobalFormat, setGlobalLogLevel, useLogg } from '@guiiai/logg'
-import { x } from 'tinyexec'
 
-import { connect, createPairingToken, listDevices, pairDevice } from '../node/index'
+import { connect, createPairingToken, listDevices, pairDevice, startAuv } from '../node/index'
 import { repositoryRoot } from './dir'
+import { unusedLoopbackPort } from './port'
 
 setGlobalFormat(Format.Pretty)
 setGlobalLogLevel(LogLevel.Debug)
@@ -35,47 +33,42 @@ export async function setupAuvDaemon(): Promise<AuvDaemonFixture> {
   const workspace = await repositoryRoot()
   const root = await mkdtemp(join(tmpdir(), 'auv-js-daemon-'))
   const ownerSocket = join(root, 'auv.sock')
+  const remotePort = await unusedLoopbackPort()
 
   log.withFields({ root }).log('starting AUV daemon for testing')
 
-  const daemon = x(join(workspace, 'target', 'debug', 'auv'), [
-    'serve',
-    '--listen',
-    `unix://${ownerSocket}`,
-    '--listen',
-    'http://127.0.0.1:0',
-    '--pairing-store',
-    join(root, 'pairings.json'),
-    '--store-root',
-    join(root, 'store'),
-    '--no-discovery',
-  ], {
-    nodeOptions: { cwd: workspace },
+  const daemon = await startAuv({
+    binaryPath: join(workspace, 'target', 'debug', 'auv'),
+    listeners: [`unix://${ownerSocket}`, `http://127.0.0.1:${remotePort}`],
+    noDiscovery: true,
+    pairingStore: join(root, 'pairings.json'),
+    storeRoot: join(root, 'store'),
+    workingDirectory: workspace,
   })
 
   log.withFields({ ownerSocket }).log('AUV daemon started for testing')
 
-  const readiness = daemonReadiness(daemon)
+  const remoteEndpoint = daemon.endpoints.find(endpoint => endpoint.startsWith('http://'))
+  if (remoteEndpoint === undefined) {
+    await daemon.stop()
+    await rm(root, { force: true, recursive: true })
+    throw new Error('AUV daemon fixture did not bind its remote HTTP listener')
+  }
 
   const stop = async () => {
-    daemon.kill('SIGINT')
-    await daemon
-    await readiness.output
-    await rm(root, { force: true, recursive: true })
+    try {
+      await daemon.stop()
+    }
+    finally {
+      await rm(root, { force: true, recursive: true })
+    }
 
     log.withFields({ ownerSocket }).log('AUV daemon stopped')
   }
 
-  try {
-    const remoteEndpoint = await readiness.endpoint
-    log.withFields({ endpoint: remoteEndpoint, ownerSocket }).log('AUV daemon ready for testing')
+  log.withFields({ endpoint: remoteEndpoint, ownerSocket }).log('AUV daemon ready for testing')
 
-    return { ownerSocket, remoteEndpoint, stop }
-  }
-  catch (error) {
-    await stop()
-    throw error
-  }
+  return { ownerSocket, remoteEndpoint, stop }
 }
 
 /** Starts an isolated daemon and returns an authenticated paired-Device connection. */
@@ -128,36 +121,6 @@ export async function setupPairedAuvDaemon(deviceId = 'auv-js-test-device'): Pro
   }
 }
 
-function daemonReadiness(daemon: Result): { endpoint: Promise<string>, output: Promise<string> } {
-  let resolveEndpoint!: (endpoint: string) => void
-  let rejectEndpoint!: (error: Error) => void
-  const endpoint = new Promise<string>((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('AUV daemon readiness timed out')), 10_000)
-    resolveEndpoint = (value) => {
-      clearTimeout(timeout)
-      resolve(value)
-    }
-    rejectEndpoint = (error) => {
-      clearTimeout(timeout)
-      reject(error)
-    }
-  })
-
-  const output = (async () => {
-    let collected = ''
-    for await (const line of daemon) {
-      collected += `${line}\n`
-      const match = line.match(/auv serve: (http:\/\/\S+)/u)
-      if (match !== null)
-        resolveEndpoint(match[1]!)
-    }
-    if (daemon.exitCode !== undefined && daemon.exitCode !== 0)
-      rejectEndpoint(new Error(`AUV daemon exited before readiness:\n${collected}`))
-    return collected
-  })()
-
-  return { endpoint, output }
-}
 function redacted(str: string, startPad: number = 4, endPad: number = 0) {
   const maskLength = Math.max(0, str.length - startPad - endPad)
 

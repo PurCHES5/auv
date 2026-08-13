@@ -31,6 +31,10 @@ export default defineConfig({
             instances: [{ browser: 'chromium' }],
             provider: playwright(),
           },
+          globalSetup: [
+            'src/tutils/auv-build.ts',
+            'src/tutils/auv-browser-daemon.ts',
+          ],
           include: ['src/**/*.browser.test.ts'],
           name: 'browser',
         },

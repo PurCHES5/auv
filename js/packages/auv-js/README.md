@@ -57,9 +57,90 @@ const auv = createAuv(connection)
 The Node entry point also exports `createGrpcTransport`. The browser entry point
 does not import Node.js or gRPC modules.
 
+Node.js and the Electron main process can also own an `auv serve` child for the
+application lifetime:
+
+```ts
+import { join } from 'node:path'
+
+import { app } from 'electron'
+
+import { createAuv, startAuv } from 'auv-js/node'
+
+const daemon = await startAuv({
+  binaryPath: join(process.resourcesPath, 'bin', 'auv'),
+  listeners: ['http://127.0.0.1:9847'],
+  noDiscovery: true,
+  storeRoot: join(app.getPath('userData'), 'auv'),
+})
+
+const connection = await daemon.connect()
+const auv = createAuv(connection)
+
+try {
+  const devices = await auv.devices.list()
+  console.log(devices)
+}
+finally {
+  await connection.close()
+  await daemon.stop()
+}
+```
+
+`startAuv` maps the current `auv serve` options and waits for every configured
+listener's typed health check to report `serving`. Listener ports must be
+explicit; `:0` is not accepted because it is not a usable connection endpoint.
+It returns the child PID, all endpoints, an `exited` promise, and idempotent
+`stop()`. `connectionOptions` is the serializable description of the preferred
+caller-local endpoint; `daemon.connect()` binds those defaults. Relative daemon
+paths are resolved from `workingDirectory`, matching the CLI.
+
+Passing `signal` gives tinyexec ownership of that child-process cancellation:
+aborting it terminates the daemon even after `startAuv()` has returned. Omit the
+signal and use `daemon.stop()` when the returned handle alone should own
+shutdown.
+
+Only import `startAuv` in Node.js or the Electron main process. An Electron
+renderer remains a browser caller: give it a paired HTTP endpoint and Device
+credential rather than exposing the child process handle or treating loopback
+as browser owner authority.
+
 `local: true` constrains operation placement to the daemon's implicit local
 Device. Supplying an explicit `deviceId` or non-empty `deviceIds` at the same
 time rejects with `AuvConfigurationError` before dispatch.
+
+## First-party Driver capabilities
+
+Bind a Runner route once, then use the same capability hierarchy as the Rust
+`auv::client::runner::RunnerClient` interface:
+
+```ts
+const runner = auv.runner({
+  runId: run.id,
+  runnerClass: 'auv.core.local',
+})
+
+const displays = await runner.displays.list({ signal })
+const window = await runner.windows.resolve({
+  application: {
+    case: 'applicationBundleId',
+    value: 'com.example.App',
+  },
+}, { signal })
+
+const capture = await window.capture({ signal })
+const matches = await window.findText('Continue', { signal })
+```
+
+The resolved window control stores only its `windowId`. Each operation sends
+that ID to the Runner and returns the observation made by that operation; the
+client does not retain the frame, title, or other resolve-time state as current
+grounding.
+
+The interface is transport-independent. Unary calls use native gRPC on the
+Node gRPC and Unix transports and the dynamic HTTP invoke endpoint on the HTTP
+transport. Streaming calls use native gRPC in Node and the WebSocket invoke
+protocol through the HTTP transport.
 
 ## Pairing
 

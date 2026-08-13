@@ -12,8 +12,10 @@ import {
   ListDevicesRequestSchema,
   ListDevicesResponseSchema,
 } from '../gen/auv/api/daemon/v1/device_pb'
+import { ListDisplaysResponseSchema } from '../gen/auv/api/driver/v1/display_pb'
 import {
   connect,
+  createAuv,
   createGrpcTransport,
   invokeDuplex,
   listDevices,
@@ -27,6 +29,15 @@ describe('node gRPC transport', () => {
     const service: ServiceDefinition = {
       listDevices: {
         path: '/auv.api.daemon.v1.DeviceService/ListDevices',
+        requestDeserialize: value => value,
+        requestSerialize: value => value,
+        requestStream: false,
+        responseDeserialize: value => value,
+        responseSerialize: value => value,
+        responseStream: false,
+      },
+      listDisplays: {
+        path: '/auv.api.driver.v1.DisplayService/ListDisplays',
         requestDeserialize: value => value,
         requestSerialize: value => value,
         requestStream: false,
@@ -63,6 +74,11 @@ describe('node gRPC transport', () => {
             platform: 2,
             ref: { deviceId: 'remote-device' },
           }],
+        }))))
+      },
+      listDisplays(_call: ServerUnaryCall<Buffer, Buffer>, callback: sendUnaryData<Buffer>) {
+        callback(null, Buffer.from(toBinary(ListDisplaysResponseSchema, create(ListDisplaysResponseSchema, {
+          displays: [{ displayId: 'main', primary: true, scaleFactor: 2 }],
         }))))
       },
       slowListDevices(_call: ServerUnaryCall<Buffer, Buffer>, callback: sendUnaryData<Buffer>) {
@@ -110,6 +126,18 @@ describe('node gRPC transport', () => {
       platform: 'macos',
     }])
 
+    await connection.close()
+  })
+
+  it('calls a generated Driver capability through the route-bound control surface', async () => {
+    const connection = await connect({ transport: createGrpcTransport({ endpoint }) })
+
+    const displays = await createAuv(connection)
+      .runner({ runnerClass: 'auv.core.local' })
+      .displays
+      .list()
+
+    expect(displays.map(display => display.displayId)).toEqual(['main'])
     await connection.close()
   })
 

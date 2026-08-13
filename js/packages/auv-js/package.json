@@ -45,7 +45,9 @@
     "@auv-js/api-client": "workspace:*",
     "@bufbuild/protobuf": "catalog:",
     "@grpc/grpc-js": "catalog:",
-    "date-fns": "catalog:"
+    "@moeru/std": "catalog:",
+    "date-fns": "catalog:",
+    "tinyexec": "catalog:"
   },
   "devDependencies": {
     "@bufbuild/buf": "catalog:",
@@ -55,7 +57,6 @@
     "@vitest/browser-playwright": "catalog:",
     "jsdom": "catalog:",
     "playwright": "catalog:",
-    "tinyexec": "catalog:",
     "tsx": "catalog:",
     "typescript": "catalog:"
   }

@@ -55,6 +55,16 @@ All public functions that wait, perform I/O, or start ongoing work accept an
 and remote operation to cancel. It does not promise rollback after a mutating
 operation has been dispatched.
 
+The Node.js/Electron-main entry point also exposes an optional app-owned daemon
+process host. `startAuv` runs the accepted `auv serve` foreground role and calls
+the daemon's typed health API until every configured listener reports
+`serving`. It requires explicit listener ports because `:0` is not a usable
+connection endpoint. The same public health RPC is available through Unix
+gRPC, TCP gRPC, and annotated HTTP. The returned lifecycle handle contains
+connection information and explicit shutdown. This process helper owns only
+the child lifecycle; daemon state, routing, recording, and serving semantics
+remain in their existing Rust owners.
+
 ## User Stories
 
 1. As a browser application developer, I want to import `auv-js`, so that I can control an AUV Device without a native addon.
@@ -97,12 +107,22 @@ operation has been dispatched.
 38. As an SDK consumer, I want public TypeScript declarations for inputs, results, errors, transports, and connections, so that editor and compiler feedback match runtime behavior.
 39. As a test author, I want operation functions testable through a recording transport, so that public behavior can be verified without a live daemon.
 40. As an AUV maintainer, I want JavaScript calls to preserve canonical Run recording and artifact production, so that a new frontend does not create an uninspectable execution lane.
+41. As a Node.js or Electron-main developer, I want to start and stop an app-owned `auv serve` child with typed options and resolved connection information, so that every application does not rebuild process readiness and cleanup logic.
 
 ## Implementation Decisions
 
 - The package name is `auv-js`. The package exposes browser-safe entry points
   and platform-specific Node.js/Electron entry points without loading Unix or
   native transport code into browser bundles.
+- The Node.js/Electron-main entry point may supervise an app-owned `auv serve`
+  child. It maps explicit foreground CLI options, verifies readiness through
+  the typed health API, and owns graceful child cleanup; it does not parse CLI
+  logs to reconstruct connection configuration, is not a persistent service
+manager, and does not replace a future `auv daemon start|status|stop`
+frontend.
+- `startAuv.signal` is the child lifecycle signal passed to tinyexec. Aborting
+  it after readiness still terminates the child; callers that want handle-only
+  shutdown omit it and call `AuvDaemon.stop()`.
 - Individually exported functions are the canonical implementation and the
   primary tree-shaking boundary. The namespaced client contains no parallel
   operation logic.
@@ -391,8 +411,9 @@ transport factories do not pretend to be cancellable merely to add a parameter.
   Semantic verification remains a separate result and is never inferred from
   WebSocket acknowledgement or successful request completion.
 - Operation execution continues through the existing frontend-owned Run
-  context and canonical tracing/artifact path. The JavaScript SDK does not own
-  daemon lifecycle, run persistence, or a new aggregate runtime.
+  context and canonical tracing/artifact path. The optional Node process host
+  owns only the app child it starts; the SDK does not own daemon semantics, run
+  persistence, system-service supervision, or a new aggregate runtime.
 - Continuous video/audio remote desktop transport is not required for the
   initial SDK. Future media may use a separate plane correlated with Device and
   Run if a concrete consumer justifies it.

@@ -42,6 +42,9 @@ catalogs:
     '@moeru/eslint-config':
       specifier: ^0.1.0-beta.20
       version: 0.1.0-beta.20
+    '@moeru/std':
+      specifier: 0.1.0-beta.20
+      version: 0.1.0-beta.20
     '@pnpm/find-workspace-dir':
       specifier: 1000.1.5
       version: 1000.1.5
@@ -202,9 +205,15 @@ importers:
       '@grpc/grpc-js':
         specifier: 'catalog:'
         version: 1.14.4
+      '@moeru/std':
+        specifier: 'catalog:'
+        version: 0.1.0-beta.20
       date-fns:
         specifier: 'catalog:'
         version: 4.4.0
+      tinyexec:
+        specifier: 'catalog:'
+        version: 1.3.0
     devDependencies:
       '@bufbuild/buf':
         specifier: 'catalog:'
@@ -227,9 +236,6 @@ importers:
       playwright:
         specifier: 'catalog:'
         version: 1.62.1
-      tinyexec:
-        specifier: 'catalog:'
-        version: 1.3.0
       tsx:
         specifier: 'catalog:'
         version: 4.23.12

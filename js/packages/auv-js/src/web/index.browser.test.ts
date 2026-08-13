@@ -5,6 +5,7 @@ import * as auv from './index'
 describe('browser entry', () => {
   it('loads in a real browser and calls AUV through browser HTTP primitives', async () => {
     expect('createGrpcTransport' in auv).toBe(false)
+    expect('startAuv' in auv).toBe(false)
 
     let request: undefined | { init?: RequestInit, input: string }
     const connection = await auv.connect({

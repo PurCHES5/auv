@@ -18,8 +18,10 @@ the canonical local/remote operation interface and `auv-daemon` as the long-live
 `auv-api-client` and `auv-api-server` become protocol boundaries. MCP remains in
 `auv-cli`.
 
-Count: **20**
+Count: **22**
 
+- [`2026-08-13-rust-browser-automation-interface-research.md`](2026-08-13-rust-browser-automation-interface-research.md) — current Rust Playwright bindings and WebDriver/CDP alternatives, with an AUV Rust Locator API recommendation.
+- [`2026-08-13-playwright-inspired-auv-js-interface-research.md`](2026-08-13-playwright-inspired-auv-js-interface-research.md) — Playwright Locator、strictness、auto-wait/actionability 与 AUV Window/Display/Runner/typed evidence 的官方来源映射。
 - [`2026-08-12-protobuf-openapi-typescript-sdk-research.md`](2026-08-12-protobuf-openapi-typescript-sdk-research.md) — primary-source comparison and implemented 20-operation daemon Rust/OpenAPI generation plus the generated `@auv-js/api-client` package consumed by `auv-js`.
 - [`2026-08-04-live-pairing-administration-decision.md`](2026-08-04-live-pairing-administration-decision.md) — accepted live administration and shared authenticated authority.
 - [`2026-08-11-auv-js-sdk-spec.md`](2026-08-11-auv-js-sdk-spec.md) — implemented function-first JavaScript SDK, HTTP/WebSocket and Node transport, pairing, typed invoke, and AbortSignal contract.
