@@ -1,6 +1,6 @@
 import type { Transport } from '../../transport/types'
 
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import {
   ListDisplaysRequestSchema,
@@ -45,23 +45,37 @@ describe('typed remote invoke', () => {
   })
 })
 
-describe.skipIf(process.platform === 'win32')('invoke against an authenticated AUV daemon', async () => {
-  const daemon = await setupAuvDaemon()
+// https://github.com/moeru-ai/auv/actions/runs/31747696257/job/94606069166
+// ROOT CAUSE:
+//
+// If Vitest skipped this suite on Windows, its async collection callback still
+// started the Unix-socket fixture before any test could be skipped.
+//
+// Before the fix, collection failed on an invalid Windows Unix-socket URL. The
+// fix keeps fixture side effects in hooks that do not run for a skipped suite.
+describe.skipIf(process.platform === 'win32')('invoke against an authenticated AUV daemon', () => {
+  let credential = ''
+  let daemon: Awaited<ReturnType<typeof setupAuvDaemon>> | undefined
 
-  const owner = await connect({ endpoint: daemon.ownerSocket, local: true, transport: 'unix' })
-  const token = await createPairingToken(owner, { ttlMs: 60_000 })
-  await owner.close()
+  beforeAll(async () => {
+    daemon = await setupAuvDaemon()
 
-  const bootstrap = await connect({ endpoint: daemon.remoteEndpoint, transport: 'http' })
-  const enrollment = await pairDevice(bootstrap, { deviceId: 'auv-js-integration', label: 'auv-js integration test', token })
-  await bootstrap.close()
+    const owner = await connect({ endpoint: daemon.ownerSocket, local: true, transport: 'unix' })
+    const token = await createPairingToken(owner, { ttlMs: 60_000 })
+    await owner.close()
+
+    const bootstrap = await connect({ endpoint: daemon.remoteEndpoint, transport: 'http' })
+    const enrollment = await pairDevice(bootstrap, { deviceId: 'auv-js-integration', label: 'auv-js integration test', token })
+    credential = enrollment.credential
+    await bootstrap.close()
+  })
 
   afterAll(async () => {
-    await daemon.stop()
+    await daemon?.stop()
   })
 
   it('rejects unauthenticated requests to the remote HTTP API', async () => {
-    const unauthenticated = await connect({ endpoint: daemon.remoteEndpoint, transport: 'http' })
+    const unauthenticated = await connect({ endpoint: daemon!.remoteEndpoint, transport: 'http' })
     const auv = createAuv(unauthenticated).runner({ runnerClass: 'auv.core.local' })
     await expect(auv.displays.list()).rejects.toMatchObject({ name: 'AuvHttpError', status: 401 })
     await unauthenticated.close()
@@ -77,7 +91,7 @@ describe.skipIf(process.platform === 'win32')('invoke against an authenticated A
   // Before the fix, this test coupled routing evidence to ambient display
   // state. The fix sends caller-owned pixels through the same real Runner.
   it('pairs a Device and invokes a headless-safe real Runner capability through the remote HTTP API', async () => {
-    const paired = await connect({ credential: enrollment.credential, endpoint: daemon.remoteEndpoint, transport: 'http' })
+    const paired = await connect({ credential, endpoint: daemon!.remoteEndpoint, transport: 'http' })
 
     {
       const auv = createAuv(paired).runner({ runnerClass: 'auv.core.local' })
@@ -108,7 +122,7 @@ describe.skipIf(process.platform === 'win32')('invoke against an authenticated A
   // Before the fix, the test required live desktop input. The fix observes a
   // typed validation error returned by the real Runner before OS interaction.
   it('routes a real Runner validation error through the remote WebSocket API', async () => {
-    const paired = await connect({ credential: enrollment.credential, endpoint: daemon.remoteEndpoint, transport: 'http' })
+    const paired = await connect({ credential, endpoint: daemon!.remoteEndpoint, transport: 'http' })
 
     const method = InputService.method.moveMouse
     const responses = await invokeServerStream(paired, {

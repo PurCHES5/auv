@@ -11,6 +11,14 @@ import { connect } from './connect'
 import { AuvDaemonStartError, startAuv } from './daemon'
 
 describe('startAuv', () => {
+  // https://github.com/moeru-ai/auv/actions/runs/31747696257/job/94606069166
+  // ROOT CAUSE:
+  //
+  // If this test stopped the daemon on Windows, Node reported the requested
+  // SIGINT as the child exit signal instead of a zero exit code.
+  //
+  // Before the fix, the lifecycle behavior passed but its Unix-only exit
+  // assertion failed. The fix preserves and checks each platform's raw result.
   it('starts, connects to, and idempotently stops an app-owned daemon', async () => {
     const workspace = await repositoryRoot()
     const workingDirectory = await mkdtemp(join(tmpdir(), 'auv-js-start-'))
@@ -46,7 +54,9 @@ describe('startAuv', () => {
       const firstExit = await daemon.stop()
       const secondExit = await daemon.stop()
       expect(secondExit).toEqual(firstExit)
-      expect(firstExit).toEqual({ code: 0, signal: null })
+      expect(firstExit).toEqual(process.platform === 'win32'
+        ? { code: null, signal: 'SIGINT' }
+        : { code: 0, signal: null })
     }
     finally {
       await daemon.stop()
