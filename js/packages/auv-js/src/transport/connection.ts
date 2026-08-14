@@ -12,10 +12,17 @@ import { create, fromBinary, fromJson, fromJsonString, toBinary, toJson, toJsonS
 
 import { abortError, auvHttpError, AuvProtocolError, AuvTransportError, throwIfAborted } from './errors'
 
+/** Inherited operation placement carried by a connection. */
+export interface ConnectionRoute {
+  deviceId?: string
+  runId?: string
+}
+
 export interface ConnectOptions extends OperationOptions {
   credential?: DeviceCredential
   endpoint?: string | URL
   local?: boolean
+  route?: ConnectionRoute
   transport?: 'grpc' | 'http' | 'unix' | Transport
 }
 
@@ -59,13 +66,21 @@ export interface UnaryOptions extends OperationOptions {
 export class AuvConnection {
   /** Whether operation placement is constrained to the daemon's local Device. */
   readonly local: boolean
+  /** Default Device and Run placement inherited by routed operations. */
+  readonly route: Readonly<ConnectionRoute>
   readonly #credential?: DeviceCredential
   readonly #transport: Transport
 
-  constructor(transport: Transport, credential?: DeviceCredential, local = false) {
+  constructor(
+    transport: Transport,
+    credential?: DeviceCredential,
+    local = false,
+    route: ConnectionRoute = {},
+  ) {
     this.#transport = transport
     this.#credential = credential
     this.local = local
+    this.route = Object.freeze({ ...route })
   }
 
   /** Closes the underlying transport. */
@@ -165,7 +180,7 @@ export async function connectTransport(
   options: ConnectOptions = {},
 ): Promise<AuvConnection> {
   await transport.connect({ signal: options.signal })
-  return new AuvConnection(transport, options.credential, options.local)
+  return new AuvConnection(transport, options.credential, options.local, options.route)
 }
 
 async function* decodeResponses<O extends DescMessage>(

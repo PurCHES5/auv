@@ -3,6 +3,7 @@ import type { DescMessage, MessageInitShape, MessageShape } from '@bufbuild/prot
 import type { AuvConnection, RpcDefinition, TypedDuplexCall } from '../../transport/connection'
 import type { OperationOptions } from '../../transport/types'
 
+import { AuvConfigurationError } from '../../transport/errors'
 import { selectedDevice } from './routing'
 
 export interface InvokeDuplexOptions<I extends DescMessage, O extends DescMessage> extends OperationOptions {
@@ -75,14 +76,28 @@ function definition<I extends DescMessage, O extends DescMessage>(
   }
 }
 
+function inheritedRouteValue(kind: 'Device' | 'Run', explicit?: string, inherited?: string): string | undefined {
+  if (explicit !== undefined && inherited !== undefined && explicit !== inherited) {
+    throw new AuvConfigurationError(
+      `explicit ${kind} selection conflicts with the connection's inherited ${kind} context`,
+    )
+  }
+  return explicit ?? inherited
+}
+
 function routeHeaders(connection: AuvConnection, options: { deviceId?: string, runId?: string, runnerClass: string }): Headers {
   const headers = new Headers({ 'auv-runner-class': options.runnerClass })
-  const deviceId = selectedDevice(connection.local, options.deviceId)
+  const deviceId = selectedDevice(connection.local, inheritedRouteValue(
+    'Device',
+    options.deviceId,
+    connection.route.deviceId,
+  ))
+  const runId = inheritedRouteValue('Run', options.runId, connection.route.runId)
 
   if (deviceId !== undefined)
     headers.set('auv-device-id', deviceId)
-  if (options.runId !== undefined)
-    headers.set('auv-run-id', options.runId)
+  if (runId !== undefined)
+    headers.set('auv-run-id', runId)
 
   return headers
 }

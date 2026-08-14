@@ -65,6 +65,17 @@ connection information and explicit shutdown. This process helper owns only
 the child lifecycle; daemon state, routing, recording, and serving semantics
 remain in their existing Rust owners.
 
+The Node.js entry point also parses the existing non-secret `AUV_CONTEXT`
+contract through `contextFromEnv(env)`. The environment object is explicit and
+defaults to `process.env`, which keeps embedded runtimes and tests independent
+of process-global state. `connectFromContext` binds the resolved
+`daemon_endpoint`, canonical `device_id`, and optional `run_id` to an
+`AuvConnection`; routed operations inherit those values and reject conflicting
+explicit placement before dispatch. `device_name` is retained only as context
+metadata and is not a JavaScript-side selection input. Unknown context fields
+remain additive. JavaScript profile-store and daemon discovery parity are
+deferred; paired profile credentials remain application-owned and explicit.
+
 ## User Stories
 
 1. As a browser application developer, I want to import `auv-js`, so that I can control an AUV Device without a native addon.
@@ -108,6 +119,7 @@ remain in their existing Rust owners.
 39. As a test author, I want operation functions testable through a recording transport, so that public behavior can be verified without a live daemon.
 40. As an AUV maintainer, I want JavaScript calls to preserve canonical Run recording and artifact production, so that a new frontend does not create an uninspectable execution lane.
 41. As a Node.js or Electron-main developer, I want to start and stop an app-owned `auv serve` child with typed options and resolved connection information, so that every application does not rebuild process readiness and cleanup logic.
+42. As a JavaScript CLI plugin or executable Runner, I want to parse a caller-supplied environment object and inherit its resolved Device and Run route, so that I do not reproduce parent selection policy or depend on global process state.
 
 ## Implementation Decisions
 

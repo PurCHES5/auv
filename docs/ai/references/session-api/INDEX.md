@@ -18,8 +18,9 @@ the canonical local/remote operation interface and `auv-daemon` as the long-live
 `auv-api-client` and `auv-api-server` become protocol boundaries. MCP remains in
 `auv-cli`.
 
-Count: **22**
+Count: **23**
 
+- [`2026-08-14-airi-bundled-auv-daemon-research.md`](2026-08-14-airi-bundled-auv-daemon-research.md) — AIRI Electron sidecar packaging, app-owned `auv serve` lifecycle, signing/notarization/TCC risks, platform artifact matrix, and native computer-operation capability gap.
 - [`2026-08-13-rust-browser-automation-interface-research.md`](2026-08-13-rust-browser-automation-interface-research.md) — current Rust Playwright bindings and WebDriver/CDP alternatives, with an AUV Rust Locator API recommendation.
 - [`2026-08-13-playwright-inspired-auv-js-interface-research.md`](2026-08-13-playwright-inspired-auv-js-interface-research.md) — Playwright Locator、strictness、auto-wait/actionability 与 AUV Window/Display/Runner/typed evidence 的官方来源映射。
 - [`2026-08-12-protobuf-openapi-typescript-sdk-research.md`](2026-08-12-protobuf-openapi-typescript-sdk-research.md) — primary-source comparison and implemented 20-operation daemon Rust/OpenAPI generation plus the generated `@auv-js/api-client` package consumed by `auv-js`.

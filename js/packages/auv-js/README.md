@@ -104,6 +104,33 @@ renderer remains a browser caller: give it a paired HTTP endpoint and Device
 credential rather than exposing the child process handle or treating loopback
 as browser owner authority.
 
+CLI plugins and daemon-managed Node.js runners can inherit the resolved,
+non-secret `AUV_CONTEXT` process contract:
+
+```ts
+import { connectFromContext, contextFromEnv, createAuv } from 'auv-js/node'
+
+const context = contextFromEnv(process.env)
+const connection = await connectFromContext(context)
+const auv = createAuv(connection)
+
+const displays = await auv
+  .runner({ runnerClass: 'auv.core.local' })
+  .displays.list()
+```
+
+`contextFromEnv` accepts any read-only environment-shaped object, so embedded
+runtimes and tests do not need to mutate or read the global `process.env`.
+Unknown JSON fields are ignored. `connectFromContext` inherits canonical
+`device_id` and `run_id` for routed operations; `device_name` remains a display
+snapshot and is never used to select another Device. A conflicting explicit
+Device or Run is rejected before dispatch.
+
+`AUV_CONTEXT` never contains credentials. If it names a `config_profile`, the
+application must pass that profile's credential explicitly to
+`connectFromContext`; JavaScript profile-store lookup remains intentionally
+outside the SDK until credential persistence has an approved shared owner.
+
 `local: true` constrains operation placement to the daemon's implicit local
 Device. Supplying an explicit `deviceId` or non-empty `deviceIds` at the same
 time rejects with `AuvConfigurationError` before dispatch.
