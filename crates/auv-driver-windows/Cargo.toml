@@ -3,7 +3,14 @@ name = "auv-driver-windows"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-publish.workspace = true
+publish = true
+readme.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Windows driver for AUV"
+documentation.workspace = true
+homepage.workspace = true
+repository.workspace = true
 
 [features]
 default = []
@@ -12,9 +19,31 @@ overlay = ["dep:auv-driver-overlay"]
 [dependencies]
 auv-driver-common = { path = "../auv-driver-common" }
 auv-driver-overlay = { path = "../auv-driver-overlay", features = ["windows"], optional = true }
-image.workspace = true
-thiserror.workspace = true
+image = { version = "0.25", default-features = false, features = ["png"] }
+thiserror = "2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows.workspace = true
-xcap.workspace = true
+windows = { version = "0.58", features = [
+  "Foundation",
+  "Foundation_Collections",
+  "Media_Ocr",
+  "Graphics_Imaging",
+  "Security_Cryptography",
+  "Globalization",
+  "Storage_Streams",
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_UI_Accessibility",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_Graphics_Dwm",
+  "Win32_Graphics_Gdi",
+  "Win32_Storage_Xps",
+  "Win32_System_Com",
+  "Win32_System_DataExchange",
+  "Win32_System_Memory",
+  "Win32_System_RemoteDesktop",
+  "Win32_System_Threading"
+] }
+xcap = "0.6"

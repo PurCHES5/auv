@@ -3,7 +3,7 @@ name = "auv"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-publish.workspace = true
+publish = true
 readme.workspace = true
 license.workspace = true
 authors.workspace = true
@@ -19,16 +19,16 @@ auv-driver = { path = "../auv-driver" }
 auv-driver-overlay-common = { path = "../auv-driver-overlay-common" }
 auv-media-macos = { path = "../auv-media-macos" }
 directories = "6"
-fs2.workspace = true
-futures-util.workspace = true
+fs2 = "0.4"
+futures-util = "0.3"
 getrandom = "0.3"
 hex = "0.4"
 http = "1"
-image.workspace = true
+image = { version = "0.25", default-features = false, features = ["png"] }
 prost-types = "0.14"
-serde.workspace = true
-serde_json.workspace = true
-thiserror.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
 tonic = { version = "0.14", features = ["transport"] }
 tokio = { version = "1", features = ["sync"] }
 tokio-stream = "0.1"
@@ -37,8 +37,31 @@ tokio-stream = "0.1"
 rustix = { version = "1", features = ["fs", "process"] }
 
 [target.'cfg(windows)'.dependencies]
-windows = { workspace = true, features = ["Win32_Storage_FileSystem"] }
+windows = { version = "0.58", features = [
+  "Foundation",
+  "Foundation_Collections",
+  "Media_Ocr",
+  "Graphics_Imaging",
+  "Security_Cryptography",
+  "Globalization",
+  "Storage_Streams",
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_UI_Accessibility",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_Graphics_Dwm",
+  "Win32_Graphics_Gdi",
+  "Win32_Storage_Xps",
+  "Win32_System_Com",
+  "Win32_System_DataExchange",
+  "Win32_System_Memory",
+  "Win32_System_RemoteDesktop",
+  "Win32_System_Threading",
+  "Win32_Storage_FileSystem"
+] }
 
 [dev-dependencies]
-tempfile.workspace = true
+tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
