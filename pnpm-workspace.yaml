@@ -53,6 +53,7 @@ catalog:
   '@vitest/browser-playwright': 4.1.10
   bumpp: ^12.2.0
   date-fns: 4.4.0
+  doctoc: ^2.5.0
   eslint: ^10.8.1
   eslint-plugin-oxlint: ^1.78.0
   jsdom: 27.4.0

@@ -4,49 +4,68 @@ TypeScript SDK for AUV Device, pairing, Run, Runner, and routed capability
 operations. The package is function-first for tree shaking and also provides a
 namespaced client over the same functions.
 
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+## Table of Contents
+
+- [Installation](#installation)
+- [Browser and universal JavaScript](#browser-and-universal-javascript)
+- [Node.js and Electron](#nodejs-and-electron)
+- [Pairing](#pairing)
+- [Call Runner capabilities](#call-runner-capabilities)
+- [Typed capability invocation](#typed-capability-invocation)
+- [Cancellation](#cancellation)
+- [Tests](#tests)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
+## Installation
+
+```sh
+npm install auv-js
+```
+
+```sh
+pnpm add auv-js
+```
+
 ## Browser and universal JavaScript
 
 ```ts
-import {
-  connect,
-  createAuv,
-  createHttpTransport,
-} from 'auv-js'
+import { connect, createAuv, createHttpTransport } from 'auv-js'
 
-const controller = new AbortController()
 const connection = await connect({
   credential,
-  signal: controller.signal,
   transport: createHttpTransport({ endpoint: 'http://127.0.0.1:9847' }),
+  // If you need timeout control, supply an AbortSignal.
+  // signal: controller.signal,
 })
 const auv = createAuv(connection)
 
-const devices = await auv.devices.list({ signal: controller.signal })
-const run = await auv.runs.create({
-  deviceIds: [devices[0]!.id],
-  signal: controller.signal,
-})
+const devices = await auv.devices.list()
+const run = await auv.runs.create({ deviceIds: [devices[0]!.id] })
 ```
 
 `transport: 'http'` selects the same HTTP transport with the default local
-endpoint. Daemon resource bindings use ProtoJSON, while dynamic routed invoke
-uses opaque Protobuf payloads. Daemon problem responses remain available as
+endpoint. By default, AUV daemon use ProtoJSON, while dynamic routed invoke
+uses opaque Protobuf payloads. If an error occurs, it is available as
 `AuvHttpError` values.
 
-Browser traffic is accepted by paired-bearer listeners. Caller-local TCP and
-Unix listeners retain owner authority for native clients and reject requests
-carrying a browser `Origin`; a web page must enroll once and use its Device
-credential against a paired-bearer listener, even when that listener is bound
-to loopback.
+### Supported transports
+
+- `createHttpTransport` — HTTP transport for browsers and Node.js
+- `createWebSocketTransport` — WebSocket transport for browsers and Node.js
+- `createUnixSocketTransport` — Unix socket transport for Node.js
+- `createGrpcTransport` — gRPC transport for Node.js
 
 ## Node.js and Electron
 
+### Connect through Unix socket / Named pipe (for Windows)
+
+Since if no `--listen` specified when bootstrapping AUV daemon, by default it listens on a Unix socket or Windows named pipe. The SDK can connect to that socket or pipe directly without HTTP or WebSocket overhead:
+
 ```ts
-import {
-  connect,
-  createAuv,
-  createUnixSocketTransport,
-} from 'auv-js/node'
+import { connect, createAuv, createUnixSocketTransport } from 'auv-js/node'
 
 const connection = await connect({
   transport: createUnixSocketTransport({ path: '/absolute/path/to/auv.sock' }),
@@ -54,11 +73,11 @@ const connection = await connect({
 const auv = createAuv(connection)
 ```
 
-The Node entry point also exports `createGrpcTransport`. The browser entry point
-does not import Node.js or gRPC modules.
+Yet if needed, gRPC can be connected too through `createGrpcTransport`.
 
-Node.js and the Electron main process can also own an `auv serve` child for the
-application lifetime:
+### Connect and start the daemon
+
+For Electron, if you wished to embed the AUV daemon and offer computer use capabilities without requiring the user to install it separately, you can start the daemon from your main process and connect to it:
 
 ```ts
 import { join } from 'node:path'
@@ -86,26 +105,26 @@ finally {
 }
 ```
 
-`startAuv` maps the current `auv serve` options and waits for every configured
-listener's typed health check to report `serving`. Listener ports must be
-explicit; `:0` is not accepted because it is not a usable connection endpoint.
-It returns the child PID, all endpoints, an `exited` promise, and idempotent
-`stop()`. `connectionOptions` is the serializable description of the preferred
-caller-local endpoint; `daemon.connect()` binds those defaults. Relative daemon
-paths are resolved from `workingDirectory`, matching the CLI.
+> [!NOTE]
+>
+> Almost all the `auv-js` functions and APIs supports [AbortSignal](https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal), passing `signal` to `startAuv()` makes the daemon process abortable. If the signal is aborted, the daemon will be terminated immediately. Omit the signal and use `daemon.stop()` when the returned handle alone should own shutdown.
 
-Passing `signal` gives tinyexec ownership of that child-process cancellation:
-aborting it terminates the daemon even after `startAuv()` has returned. Omit the
-signal and use `daemon.stop()` when the returned handle alone should own
-shutdown.
-
-Only import `startAuv` in Node.js or the Electron main process. An Electron
+> [!CAUTION]
+>
+> Only import `startAuv` in Node.js or the Electron main process. An Electron
 renderer remains a browser caller: give it a paired HTTP endpoint and Device
 credential rather than exposing the child process handle or treating loopback
 as browser owner authority.
 
-CLI plugins and daemon-managed Node.js runners can inherit the resolved,
-non-secret `AUV_CONTEXT` process contract:
+### Connect as a plugin/runner through `AUV_CONTEXT`
+
+`auv` cli has similar plugin capability like `kubectl` or `git`. You can build a `auv` plugin in Node.js, and when you have `auv-some-plugin` in your `PATH`, you can invoke it as:
+
+```sh
+auv some-plugin
+```
+
+and `auv` will pass the `AUV_CONTEXT` environment variable to the plugin process. You can use this context to communicate to `auv` and registers your own runner or capability:
 
 ```ts
 import { connectFromContext, contextFromEnv, createAuv } from 'auv-js/node'
@@ -120,54 +139,15 @@ const displays = await auv
   .list()
 ```
 
-`contextFromEnv` accepts any read-only environment-shaped object, so embedded
-runtimes and tests do not need to mutate or read the global `process.env`.
-Unknown JSON fields are ignored. `connectFromContext` inherits canonical
-`device_id` and `run_id` for routed operations; `device_name` remains a display
-snapshot and is never used to select another Device. A conflicting explicit
-Device or Run is rejected before dispatch.
+> [!NOTE]
+>
+> `AUV_CONTEXT` never contains credentials. If it names a `config_profile`, the application must pass that profile's credential explicitly to `connectFromContext`; JavaScript profile-store lookup remains intentionally outside the SDK until credential persistence has an approved shared owner.
 
-`AUV_CONTEXT` never contains credentials. If it names a `config_profile`, the
-application must pass that profile's credential explicitly to
-`connectFromContext`; JavaScript profile-store lookup remains intentionally
-outside the SDK until credential persistence has an approved shared owner.
+### Selecting a Device
 
-`local: true` constrains operation placement to the daemon's implicit local
-Device. Supplying an explicit `deviceId` or non-empty `deviceIds` at the same
-time rejects with `AuvConfigurationError` before dispatch.
+`local: true` constrains operation placement to the daemon's implicit local Device.
 
-## First-party Driver capabilities
-
-Bind a Runner route once, then use the same capability hierarchy as the Rust
-`auv::client::runner::RunnerClient` interface:
-
-```ts
-const runner = auv.runner({
-  runId: run.id,
-  runnerClass: 'auv.core.local',
-})
-
-const displays = await runner.displays.list({ signal })
-const window = await runner.windows.resolve({
-  application: {
-    case: 'applicationBundleId',
-    value: 'com.example.App',
-  },
-}, { signal })
-
-const capture = await window.capture({ signal })
-const matches = await window.findText('Continue', { signal })
-```
-
-The resolved window control stores only its `windowId`. Each operation sends
-that ID to the Runner and returns the observation made by that operation; the
-client does not retain the frame, title, or other resolve-time state as current
-grounding.
-
-The interface is transport-independent. Unary calls use native gRPC on the
-Node gRPC and Unix transports and the dynamic HTTP invoke endpoint on the HTTP
-transport. Streaming calls use native gRPC in Node and the WebSocket invoke
-protocol through the HTTP transport.
+Supplying an explicit `deviceId` or non-empty `deviceIds` at the same time rejects with `AuvConfigurationError` before dispatch.
 
 ## Pairing
 
@@ -193,6 +173,29 @@ const paired = await connect({
 })
 ```
 
+## Call Runner capabilities
+
+Bind a Runner route once, then use the same capability hierarchy as the Rust
+`auv::client::runner::RunnerClient` interface:
+
+```ts
+const runner = auv.runner({
+  runId: run.id,
+  runnerClass: 'auv.core.local',
+})
+
+const displays = await runner.displays.list({ signal })
+const window = await runner.windows.resolve({
+  application: {
+    case: 'applicationBundleId',
+    value: 'com.example.App',
+  },
+}, { signal })
+
+const capture = await window.capture({ signal })
+const matches = await window.findText('Continue', { signal })
+```
+
 ## Typed capability invocation
 
 `invokeUnary` accepts message schemas generated by `protoc-gen-es`. It routes
@@ -213,12 +216,6 @@ const result = await invokeUnary(connection, {
 })
 ```
 
-`invokeServerStream` and `invokeDuplex` use the same schemas and route fields.
-In browsers the HTTP transport opens one WebSocket per live operation; in
-Node.js the gRPC and Unix transports use a native bidirectional gRPC stream.
-Responses are exposed as typed async iterables, and aborting the operation
-closes the remote stream.
-
 ## Cancellation
 
 Every asynchronous public operation accepts an `AbortSignal`. A signal passed
@@ -234,16 +231,10 @@ Remote failures share `AuvRemoteError`; gRPC and WebSocket status failures add
 
 ## Tests
 
-The SDK has separate Vitest projects for the Node.js runtime, `jsdom`, and a
-real headless Chromium instance. Install the Chromium binary once in a fresh
-development or CI environment, then run the complete suite:
-
 ```sh
-pnpm --filter auv-js exec playwright install chromium
-pnpm --filter auv-js test
+pnpm exec playwright install chromium
+pnpm --filter auv-js test:run
 ```
 
-Use `test:node`, `test:browser`, or `test:jsdom` to run one runtime project on
-its own. Package-condition, browser dependency-graph, and tree-shaking checks
-remain in `test:package`; they complement the runtime projects rather than
-replace them.
+Use `test:node`, `test:browser`, or `test:jsdom` to run one project on
+its own.

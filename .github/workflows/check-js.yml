@@ -96,11 +96,11 @@ jobs:
 
       - name: Install Playwright browser and Linux dependencies
         if: runner.os == 'Linux'
-        run: pnpm --filter auv-js exec playwright install --with-deps chromium
+        run: pnpm exec playwright install --with-deps chromium
 
       - name: Install Playwright browser
         if: runner.os != 'Linux'
-        run: pnpm --filter auv-js exec playwright install chromium
+        run: pnpm exec playwright install chromium
 
       - name: Lint
         run: pnpm lint
