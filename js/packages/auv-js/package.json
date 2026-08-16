@@ -1,7 +1,7 @@
 {
   "name": "auv-js",
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "JavaScript and TypeScript SDK for AUV",
   "license": "Apache-2.0",
   "repository": {
