@@ -769,7 +769,7 @@ Scope:
 
 It should be an adapter over `auv-runtime`, not a replacement runtime.
 
-### `auv-js`
+### `@auv-js/sdk`
 
 Purpose:
 
@@ -821,7 +821,7 @@ auv-core
        <- auv-driver-fixture
        <- auv-driver-macos
        <- auv-webdriver
-       <- auv-js
+       <- @auv-js/sdk
        <- auv-cli
 ```
 

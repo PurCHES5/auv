@@ -54,9 +54,9 @@ operations. Caller-local owner endpoints do not require this header.
 ## Scope
 
 Dynamic Runner invocation and WebSocket streaming are runtime-described
-protocols and are intentionally owned by `auv-js`, not this package.
+protocols and are intentionally owned by `@auv-js/sdk`, not this package.
 
-`auv-js` owns pairing, transport selection, Runner routing, streamed
+`@auv-js/sdk` owns pairing, transport selection, Runner routing, streamed
 invocation, and the higher-level Device and Run interfaces.
 
 ## Development

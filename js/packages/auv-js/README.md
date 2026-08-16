@@ -1,4 +1,4 @@
-# auv-js
+# AUV TypeScript SDK
 
 TypeScript SDK for AUV Device, pairing, Run, Runner, and routed capability
 operations. The package is function-first for tree shaking and also provides a
@@ -22,17 +22,17 @@ namespaced client over the same functions.
 ## Installation
 
 ```sh
-npm install auv-js
+npm install @auv-js/sdk
 ```
 
 ```sh
-pnpm add auv-js
+pnpm add @auv-js/sdk
 ```
 
 ## Browser and universal JavaScript
 
 ```ts
-import { connect, createAuv, createHttpTransport } from 'auv-js'
+import { connect, createAuv, createHttpTransport } from '@auv-js/sdk'
 
 const connection = await connect({
   credential,
@@ -107,7 +107,7 @@ finally {
 
 > [!NOTE]
 >
-> Almost all the `auv-js` functions and APIs supports [AbortSignal](https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal), passing `signal` to `startAuv()` makes the daemon process abortable. If the signal is aborted, the daemon will be terminated immediately. Omit the signal and use `daemon.stop()` when the returned handle alone should own shutdown.
+> Almost all the `@auv-js/sdk` functions and APIs supports [AbortSignal](https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal), passing `signal` to `startAuv()` makes the daemon process abortable. If the signal is aborted, the daemon will be terminated immediately. Omit the signal and use `daemon.stop()` when the returned handle alone should own shutdown.
 
 > [!CAUTION]
 >
@@ -233,7 +233,7 @@ Remote failures share `AuvRemoteError`; gRPC and WebSocket status failures add
 
 ```sh
 pnpm exec playwright install chromium
-pnpm --filter auv-js test:run
+pnpm --filter @auv-js/sdk test:run
 ```
 
 Use `test:node`, `test:browser`, or `test:jsdom` to run one project on

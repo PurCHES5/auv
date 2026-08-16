@@ -1,11 +1,11 @@
-# Playwright-inspired auv-js interface research
+# Playwright-inspired @auv-js/sdk interface research
 
 Date: 2026-08-13
 
 Status: design research, not an accepted API contract
 
 This note studies the parts of Playwright's public API that are useful for a
-typed `auv-js` interface. It uses Playwright's official documentation and
+typed `@auv-js/sdk` interface. It uses Playwright's official documentation and
 source only. The recommendation is to borrow the locator model, not to copy
 browser-specific DOM semantics.
 
@@ -189,10 +189,10 @@ should expose whether delivery had started.
 
 | Playwright concept | AUV analogue | Owner |
 | --- | --- | --- |
-| `BrowserContext` / connection defaults | authenticated Runner binding and default timeout/input policy | auv-js client context |
+| `BrowserContext` / connection defaults | authenticated Runner binding and default timeout/input policy | @auv-js/sdk client context |
 | `Page` | resolved or lazily selected application window | window capability |
 | `FrameLocator` | a narrower semantic or visual region with a real containment relation | locator/scope implementation |
-| `Locator` | immutable, lazy target-selection recipe | shared typed operation contract plus auv-js facade |
+| `Locator` | immutable, lazy target-selection recipe | shared typed operation contract plus @auv-js/sdk facade |
 | `getByRole` | accessibility role/name/state query | accessibility capability |
 | `getByText` | provisional text-selection policy; do not silently conflate AX and OCR | owning recognition/selection contract |
 | `filter`, chaining | relative refinement within a proven scope | locator contract |

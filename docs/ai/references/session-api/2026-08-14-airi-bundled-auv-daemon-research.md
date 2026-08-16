@@ -45,11 +45,11 @@ The first macOS slice now exists in the AIRI working tree:
   and `probe_permissions`. It exposes no raw daemon endpoint or arbitrary AUV
   operation.
 
-Because `auv-js` and `@auv-js/api-client` are not published, this slice uses the
+Because `@auv-js/sdk` and `@auv-js/api-client` are not published, this slice uses the
 same pinned `auv` executable as both daemon and typed-command adapter. Each
 operation is an allowlisted CLI invocation routed to the Electron-owned daemon
 with the selected Device and Run. Replace this adapter with the matching
-`auv-js` package after it is published; the manager and tool-provider ownership
+`@auv-js/sdk` package after it is published; the manager and tool-provider ownership
 boundary does not need to change.
 
 Local signed-package evidence:
@@ -173,7 +173,7 @@ and
 
 This means AUV does not need a new generic Electron child framework for the
 first slice. It needs one cohesive AUV supervisor, shaped like the existing
-app-wide managers but using `auv-js`'s accepted daemon lifecycle.
+app-wide managers but using `@auv-js/sdk`'s accepted daemon lifecycle.
 
 ### AUV already has the app-owned daemon lifecycle
 
@@ -189,10 +189,10 @@ binary path, endpoints, store root, serializable connection defaults, an
   deadline.
 
 See AUV
-[`daemon.ts`](https://github.com/moeru-ai/auv/blob/1ca775f957dd11b96ddc73f77e8e5f3c38d8bd4a/js/packages/auv-js/src/node/daemon.ts#L18-L109),
-[`startAuv`](https://github.com/moeru-ai/auv/blob/1ca775f957dd11b96ddc73f77e8e5f3c38d8bd4a/js/packages/auv-js/src/node/daemon.ts#L122-L284),
+[`daemon.ts`](https://github.com/moeru-ai/auv/blob/1ca775f957dd11b96ddc73f77e8e5f3c38d8bd4a/js/packages/sdk/src/node/daemon.ts#L18-L109),
+[`startAuv`](https://github.com/moeru-ai/auv/blob/1ca775f957dd11b96ddc73f77e8e5f3c38d8bd4a/js/packages/sdk/src/node/daemon.ts#L122-L284),
 and
-[`serveArguments` / `stopChild`](https://github.com/moeru-ai/auv/blob/1ca775f957dd11b96ddc73f77e8e5f3c38d8bd4a/js/packages/auv-js/src/node/daemon.ts#L302-L352).
+[`serveArguments` / `stopChild`](https://github.com/moeru-ai/auv/blob/1ca775f957dd11b96ddc73f77e8e5f3c38d8bd4a/js/packages/sdk/src/node/daemon.ts#L302-L352).
 
 On macOS and Linux, an empty listener list becomes a caller-local Unix socket
 under the chosen store root. On Windows it becomes loopback HTTP. For AIRI's
@@ -332,7 +332,7 @@ ID and Hardened Runtime signature before the outer app is notarized.
 
 ### Lock the SDK and binary together
 
-AIRI currently has no `auv-js` or `@auv-js/*` dependency in its package or lock
+AIRI currently has no `@auv-js/sdk` or `@auv-js/*` dependency in its package or lock
 file. Adding the binary without adding a compatible Node SDK would leave AIRI
 with either ad-hoc HTTP calls or a generic MCP subprocess, neither of which
 matches the intended typed integration.
@@ -340,17 +340,17 @@ matches the intended typed integration.
 The AUV daemon API is explicitly marked experimental and not a long-term
 compatibility promise in
 [`runner.proto`](https://github.com/moeru-ai/auv/blob/1ca775f957dd11b96ddc73f77e8e5f3c38d8bd4a/proto/auv/api/daemon/v1/runner.proto#L1-L5).
-The `auv-js` package also depends on workspace-generated API code. See
-[`auv-js/package.json`](https://github.com/moeru-ai/auv/blob/1ca775f957dd11b96ddc73f77e8e5f3c38d8bd4a/js/packages/auv-js/package.json#L1-L50).
+The `@auv-js/sdk` package also depends on workspace-generated API code. See
+[`auv-js/package.json`](https://github.com/moeru-ai/auv/blob/1ca775f957dd11b96ddc73f77e8e5f3c38d8bd4a/js/packages/sdk/package.json#L1-L50).
 
-Once AIRI consumes `auv-js`, it must consume the SDK and `auv` binary from the
+Once AIRI consumes `@auv-js/sdk`, it must consume the SDK and `auv` binary from the
 same AUV release/revision. Until those packages are published, using the same
 pinned CLI for daemon control and allowlisted operation calls keeps the wire
 contract on one revision without copying an ad-hoc HTTP client into AIRI. A
 packaged test must still create a Run/Runner route and execute one harmless
 Driver read. `auv --help` or process health alone cannot detect schema drift.
 
-As of the research date, public npm lookups for both `auv-js` and
+As of the research date, public npm lookups for both `@auv-js/sdk` and
 `@auv-js/api-client` return `404 Not Found`. The source package is structured
 for publication, but AIRI cannot yet add a normal registry dependency. The
 release seam must either publish both packages together or attach tested,
@@ -427,7 +427,7 @@ A good boundary is:
 AIRI model/tool registry
   -> AIRI approval and policy
   -> AuvComputerAdapter (typed calls only)
-  -> app-owned auv-js client
+  -> app-owned @auv-js/sdk client
 ```
 
 Electron renderers should receive only capability-level Eventa/IPC methods and
@@ -510,7 +510,7 @@ becomes part of AIRI's DMG/NSIS/deb/rpm/AppImage/Steam application payload. It
 should not run its own updater. AIRI's updater must:
 
 1. stop the old app-owned daemon in `before-quit`;
-2. install the new AIRI payload including the matching AUV and `auv-js`;
+2. install the new AIRI payload including the matching AUV and `@auv-js/sdk`;
 3. let the new AIRI process start the new daemon;
 4. re-run the typed compatibility/health probe before exposing tools.
 
@@ -751,11 +751,11 @@ larger FFI and lifecycle seam.
 ### Current public-surface comparison
 
 The relevant AUV boundary is the typed `RunnerClient` in
-[`auv-js/src/apis/auv/driver.ts`](https://github.com/moeru-ai/auv/blob/1ca775f957dd11b96ddc73f77e8e5f3c38d8bd4a/js/packages/auv-js/src/apis/auv/driver.ts),
+[`auv-js/src/apis/auv/driver.ts`](https://github.com/moeru-ai/auv/blob/1ca775f957dd11b96ddc73f77e8e5f3c38d8bd4a/js/packages/sdk/src/apis/auv/driver.ts),
 not AUV's generic MCP `invoke` tool. AIRI can call this client in Electron main
 and project only approved product tools.
 
-| Native capability | AIRI computer-use-mcp today | AUV through `auv-js` today | Gap classification |
+| Native capability | AIRI computer-use-mcp today | AUV through `@auv-js/sdk` today | Gap classification |
 | --- | --- | --- | --- |
 | Display enumeration | `display_enumerate` | Direct: `displays.list()` | Ready |
 | Identify display/local point | `display_identify_point` | Display frames are available; AIRI can compute containment and local coordinates | AIRI-side composition |
@@ -768,9 +768,9 @@ and project only approved product tools.
 | Pointer movement | Internal pointer trace used by click | Direct planned and streaming mouse motion | AUV is ahead |
 | Type/paste text | `desktop_type_text`, optional pre-click | Direct type and clipboard-preserving paste; pre-click is two typed calls | Ready by composition |
 | Key press/chord | Broad macOS key-code table including arrows | Public string API exists; macOS currently accepts a smaller special-key set plus supported single-character shortcuts | Partial; arrows/navigation/function-key parity is missing on macOS |
-| Horizontal/vertical scroll at a point | `desktop_scroll` | Implemented in Rust on macOS/Linux/Windows, including window-targeted paths, but absent from Proto and `auv-js` | Implemented substrate; missing public surface |
+| Horizontal/vertical scroll at a point | `desktop_scroll` | Implemented in Rust on macOS/Linux/Windows, including window-targeted paths, but absent from Proto and `@auv-js/sdk` | Implemented substrate; missing public surface |
 | Wait | `desktop_wait` | No daemon call is needed | AIRI-side timer |
-| Clipboard read/write | `clipboard_read_text` / `clipboard_write_text` | Implemented by platform Driver APIs, but absent from Proto and `auv-js` | Implemented substrate; missing public surface |
+| Clipboard read/write | `clipboard_read_text` / `clipboard_write_text` | Implemented by platform Driver APIs, but absent from Proto and `@auv-js/sdk` | Implemented substrate; missing public surface |
 | AX snapshot | `accessibility_snapshot` | Public API exposes only `focusText()`; Rust has tree capture, path focus, and text readback | Implemented substrate; missing public surface and schema decisions |
 | AX find element | `accessibility_find_element` | Can be an AIRI query over a public AUV snapshot; no separate daemon search is required | Blocked by snapshot surface |
 | Unified observe / candidate IDs | `desktop_observe` merges screenshot, windows, AX, and optional Chrome candidates | No cross-source target-candidate API | Keep as an AIRI adapter, not a new AUV candidate schema |
@@ -796,7 +796,7 @@ The practical reading is:
 The answer to “AUV probably does not have many AX APIs yet” depends on the
 layer:
 
-- Public daemon/`auv-js`: only `FocusText` is exposed.
+- Public daemon/`@auv-js/sdk`: only `FocusText` is exposed.
 - Capability-oriented macOS Driver: tree capture, node-path focus, text focus,
   and text readback exist.
 - Native Swift boundary: tree capture, arbitrary AX action dispatch, focus,
@@ -821,13 +821,13 @@ expanding the archived AX-copilot vertical.
 
 AUV sends captures as tightly packed, uncompressed RGBA bytes. A 1920x1080
 frame is about 7.9 MiB before protobuf overhead; Retina frames are larger.
-The current `auv-js` gRPC transport constructs `@grpc/grpc-js`'s `Client`
+The current `@auv-js/sdk` gRPC transport constructs `@grpc/grpc-js`'s `Client`
 without channel options. The pinned `@grpc/grpc-js` 1.14.4 default maximum
 receive message length is 4 MiB.
 
 Therefore a normal full-display capture over the preferred Unix gRPC transport
 can exceed the client limit even though the local Runner server allows large
-messages. Before AIRI treats screenshot as product-ready, `auv-js` needs an
+messages. Before AIRI treats screenshot as product-ready, `@auv-js/sdk` needs an
 owned receive-size setting and a regression test above 4 MiB. The AIRI adapter
 also needs to turn raw RGBA into the image/tool-result representation expected
 by the model without duplicating screenshots unnecessarily.
@@ -841,7 +841,7 @@ The following is a bounded parity backlog, not approval to implement the
 slices:
 
 1. Fix large-frame transport and add AIRI's RGBA-to-image result projection.
-2. Expose typed global/window scroll through Proto, local Runner, and `auv-js`.
+2. Expose typed global/window scroll through Proto, local Runner, and `@auv-js/sdk`.
 3. Expose text clipboard read/write through the same owned layers.
 4. Expose a read-only macOS AX snapshot carrying truncation and `enabled`, then
    implement AIRI-side find/ranking over it.
@@ -872,7 +872,7 @@ keep in AIRI Electron main
         |
         v
 replace native execution with
-  AuvComputerAdapter -> auv-js -> auv serve -> local Driver Runner
+  AuvComputerAdapter -> @auv-js/sdk -> auv serve -> local Driver Runner
 ```
 
 AIRI's renderer currently obtains MCP tools through two main-process Eventa

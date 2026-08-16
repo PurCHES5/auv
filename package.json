@@ -6,7 +6,7 @@
   "packageManager": "pnpm@11.9.0",
   "scripts": {
     "build": "pnpm --filter @auv-js/api-client --filter \"./js/packages/*\" --if-present build",
-    "docs:toc": "doctoc --github --title \"## Table of Contents\" --maxlevel=2 README.md js/packages/auv-js/README.md proto/sdk/js/README.md",
+    "docs:toc": "doctoc --github --title \"## Table of Contents\" --maxlevel=2 README.md js/packages/sdk/README.md proto/sdk/js/README.md",
     "docs:update": "pnpm docs:toc",
     "generate:proto": "cd proto && buf generate --template buf.gen.yaml",
     "lint:fix": "eslint --cache . --fix",

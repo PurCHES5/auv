@@ -66,7 +66,7 @@ describe.skipIf(isWindows)('invoke against an authenticated AUV daemon', () => {
     await owner.close()
 
     const bootstrap = await connect({ endpoint: daemon.remoteEndpoint, transport: 'http' })
-    const enrollment = await pairDevice(bootstrap, { deviceId: 'auv-js-integration', label: 'auv-js integration test', token })
+    const enrollment = await pairDevice(bootstrap, { deviceId: 'auv-js-integration', label: '@auv-js/sdk integration test', token })
     credential = enrollment.credential
     await bootstrap.close()
   })

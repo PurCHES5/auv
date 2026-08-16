@@ -6,8 +6,8 @@ inputs:
       - auv/api/driver
       - auv/api/transport/websocket/v1
 plugins:
-  - local: [pnpm, --filter, auv-js, exec, protoc-gen-es]
-    out: ../js/packages/auv-js/src/gen
+  - local: [pnpm, --filter, '@auv-js/sdk', exec, protoc-gen-es]
+    out: ../js/packages/sdk/src/gen
     # Service descriptors retain google.api.http extensions at runtime, so the
     # generated browser module graph must include their transitive definitions.
     include_imports: true

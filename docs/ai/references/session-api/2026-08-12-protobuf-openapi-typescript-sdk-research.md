@@ -48,7 +48,7 @@ production users to stay with the v2 generator for now.
 The owner approved the Rust half of the experiment on 2026-08-12, first for
 PairingService and then for every daemon-owned unary service. On 2026-08-13,
 the owner approved the generated JavaScript package and its integration into
-`auv-js`. The current implementation:
+`@auv-js/sdk`. The current implementation:
 
 - annotates 20 RPCs across Discovery, Device, Pairing, Run, Runner, and
   RunnerClass with `google.api.http`;
@@ -68,10 +68,10 @@ the owner approved the generated JavaScript package and its integration into
 - generates the independent `@auv-js/api-client` package under `proto/sdk/js`
   through exact-pinned `@hey-api/openapi-ts 0.99.0`;
 - uses those generated operations for daemon-owned unary HTTP calls in
-  `auv-js`, while the same facade continues to use protobuf RPCs for gRPC and
+  `@auv-js/sdk`, while the same facade continues to use protobuf RPCs for gRPC and
   Unix transports;
 - keeps AUV-owned conveniences such as `ttlMs`, `Date`, generated Device IDs,
-  selectors, enum validation, and narrowed resource results in `auv-js`;
+  selectors, enum validation, and narrowed resource results in `@auv-js/sdk`;
 - verifies Discovery, Device, Pairing, Run, Runner, and RunnerClass JSON routes
   with daemon integration tests and verifies the
   unchanged gRPC path with both a real `auv serve` process and the `auv`
@@ -89,7 +89,7 @@ consumers:
    protobuf/WebSocket transport because its services come from runtime
    descriptors rather than daemon-owned concrete Tonic implementations.
 3. `proto/sdk/js` turns that Swagger artifact into `@auv-js/api-client`.
-   `js/packages/auv-js/src/apis/auv-daemon` binds the generated operations to
+   `js/packages/sdk/src/apis/auv-daemon` binds the generated operations to
    the existing protobuf request/response descriptors and contains no daemon
    REST path literals.
 
@@ -247,7 +247,7 @@ Source: [Hey API get started](https://heyapi.dev/docs/openapi/typescript/get-sta
 
 ## Implemented Hey API package
 
-The generated package and `auv-js` integration satisfy these gates:
+The generated package and `@auv-js/sdk` integration satisfy these gates:
 
 - server routes and generated client paths come from the same annotations;
 - local-owner, unauthenticated enrollment, and paired-bearer cases match the
@@ -263,7 +263,7 @@ The generated package and `auv-js` integration satisfy these gates:
 
 Two OpenAPI contract gaps remain explicit: the Swagger document does not yet
 describe the listener-wide bearer default with the public `PairDevice`
-exception, and it does not describe RFC 9457 error responses. `auv-js` supplies
+exception, and it does not describe RFC 9457 error responses. `@auv-js/sdk` supplies
 the bearer header and preserves its structured `AuvHttpError` mapping. Adding
 those declarations is a separate schema-contract slice rather than a second
 route list.

@@ -90,7 +90,7 @@ export async function setupPairedAuvDaemon(deviceId = 'auv-js-test-device'): Pro
     const bootstrap = await connect({ endpoint: daemon.remoteEndpoint, transport: 'http' })
 
     log.log('paring test Device')
-    const enrollment = await pairDevice(bootstrap, { deviceId, label: 'auv-js test Device', token })
+    const enrollment = await pairDevice(bootstrap, { deviceId, label: '@auv-js/sdk test Device', token })
     log.log('paired successfully')
 
     await bootstrap.close()

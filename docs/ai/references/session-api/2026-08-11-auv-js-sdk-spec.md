@@ -29,7 +29,7 @@ same cancellation contract.
 
 ## Solution
 
-Provide an `auv-js` package whose canonical implementation is a set of
+Provide an `@auv-js/sdk` package whose canonical implementation is a set of
 individually exported functions. Each operation function receives an explicit
 `AuvConnection`, domain-facing input, and an optional `AbortSignal`. A thin
 `createAuv` binds a connection and optional default signal into an `AuvClient`, then exposes
@@ -78,8 +78,8 @@ deferred; paired profile credentials remain application-owned and explicit.
 
 ## User Stories
 
-1. As a browser application developer, I want to import `auv-js`, so that I can control an AUV Device without a native addon.
-2. As a Node.js developer, I want to use the same package as browser callers, so that shared application code has one API.
+1. As a browser application developer, I want to import `@auv-js/sdk`, so that I can control an AUV Device without a native addon.
+2. As a Node.js developer, I want to use the same `@auv-js/sdk` package as browser callers, so that shared application code has one API.
 3. As an Electron developer, I want to connect through a Unix socket, so that a trusted local application can use the owner-checked daemon transport.
 4. As a JavaScript developer, I want to connect with a short transport name, so that common local configuration is concise.
 5. As an advanced integrator, I want to pass a constructed transport, so that endpoint and adapter configuration remain explicit when needed.
@@ -123,7 +123,7 @@ deferred; paired profile credentials remain application-owned and explicit.
 
 ## Implementation Decisions
 
-- The package name is `auv-js`. The package exposes browser-safe entry points
+- The package name is `@auv-js/sdk`. The package exposes browser-safe entry points
   and platform-specific Node.js/Electron entry points without loading Unix or
   native transport code into browser bundles.
 - The Node.js/Electron-main entry point may supervise an app-owned `auv serve`
@@ -212,7 +212,7 @@ import {
   createAuv,
   createPairingToken,
   listDevices,
-} from 'auv-js'
+} from '@auv-js/sdk'
 
 const connection = await connect({
   local: true,
@@ -315,7 +315,7 @@ await auv.devices.list({ signal })
 The bootstrap connection is allowed to call only the token-authenticated
 enrollment operation. Passing a pairing token to `connect` as though it were a
 long-lived bearer is not part of the API. A browser may receive the one-time
-token from any already authenticated `auv-js`, Rust, CLI, or MCP caller that is
+token from any already authenticated `@auv-js/sdk`, Rust, CLI, or MCP caller that is
 authorized to create it; Unix socket access is one bootstrap path, not the only
 token creator.
 
@@ -432,7 +432,7 @@ transport factories do not pretend to be cancellable merely to add a parameter.
 
 ## Testing Decisions
 
-- Fast protocol-mapping tests use the public `auv-js` function/client API over
+- Fast protocol-mapping tests use the public `@auv-js/sdk` function/client API over
   a recording transport. The invoke integration seam starts a real `auv`
   daemon, enrolls a Device, authenticates with its credential, and reaches a
   real routed Runner over HTTP and WebSocket.
@@ -514,6 +514,6 @@ to one routed operation: its Protobuf `Open`, input, half-close, cancel, output,
 and terminal status frames preserve typed payloads and explicit lifecycle
 without creating a second session resource.
 
-The implementation lives in `js/packages/auv-js`; browser-safe exports are kept
+The implementation lives in `js/packages/sdk`; browser-safe exports are kept
 separate from the Node gRPC/Unix adapter, and all generated message code comes
 from the checked-in Protobuf schemas through Buf.

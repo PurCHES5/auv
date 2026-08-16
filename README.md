@@ -299,7 +299,7 @@ cargo check
 cargo test
 ```
 
-### `auv-js`
+### `@auv-js/sdk`
 
 #### Prerequisites
 

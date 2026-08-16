@@ -46,7 +46,7 @@ jobs:
         run: pnpm build
 
       - name: Lint packages
-        run: pnpm --filter @auv-js/api-client --filter auv-js exec publint
+        run: pnpm --filter @auv-js/api-client --filter @auv-js/sdk exec publint
 
       - name: Verify package contents
         run: >-

@@ -6,7 +6,7 @@ Status: research only; no production code changed
 
 ## Question
 
-Can `js/packages/auv-js/src/transport/async-queue.ts` be replaced by a built-in primitive or
+Can `js/packages/sdk/src/transport/async-queue.ts` be replaced by a built-in primitive or
 an npm package while preserving all of its transport semantics?
 
 The required contract is stricter than a generic task queue:
