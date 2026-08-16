@@ -1,0 +1,48 @@
+name: Release npm packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  release:
+    name: Release npm packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: pnpm build
+
+      - name: Lint packages
+        run: pnpm --filter @auv-js/api-client --filter auv-js exec publint
+
+      - name: Verify package contents
+        run: >-
+          pnpm -r publish --access public --no-git-checks --dry-run
+
+      - name: Publish packages
+        run: >-
+          pnpm -r publish --access public --no-git-checks
