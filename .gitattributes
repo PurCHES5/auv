@@ -1,5 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 js/packages/api-client/src/gen/**/*.ts text eol=lf whitespace=-blank-at-eof
-./cursor/** linguist-detectable=false
-./cursor/** linguist-vendored=true
+./.cursor/** linguist-detectable=false
+./.cursor/** linguist-vendored=true
