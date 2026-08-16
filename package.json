@@ -19,6 +19,7 @@
   "devDependencies": {
     "@alint-js/cli": "catalog:",
     "@auv-js/alint-config": "workspace:*",
+    "@decimalturn/toml-patch": "catalog:",
     "@moeru/eslint-config": "catalog:",
     "@types/node": "catalog:",
     "@vitest/coverage-v8": "catalog:vitest",
@@ -31,7 +32,6 @@
     "playwright": "catalog:",
     "publint": "catalog:",
     "simple-git-hooks": "catalog:",
-    "smol-toml": "catalog:",
     "taze": "catalog:",
     "tinyexec": "catalog:",
     "tsdown": "catalog:",

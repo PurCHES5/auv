@@ -30,6 +30,9 @@ catalogs:
     '@bufbuild/protoc-gen-es':
       specifier: 2.13.0
       version: 2.13.0
+    '@decimalturn/toml-patch':
+      specifier: ^3.0.2
+      version: 3.0.2
     '@grpc/grpc-js':
       specifier: 1.14.4
       version: 1.14.4
@@ -87,9 +90,6 @@ catalogs:
     simple-git-hooks:
       specifier: ^2.13.1
       version: 2.13.1
-    smol-toml:
-      specifier: ^1.8.0
-      version: 1.8.0
     std-env:
       specifier: 4.2.0
       version: 4.2.0
@@ -132,6 +132,9 @@ importers:
       '@auv-js/alint-config':
         specifier: workspace:*
         version: link:js/packages/alint-config
+      '@decimalturn/toml-patch':
+        specifier: 'catalog:'
+        version: 3.0.2
       '@moeru/eslint-config':
         specifier: 'catalog:'
         version: 0.1.0-beta.20(@antfu/eslint-config@8.3.0(@typescript-eslint/typescript-estree@8.67.0(typescript@6.0.3))(@typescript-eslint/utils@8.67.0(eslint@10.8.1(jiti@2.7.0))(typescript@6.0.3))(@vue/compiler-sfc@3.5.41)(eslint@10.8.1(jiti@2.7.0))(oxlint@1.78.0)(typescript@6.0.3)(vitest@4.1.10))(eslint-plugin-oxlint@1.78.0(oxlint@1.78.0))(eslint@10.8.1(jiti@2.7.0))(typescript@6.0.3)
@@ -168,9 +171,6 @@ importers:
       simple-git-hooks:
         specifier: 'catalog:'
         version: 2.13.1
-      smol-toml:
-        specifier: 'catalog:'
-        version: 1.8.0
       taze:
         specifier: 'catalog:'
         version: 19.17.2
@@ -536,6 +536,10 @@ packages:
   '@csstools/css-tokenizer@4.0.0':
     resolution: {integrity: sha512-QxULHAm7cNu72w97JUNCBFODFaXpbDg+dP8b/oWFAZ2MTRppA3U00Y2L1HqaS4J6yBqxwa/Y3nMBaxVKbB/NsA==}
     engines: {node: '>=20.19.0'}
+
+  '@decimalturn/toml-patch@3.0.2':
+    resolution: {integrity: sha512-0qEaybovbKCOTCmOiXj7PgajYsoMhiphka0sjWqT/up5WE9LQF/SRDFcL65CG6IhyyxmKrxjcLROqgDNHMMGWw==}
+    engines: {node: '>=16'}
 
   '@e18e/eslint-plugin@0.4.1':
     resolution: {integrity: sha512-Re00N8ad1HsNrzpuIX7Bhdr8RSaFWp6VgwJUEJF+47+D1CMcXoS7VNRkIG23e46pddhgxWU0cWk4wYiQIuMHqQ==}
@@ -4221,6 +4225,8 @@ snapshots:
       css-tree: 3.2.1
 
   '@csstools/css-tokenizer@4.0.0': {}
+
+  '@decimalturn/toml-patch@3.0.2': {}
 
   '@e18e/eslint-plugin@0.4.1(eslint@10.8.1(jiti@2.7.0))(oxlint@1.78.0)':
     dependencies:

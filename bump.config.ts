@@ -2,15 +2,16 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { cwd } from 'node:process'
 
+import { parse, patch } from '@decimalturn/toml-patch'
 import { defineConfig } from 'bumpp'
-import { parse, stringify } from 'smol-toml'
 import { x } from 'tinyexec'
 
 import packageJSON from './package.json' with { type: 'json' }
 
 async function syncCargoToml() {
-  const cargoTomlFile = await readFile(join(cwd(), 'Cargo.toml'))
-  const cargoToml = parse(cargoTomlFile.toString('utf-8')) as {
+  const cargoTomlPath = join(cwd(), 'Cargo.toml')
+  const cargoTomlSource = await readFile(cargoTomlPath, 'utf8')
+  const cargoToml = parse(cargoTomlSource) as {
     workspace?: {
       package?: {
         version?: string
@@ -28,7 +29,10 @@ async function syncCargoToml() {
   cargoToml.workspace.package.version = packageJSON.version
   console.info(`Bumping Cargo.toml version to ${cargoToml.workspace.package.version} (from package.json, ${packageJSON.version})`)
 
-  await writeFile(join(cwd(), 'Cargo.toml'), stringify(cargoToml))
+  await writeFile(
+    cargoTomlPath,
+    patch(cargoTomlSource, cargoToml),
+  )
 }
 
 export default defineConfig({
