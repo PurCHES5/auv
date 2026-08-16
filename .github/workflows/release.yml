@@ -26,6 +26,9 @@ concurrency:
 env:
   BINARY_NAME: auv
   CARGO_TERM_COLOR: always
+  # NOTICE: Big Sur aligns both architectures on the system Swift runtime;
+  # Rust's older x86_64 default otherwise produces an unresolved @rpath load.
+  MACOSX_DEPLOYMENT_TARGET: "11.0"
   PACKAGE_NAME: auv-cli
 
 jobs:
