@@ -39,20 +39,49 @@ jobs:
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
             archive: auv-x86_64-unknown-linux-gnu.tar.gz
+            executable: auv
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             archive: auv-aarch64-unknown-linux-gnu.tar.gz
+            executable: auv
           - os: macos-15-intel
             target: x86_64-apple-darwin
             archive: auv-x86_64-apple-darwin.tar.gz
+            executable: auv
           - os: macos-14
             target: aarch64-apple-darwin
             archive: auv-aarch64-apple-darwin.tar.gz
+            executable: auv
+          - os: windows-2025
+            target: x86_64-pc-windows-msvc
+            archive: auv-x86_64-pc-windows-msvc.zip
+            executable: auv.exe
 
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
+
+      - name: Set up Buf
+        uses: bufbuild/buf-action@v1
+        with:
+          version: "1.71.0"
+          setup_only: true
+
+      - name: Install yq
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install yq --version 4.53.3 --yes --no-progress
+
+      - name: Generate vendored Protobuf dependencies
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/generate-proto-vendor.ps1
+
+      - name: Generate vendored Protobuf dependencies
+        if: runner.os != 'Windows'
+        shell: bash
+        run: ./scripts/generate-proto-vendor
 
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
@@ -76,7 +105,7 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Build release binary
-        run: cargo build --release --package "$PACKAGE_NAME" --bin "$BINARY_NAME" --target "${{ matrix.target }}"
+        run: cargo build --release --package "${{ env.PACKAGE_NAME }}" --bin "${{ env.BINARY_NAME }}" --target "${{ matrix.target }}"
 
       - name: Import macOS signing certificate
         if: runner.os == 'macOS'
@@ -94,17 +123,29 @@ jobs:
           test -n "$identity"
           codesign --force --timestamp --options runtime \
             --sign "$identity" \
-            "target/${{ matrix.target }}/release/${BINARY_NAME}"
-          codesign --verify --strict --verbose=2 "target/${{ matrix.target }}/release/${BINARY_NAME}"
+            "target/${{ matrix.target }}/release/${{ matrix.executable }}"
+          codesign --verify --strict --verbose=2 "target/${{ matrix.target }}/release/${{ matrix.executable }}"
 
       - name: Verify binary starts
-        run: target/${{ matrix.target }}/release/${{ env.BINARY_NAME }} --help
+        run: target/${{ matrix.target }}/release/${{ matrix.executable }} --help
 
       - name: Create archive
-        run: tar -czf ${{ matrix.archive }} -C target/${{ matrix.target }}/release ${{ env.BINARY_NAME }}
+        if: runner.os != 'Windows'
+        run: tar -czf ${{ matrix.archive }} -C target/${{ matrix.target }}/release ${{ matrix.executable }}
+
+      - name: Create archive
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path "target/${{ matrix.target }}/release/${{ matrix.executable }}" -DestinationPath "${{ matrix.archive }}"
 
       - name: Calculate hash
+        if: runner.os != 'Windows'
         run: shasum -a 256 ${{ matrix.archive }} | awk '{ print $1 }' > ${{ matrix.archive }}.sha256
+
+      - name: Calculate hash
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Set-Content -Path "${{ matrix.archive }}.sha256" -Value (Get-FileHash -Algorithm SHA256 "${{ matrix.archive }}").Hash.ToLower()
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v7
