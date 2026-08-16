@@ -1,6 +1,7 @@
 {
   "name": "@auv-js/root",
   "type": "module",
+  "version": "0.0.1",
   "private": true,
   "packageManager": "pnpm@11.9.0",
   "scripts": {
@@ -26,7 +27,9 @@
     "oxlint": "catalog:",
     "publint": "catalog:",
     "simple-git-hooks": "catalog:",
+    "smol-toml": "catalog:",
     "taze": "catalog:",
+    "tinyexec": "catalog:",
     "tsdown": "catalog:",
     "tsx": "catalog:",
     "typescript": "catalog:",
