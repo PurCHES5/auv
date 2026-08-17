@@ -11,9 +11,11 @@ words:
   - Balatro
   - bbox
   - bufbuild
+  - bumpp
   - clippy
   - conv
   - cust
+  - decimalturn
   - direnv
   - dotenv
   - fsrs

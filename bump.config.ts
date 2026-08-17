@@ -6,8 +6,6 @@ import { parse, patch } from '@decimalturn/toml-patch'
 import { defineConfig } from 'bumpp'
 import { x } from 'tinyexec'
 
-import packageJSON from './package.json' with { type: 'json' }
-
 async function syncCargoToml() {
   const cargoTomlPath = join(cwd(), 'Cargo.toml')
   const cargoTomlSource = await readFile(cargoTomlPath, 'utf8')
@@ -24,6 +22,14 @@ async function syncCargoToml() {
   }
   if (typeof cargoToml.workspace?.package?.version !== 'string') {
     throw new TypeError('Cargo.toml does not contain a valid version in workspace.package.version')
+  }
+
+  // NOTICE: here we don't use import package.json because during bumpp, the package.json will be updated,
+  // and the import will be cached, yet the Cargo.toml will be updated with the old version.
+  const packageJSONFile = join(cwd(), 'package.json')
+  const packageJSON = JSON.parse(await readFile(packageJSONFile, 'utf-8'))
+  if (typeof packageJSON?.version !== 'string' || packageJSON?.version === null) {
+    throw new TypeError('package.json does not contain a valid version')
   }
 
   cargoToml.workspace.package.version = packageJSON.version
