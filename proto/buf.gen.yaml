@@ -7,7 +7,9 @@ inputs:
       - auv/api/transport/websocket/v1
       - grpc/reflection/v1
 plugins:
-  - local: [pnpm, --filter, '@auv-js/sdk', exec, protoc-gen-es]
+  # NOTICE(protoc-plugin-stdout): Buf decodes plugin stdout as a binary
+  # CodeGeneratorResponse, so pnpm must not emit workspace platform warnings.
+  - local: [pnpm, --silent, --filter, '@auv-js/sdk', exec, protoc-gen-es]
     out: ../js/packages/sdk/src/gen
     # Service descriptors retain google.api.http extensions at runtime, so the
     # generated browser module graph must include their transitive definitions.
