@@ -42,22 +42,27 @@ jobs:
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
             archive: auv-x86_64-unknown-linux-gnu.tar.gz
+            binding: auv-binding.linux-x64-gnu.node
             executable: auv
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             archive: auv-aarch64-unknown-linux-gnu.tar.gz
+            binding: auv-binding.linux-arm64-gnu.node
             executable: auv
           - os: macos-15-intel
             target: x86_64-apple-darwin
             archive: auv-x86_64-apple-darwin.tar.gz
+            binding: auv-binding.darwin-x64.node
             executable: auv
           - os: macos-14
             target: aarch64-apple-darwin
             archive: auv-aarch64-apple-darwin.tar.gz
+            binding: auv-binding.darwin-arm64.node
             executable: auv
           - os: windows-2025
             target: x86_64-pc-windows-msvc
             archive: auv-x86_64-pc-windows-msvc.zip
+            binding: auv-binding.win32-x64-msvc.node
             executable: auv.exe
 
     steps:
@@ -106,6 +111,22 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
+      - uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: pnpm
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build NAPI binding
+        working-directory: js/packages/cli
+        run: pnpm build --target ${{ matrix.target }}
 
       - name: Build release binary
         run: cargo build --release --package "${{ env.PACKAGE_NAME }}" --bin "${{ env.BINARY_NAME }}" --target "${{ matrix.target }}"
@@ -157,6 +178,7 @@ jobs:
           path: |
             ${{ matrix.archive }}
             ${{ matrix.archive }}.sha256
+            js/packages/cli/${{ matrix.binding }}
 
   publish:
     name: Publish release artifacts
@@ -249,3 +271,54 @@ jobs:
           path: |
             ${{ matrix.archive }}
             ${{ matrix.archive }}.sha256
+
+  publish-npm-cli:
+    name: Publish NAPI and CLI npm packages
+    needs: publish
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'release'
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: js/packages/cli/artifacts
+
+      - name: Assemble platform npm packages
+        working-directory: js/packages/cli
+        env:
+          AUV_RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: pnpm artifacts
+
+      - name: Verify npm package contents
+        working-directory: js/packages/cli
+        env:
+          NAPI_DRY_RUN: "1"
+        run: |
+          pnpm prepublishOnly
+          mkdir -p npm-package
+          pnpm pack --pack-destination npm-package
+          npm publish npm-package/*.tgz --access public --dry-run
+
+      - name: Publish npm packages
+        working-directory: js/packages/cli
+        run: |
+          pnpm prepublishOnly
+          npm publish npm-package/*.tgz --access public

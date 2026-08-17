@@ -27,6 +27,8 @@ export default defineConfig({
     '**/target/',
     '**/.auv/**',
     '**/gen/**',
+    'js/packages/cli/binding.d.ts',
+    'js/packages/cli/binding.js',
     'proto/**',
     'crates/**',
     'supported/**',

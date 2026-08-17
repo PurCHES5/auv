@@ -32,6 +32,7 @@ trustPolicy: no-downgrade
 packages:
   - 'crates/auv-inspect-server/viewer'
   - 'js/packages/*'
+  - 'js/packages/cli/npm/*'
   - 'proto/sdk/js'
 
 catalog:
@@ -44,17 +45,21 @@ catalog:
   '@bufbuild/protobuf': 2.13.0
   '@bufbuild/protoc-gen-es': 2.13.0
   '@decimalturn/toml-patch': ^3.0.2
+  '@emnapi/core': ^1.11.2
+  '@emnapi/runtime': ^1.11.2
   '@grpc/grpc-js': 1.14.4
   '@guiiai/logg': ^1.2.11
   '@hey-api/openapi-ts': ^0.99.0
   '@moeru/eslint-config': ^0.1.0-beta.20
   '@moeru/std': 0.1.0-beta.20
+  '@napi-rs/cli': ^3.8.6
   '@pnpm/find-workspace-dir': 1000.1.5
   '@types/node': ^26.0.1
   '@vitest/browser-playwright': 4.1.10
   bumpp: ^12.2.0
   date-fns: 4.4.0
   doctoc: ^2.5.0
+  emnapi: ^1.11.3
   eslint: ^10.8.1
   eslint-plugin-oxlint: ^1.78.0
   jsdom: 27.4.0

@@ -17,8 +17,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
 
       - name: Set up Buf
         uses: bufbuild/buf-action@v1
@@ -43,15 +41,16 @@ jobs:
         run: pnpm generate:proto
 
       - name: Build packages
-        run: pnpm build
+        run: >-
+          pnpm -r --filter @auv-js/api-client --filter @auv-js/sdk build
 
       - name: Lint packages
         run: pnpm --filter @auv-js/api-client --filter @auv-js/sdk exec publint
 
       - name: Verify package contents
         run: >-
-          pnpm -r publish --access public --no-git-checks --dry-run
+          pnpm -r --filter @auv-js/api-client --filter @auv-js/sdk publish --access public --no-git-checks --dry-run
 
       - name: Publish packages
         run: >-
-          pnpm -r publish --access public --no-git-checks
+          pnpm -r --filter @auv-js/api-client --filter @auv-js/sdk publish --access public --no-git-checks
