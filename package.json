@@ -21,6 +21,7 @@
     "@auv-js/alint-config": "workspace:*",
     "@decimalturn/toml-patch": "catalog:",
     "@moeru/eslint-config": "catalog:",
+    "@pnpm/find-workspace-dir": "catalog:",
     "@types/node": "catalog:",
     "@vitest/coverage-v8": "catalog:vitest",
     "bumpp": "catalog:",

@@ -19,10 +19,6 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.release.tag_name || github.ref }}
-  cancel-in-progress: false
-
 env:
   BINARY_NAME: auv
   CARGO_TERM_COLOR: always
