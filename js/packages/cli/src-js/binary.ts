@@ -1,6 +1,6 @@
 import process from 'node:process'
 
-import { accessSync, constants, readFileSync } from 'node:fs'
+import { accessSync, constants } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 
@@ -20,10 +20,6 @@ interface DiagnosticReport {
   }
 }
 
-interface PackageManifest {
-  version: string
-}
-
 export class AuvBinaryError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options)
@@ -34,18 +30,13 @@ export class AuvBinaryError extends Error {
 /** Return the absolute path of the AUV executable installed for this host. */
 export function binaryPath(): string {
   const platformKey = `${process.platform}-${process.arch}`
+
   const platformPackage = PLATFORM_PACKAGES.get(platformKey)
-
   if (!platformPackage) {
-    throw new AuvBinaryError(
-      `AUV does not publish an executable for ${process.platform}/${process.arch}.`,
-    )
+    throw new AuvBinaryError(`AUV does not publish an executable for ${process.platform}/${process.arch}.`)
   }
-
   if (process.platform === 'linux' && isMusl()) {
-    throw new AuvBinaryError(
-      'AUV currently publishes glibc Linux executables only; musl Linux is not supported.',
-    )
+    throw new AuvBinaryError('AUV currently publishes glibc Linux executables only; musl Linux is not supported.')
   }
 
   const [packageName, executable] = platformPackage
@@ -55,26 +46,15 @@ export function binaryPath(): string {
     manifestPath = require.resolve(`${packageName}/package.json`)
   }
   catch (cause) {
-    throw new AuvBinaryError(
-      `The optional package ${packageName} is missing. Reinstall @auv-js/cli without omitting optional dependencies.`,
-      { cause },
-    )
+    throw new AuvBinaryError(`The optional package ${packageName} is missing. Reinstall @auv-js/cli without omitting optional dependencies.`, { cause })
   }
-
-  verifyPackageVersion(packageName, manifestPath)
 
   const resolvedPath = join(dirname(manifestPath), executable)
   try {
-    accessSync(
-      resolvedPath,
-      process.platform === 'win32' ? constants.F_OK : constants.X_OK,
-    )
+    accessSync(resolvedPath, process.platform === 'win32' ? constants.F_OK : constants.X_OK)
   }
   catch (cause) {
-    throw new AuvBinaryError(
-      `The ${packageName} package does not contain an executable AUV binary at ${resolvedPath}.`,
-      { cause },
-    )
+    throw new AuvBinaryError(`The ${packageName} package does not contain an executable AUV binary at ${resolvedPath}.`, { cause })
   }
 
   return resolvedPath
@@ -83,19 +63,4 @@ export function binaryPath(): string {
 function isMusl(): boolean {
   const report = process.report?.getReport?.() as DiagnosticReport | undefined
   return report?.header?.glibcVersionRuntime === undefined
-}
-
-function verifyPackageVersion(packageName: string, manifestPath: string): void {
-  const rootManifest = JSON.parse(
-    readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
-  ) as PackageManifest
-  const platformManifest = JSON.parse(
-    readFileSync(manifestPath, 'utf8'),
-  ) as PackageManifest
-
-  if (platformManifest.version !== rootManifest.version) {
-    throw new AuvBinaryError(
-      `The installed ${packageName} version (${platformManifest.version}) does not match @auv-js/cli (${rootManifest.version}). Reinstall both packages together.`,
-    )
-  }
 }
