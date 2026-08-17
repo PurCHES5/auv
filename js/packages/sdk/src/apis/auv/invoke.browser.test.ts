@@ -102,4 +102,60 @@ describe('typed remote invoke from a browser', () => {
       await connection.close()
     }
   })
+
+  it.skipIf(!daemon.available)('reflects and invokes the registered NetEase Runner through browser transports', async () => {
+    if (!daemon.available)
+      throw new Error('browser daemon fixture is unavailable')
+
+    const connection = await connect({
+      credential: daemon.credential,
+      endpoint: daemon.endpoint,
+      transport: 'http',
+    })
+
+    try {
+      const runner = await createAuv(connection).runners.discover({
+        runnerClass: 'auv.app.netease_music',
+      })
+      const nowPlaying = runner.apis.find(method => method.method === 'GetNowPlaying')
+      const listSongs = runner.apis.find(method => method.method === 'ListSongs')
+
+      expect(runner.apis).toHaveLength(14)
+      expect(nowPlaying).toMatchObject({
+        effect: 'read_only',
+        methodKind: 'unary',
+      })
+      expect(listSongs).toMatchObject({
+        effect: 'input',
+        methodKind: 'server_streaming',
+      })
+      expect(listSongs?.inputSchema).toMatchObject({
+        $defs: {
+          'auv.netease_music.v1.ListSongsRequest': {
+            properties: {
+              dailyRecommended: {
+                $ref: '#/$defs/auv.netease_music.v1.DailyRecommendedRef',
+              },
+              playlist: {
+                $ref: '#/$defs/auv.netease_music.v1.PlaylistRef',
+              },
+            },
+          },
+        },
+      })
+      await expect(runner.invokeUnaryJson({
+        input: { applicationBundleId: 'dev.auv.nonexistent-browser-player' },
+        method: nowPlaying!,
+      })).resolves.toEqual({})
+      const responses = await runner.invokeServerStreamJson({ input: {}, method: listSongs! })
+      await expect(responses[Symbol.asyncIterator]().next()).rejects.toMatchObject({
+        grpcStatus: 3,
+        name: 'AuvWebSocketError',
+        rpcCode: 3,
+      })
+    }
+    finally {
+      await connection.close()
+    }
+  }, 600_000)
 })

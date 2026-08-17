@@ -185,9 +185,10 @@ transport bound to its endpoint, Device, optional Run, and RunnerClass routing
 context. An extension owns its generated clients and any extension-specific
 local/remote operation interface; community service types are not aggregated into
 `auv::Client`. Rust extensions normally use their generated client over this
-routed transport. Reflection-based dynamic invocation is reserved for future
-scripting, developer tools, and generic clients rather than replacing an
-extension's typed Rust API.
+routed transport. `@auv-js/sdk` additionally supports Reflection-based dynamic
+invocation for scripting, developer tools, and generic clients. That projection
+uses standard gRPC Reflection plus ProtoJSON and does not replace an extension's
+typed Rust API or make the daemon a capability catalog.
 
 An extension-owned generated client may use an operation-interface-provided transport handle
 that has already resolved context, routing, and authentication. This is an
@@ -585,9 +586,12 @@ AUV method annotations do not grant capabilities or authority. An optional
 `discoverable` marker includes a concrete typed RPC in DevTools, Inspector,
 capability panels, and future JavaScript REPL discovery. Its required effect
 classification distinguishes read-only, mutation, and input-delivery calls for
-tool presentation and confirmation. Unannotated RPCs remain callable through
-their generated typed clients. Device authentication/authorization and optional
-Run association are independent of these developer-tool annotations.
+tool presentation and confirmation. A generic client may project an annotated
+unary or server-streaming RPC into a JSON-schema-described tool while retaining
+the selected Device, optional Run, and RunnerClass route. Unannotated RPCs
+remain callable through their generated typed clients. Device authentication
+and authorization remain independent of these developer-tool annotations. The
+optional Run association is also independent.
 
 ## Driver API
 

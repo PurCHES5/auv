@@ -2,7 +2,7 @@ import type { TestProject } from 'vitest/node'
 
 import { isWindows } from 'std-env'
 
-import { setupPairedAuvDaemon } from './auv-daemon'
+import { neteaseMusicRunner, setupPairedAuvDaemon } from './auv-daemon'
 
 export type BrowserAuvDaemonContext
   = | { readonly available: false }
@@ -28,7 +28,9 @@ export async function setup(project: TestProject): Promise<() => Promise<void>> 
     return () => Promise.resolve()
   }
 
-  const daemon = await setupPairedAuvDaemon('auv-js-browser-integration')
+  const daemon = await setupPairedAuvDaemon('auv-js-browser-integration', {
+    runners: [neteaseMusicRunner],
+  })
 
   project.provide('auvBrowserDaemon', {
     available: true,

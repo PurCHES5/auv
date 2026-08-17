@@ -7,6 +7,7 @@ import type { HealthStatus } from '../auv-daemon/health'
 import type { CreatePairingTokenOptions, PairDeviceOptions, PairedDeviceOptions, PairingEnrollment, PairingToken, SetPairedDeviceEnabledOptions } from '../auv-daemon/pairing'
 import type { CreateRunnerOptions, DeleteRunnerOptions, GetRunnerClassOptions, GetRunnerOptions, ListRunnerClassesOptions, Runner, RunnerClass } from '../auv-daemon/runners'
 import type { CreateRunOptions, GetRunOptions, Run, StopRunOptions } from '../auv-daemon/runs'
+import type { DiscoveredRunner, DiscoverRunnerOptions } from './discover'
 import type { RunnerClient, RunnerRouteOptions } from './driver'
 import type { InvokeDuplexOptions, InvokeServerStreamOptions, InvokeUnaryOptions } from './invoke'
 
@@ -15,6 +16,7 @@ import { checkHealth } from '../auv-daemon/health'
 import { createPairingToken, pairDevice, revokeDeviceCredential, setPairedDeviceEnabled, unpairDevice } from '../auv-daemon/pairing'
 import { createRunner, deleteRunner, getRunner, getRunnerClass, listRunnerClasses, listRunners } from '../auv-daemon/runners'
 import { createRun, getRun, listRuns, stopRun } from '../auv-daemon/runs'
+import { discoverRunner } from './discover'
 import { createRunnerClient } from './driver'
 import { invokeDuplex, invokeServerStream, invokeUnary } from './invoke'
 
@@ -44,6 +46,7 @@ export interface AuvClient {
   readonly runners: {
     create: (options: CreateRunnerOptions) => Promise<Runner>
     delete: (options: DeleteRunnerOptions) => Promise<Runner>
+    discover: (options: DiscoverRunnerOptions) => Promise<DiscoveredRunner>
     get: (options: GetRunnerOptions) => Promise<Runner>
     getClass: (options: GetRunnerClassOptions) => Promise<RunnerClass>
     list: (options?: OperationOptions) => Promise<readonly Runner[]>
@@ -92,6 +95,7 @@ export function createAuv(connection: AuvConnection, options: CreateClientOption
     runners: {
       create: value => createRunner(connection, operation(value)),
       delete: value => deleteRunner(connection, operation(value)),
+      discover: value => discoverRunner(connection, operation(value)),
       get: value => getRunner(connection, operation(value)),
       getClass: value => getRunnerClass(connection, operation(value)),
       list: value => listRunners(connection, operation(value)),

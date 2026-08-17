@@ -52,6 +52,33 @@ with the selected Device and Run. Replace this adapter with the matching
 `@auv-js/sdk` package after it is published; the manager and tool-provider ownership
 boundary does not need to change.
 
+### AUV npm distribution update (2026-08-17)
+
+AUV now has a source-complete npm distribution path under
+`js/packages/cli`; this is implementation evidence, not evidence that version
+`0.0.6` has been published or installed from npm. The package keeps the
+napi-rs template's root-package plus platform-package layout:
+
+- `@auv-js/cli` exports the NAPI binding, `binaryPath()`, and the `auv` npm
+  command shim;
+- five optional packages cover macOS arm64/x64, glibc Linux arm64/x64, and
+  Windows x64;
+- each platform package carries both its `.node` binding and the matching
+  standalone `auv` executable;
+- the existing AUV release matrix builds both artifacts, while the npm
+  assembly step verifies the release archive SHA-256 and prefers the notarized
+  macOS archive before publishing;
+- installation uses npm optional dependencies instead of a network-fetching
+  `postinstall` hook.
+
+This removes the need for Electron applications to invent a GitHub download
+protocol. It does not remove Electron's bundle boundary: the application must
+still copy `binaryPath()` outside `app.asar`, sign the copied nested executable
+as part of the final macOS app, resolve the app-owned absolute path at runtime,
+and let the main process own its lifecycle. AIRI's existing
+`Contents/MacOS/auv` implementation remains the reference shape for that
+staging step.
+
 Local signed-package evidence:
 
 - electron-builder reported `signing additional user-defined binaries` for
@@ -135,9 +162,9 @@ integration still needs:
 
 For the current release matrices, macOS x64/arm64 is the closest product slice.
 Linux x64/arm64 has matching AUV artifacts but still needs runtime-library and
-Flatpak/portal validation. Windows x64 is presently blocked in AUV beyond
-packaging: AUV publishes no Windows release artifact and `auv serve` does not
-register its first-party local Driver Runner on non-Unix platforms.
+Flatpak/portal validation. Windows x64 now has a release archive and a
+first-party local Driver Runner, but still needs executable signing, installer
+staging, SmartScreen, and packaged live-Driver evidence.
 
 ## What already exists
 
@@ -208,7 +235,7 @@ first-party Runner role. See
 Consequently, bundling one executable is sufficient on macOS/Linux: the daemon
 does not require a separately packaged local-Runner executable.
 
-### Four AIRI/AUV release targets already match exactly
+### Five AIRI/AUV release targets now match exactly
 
 AIRI currently builds these five desktop targets:
 
@@ -221,9 +248,10 @@ AIRI currently builds these five desktop targets:
 See the AIRI
 [`release-tamagotchi.yml` matrix](https://github.com/moeru-ai/airi/blob/0ef3a26f7ded46ad831ff3a7e2248dee468bb6fa/.github/workflows/release-tamagotchi.yml#L52-L89).
 
-AUV's release workflow already emits the first four target-specific archives,
-calculates SHA-256 files, signs both macOS binaries with Hardened Runtime, and
-submits the macOS executables to Apple notarization. See AUV
+AUV's audited revision emitted the first four target-specific archives. The
+current workflow also emits Windows x64, calculates SHA-256 files for all five,
+signs both macOS binaries with Hardened Runtime, and submits the macOS
+executables to Apple notarization. See AUV
 [`release.yml`](https://github.com/moeru-ai/auv/blob/1ca775f957dd11b96ddc73f77e8e5f3c38d8bd4a/.github/workflows/release.yml#L31-L115)
 and its
 [`notarize-macos` job](https://github.com/moeru-ai/auv/blob/1ca775f957dd11b96ddc73f77e8e5f3c38d8bd4a/.github/workflows/release.yml#L159-L207).
@@ -533,9 +561,9 @@ ordinary release. It cannot inherit changes made only to
 | macOS arm64 | Yes: `auv-aarch64-apple-darwin.tar.gz` | Yes: Unix executable Runner | Close | Same as macOS x64; verify native arm64 rather than Rosetta fallback. |
 | Linux x64 GNU | Yes | Yes: Unix executable Runner | Conditional | Inspect ELF runtime dependencies; declare/bundle them for deb/rpm/AppImage; verify X11/Wayland portal input/capture and Flatpak permissions. |
 | Linux arm64 GNU | Yes | Yes: Unix executable Runner | Conditional | Same as Linux x64 plus native arm64 dependency and portal testing. |
-| Windows x64 MSVC | No AUV release artifact | Yes from source: loopback daemon plus named-pipe executable Runner, tested 2026-08-16 | Blocked on packaging | Publish and sign the Windows artifact, then validate staging, NSIS, SmartScreen, and live Driver behavior. |
+| Windows x64 MSVC | Yes: `auv-x86_64-pc-windows-msvc.zip`; Authenticode not yet evidenced | Yes: loopback daemon plus named-pipe executable Runner, tested 2026-08-16 | Conditional | Sign the executable, then validate staging, NSIS, SmartScreen, and live Driver behavior. |
 
-### Windows runtime gap closed; packaging remains
+### Windows runtime and archive gaps closed; signing evidence remains
 
 The 2026-08-16 AUV slice enabled the first-party local Driver Runner and custom
 executable Runners on Windows. The daemon uses one local-only named pipe per
@@ -543,9 +571,10 @@ Runner. An automated test routes `invoke display.list` through this boundary.
 See
 [`2026-08-16-windows-local-runner-ipc-handoff.md`](2026-08-16-windows-local-runner-ipc-handoff.md).
 
-AUV still publishes no Windows release artifact. AIRI integration therefore
-remains blocked on artifact publication, signing, packaging, and packaged live
-Driver evidence. Do not infer bundle readiness from source-tree tests.
+AUV now produces a Windows x64 archive. AIRI integration still lacks
+Authenticode evidence for the nested executable, final installer staging, and
+packaged live Driver evidence. Do not infer bundle readiness from an unsigned
+archive or source-tree tests.
 
 Once implemented, the Windows executable must be included before NSIS signing
 and verified in both unpacked output and the final signed installer. AIRI's
@@ -717,8 +746,8 @@ The honest distance is:
   evidence, notarization/stapling, and an updater test remain;
 - **Linux x64/arm64:** matching artifacts exist, but distribution dependencies
   and portal/package-format evidence remain;
-- **Windows x64:** blocked on an AUV runtime/release slice, not merely Electron
-  bundle configuration.
+- **Windows x64:** runtime and archive production exist; executable signing,
+  Electron/NSIS staging, SmartScreen, and packaged Driver evidence remain.
 
 The daemon should replace duplicated execution infrastructure incrementally.
 AIRI should remain the owner of which computer-use tools exist for a model,

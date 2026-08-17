@@ -14,6 +14,7 @@ namespaced client over the same functions.
 - [Pairing](#pairing)
 - [Call Runner capabilities](#call-runner-capabilities)
 - [Typed capability invocation](#typed-capability-invocation)
+- [Reflect extension operations](#reflect-extension-operations)
 - [Cancellation](#cancellation)
 - [Tests](#tests)
 
@@ -215,6 +216,42 @@ const result = await invokeUnary(connection, {
   signal,
 })
 ```
+
+## Discover extension operations
+
+A generic host can discover annotated operations without generating an
+extension-specific client. Discovery uses gRPC Reflection, stays scoped to one
+RunnerClass, and retains the same optional Device and Run route for dynamic
+calls.
+
+```ts
+const netease = await auv.runners.discover({
+  runId: run.id,
+  runnerClass: 'auv.app.netease_music',
+})
+
+for (const method of netease.apis) {
+  console.info(method.id, method.effect, method.inputSchema)
+}
+
+const result = await netease.invokeUnaryJson({
+  method: '/auv.netease_music.v1.PlayerService/GetNowPlaying',
+  input: { applicationBundleId: 'com.netease.163music' },
+})
+
+const events = await netease.invokeServerStreamJson({
+  method: '/auv.netease_music.v1.SongService/ListSongs',
+  input: { dailyRecommended: {} },
+})
+for await (const event of events)
+  console.info(event)
+```
+
+`apis` contains only RPCs marked with AUV's `discoverable` method option. The
+complete gRPC Reflection method surface remains private to the discovery
+implementation. Dynamic ProtoJSON invocation supports unary and
+server-streaming APIs. Generated clients are still preferable when the
+extension API is known at build time.
 
 ## Cancellation
 

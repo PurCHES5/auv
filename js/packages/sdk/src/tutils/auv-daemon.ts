@@ -1,8 +1,8 @@
 import type { AuvConnection } from '../node/index'
 
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join, resolve } from 'node:path'
 
 import { Format, LogLevel, setGlobalFormat, setGlobalLogLevel, useLogg } from '@guiiai/logg'
 
@@ -19,6 +19,23 @@ export interface AuvDaemonFixture {
   stop: () => Promise<void>
 }
 
+export interface AuvDaemonFixtureOptions {
+  readonly runners?: readonly RunnerProvider[]
+}
+
+export interface RunnerProvider {
+  readonly args?: readonly string[]
+  readonly class: string
+  readonly env?: Readonly<Record<string, string>>
+  readonly executable: string
+  readonly workingDirectory?: string
+}
+
+export const neteaseMusicRunner = {
+  class: 'auv.app.netease_music',
+  executable: join('target', 'debug', 'auv-runner-netease-music'),
+} satisfies RunnerProvider
+
 export interface PairedAuvDaemonFixture extends AuvDaemonFixture {
   readonly connection: AuvConnection
   readonly credential: string
@@ -27,13 +44,29 @@ export interface PairedAuvDaemonFixture extends AuvDaemonFixture {
 }
 
 /** Starts an isolated AUV daemon with local-owner and paired-bearer listeners. */
-export async function setupAuvDaemon(): Promise<AuvDaemonFixture> {
+export async function setupAuvDaemon(options: AuvDaemonFixtureOptions = {}): Promise<AuvDaemonFixture> {
   const log = useLogg('setup:auv-daemon').useGlobalConfig()
 
   const workspace = await repositoryRoot()
   const root = await mkdtemp(join(tmpdir(), 'auv-js-daemon-'))
   const ownerSocket = join(root, 'auv.sock')
   const remotePort = await unusedLoopbackPort()
+  const runnerProviders = await Promise.all((options.runners ?? []).map(async (provider, index) => {
+    const manifest = join(root, `runner-provider-${index}.json`)
+    await writeFile(manifest, JSON.stringify({
+      runner_class: provider.class,
+      runtime: {
+        config: {
+          arguments: provider.args ?? [],
+          environment: provider.env ?? {},
+          executable: workspacePath(workspace, provider.executable),
+          working_directory: workspacePath(workspace, provider.workingDirectory ?? '.'),
+        },
+        type: 'executable',
+      },
+    }))
+    return manifest
+  }))
 
   log.withFields({ root }).log('starting AUV daemon for testing')
 
@@ -42,6 +75,7 @@ export async function setupAuvDaemon(): Promise<AuvDaemonFixture> {
     listeners: [`unix://${ownerSocket}`, `http://127.0.0.1:${remotePort}`],
     noDiscovery: true,
     pairingStore: join(root, 'pairings.json'),
+    runnerProviders,
     storeRoot: join(root, 'store'),
     workingDirectory: workspace,
   })
@@ -72,10 +106,10 @@ export async function setupAuvDaemon(): Promise<AuvDaemonFixture> {
 }
 
 /** Starts an isolated daemon and returns an authenticated paired-Device connection. */
-export async function setupPairedAuvDaemon(deviceId = 'auv-js-test-device'): Promise<PairedAuvDaemonFixture> {
+export async function setupPairedAuvDaemon(deviceId = 'auv-js-test-device', options: AuvDaemonFixtureOptions = {}): Promise<PairedAuvDaemonFixture> {
   const log = useLogg('setup:auv-daemon-pairing').useGlobalConfig()
 
-  const daemon = await setupAuvDaemon()
+  const daemon = await setupAuvDaemon(options)
   try {
     log.debug('connecting to started AUV daemon for pairing and enrollment')
     const owner = await connect({ endpoint: daemon.ownerSocket, local: true, transport: 'unix' })
@@ -129,4 +163,8 @@ function redacted(str: string, startPad: number = 4, endPad: number = 0) {
     + '•'.repeat(maskLength)
     + (endPad > 0 ? str.slice(-endPad) : '')
   )
+}
+
+function workspacePath(workspace: string, path: string): string {
+  return isAbsolute(path) ? path : resolve(workspace, path)
 }

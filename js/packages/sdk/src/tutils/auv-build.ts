@@ -10,12 +10,23 @@ export default async function setup(): Promise<void> {
   const log = useLogg('setup:auv-build').useGlobalConfig()
 
   const root = await repositoryRoot()
-  log.withField('root', root).debug('building AUV CLI binary for testing')
+  log.withField('root', root).debug('building AUV and NetEase Runner binaries for testing')
 
-  await x('cargo', ['build', '--quiet', '--package', 'auv-cli', '--bin', 'auv'], {
+  await x('cargo', [
+    'build',
+    '--quiet',
+    '--package',
+    'auv-cli',
+    '--bin',
+    'auv',
+    '--package',
+    'auv-netease-music',
+    '--bin',
+    'auv-runner-netease-music',
+  ], {
     nodeOptions: { cwd: root },
     throwOnError: true,
   })
 
-  log.debug('AUV CLI binary built successfully')
+  log.debug('AUV and NetEase Runner binaries built successfully')
 }

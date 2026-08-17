@@ -341,10 +341,8 @@ pub async fn serve_inherited() -> Result<(), String> {
   let (health_reporter, health) = tonic_health::server::health_reporter();
   health_reporter.set_serving::<BalatroDetectionServiceServer<Service>>().await;
   let descriptor = crate::api::FILE_DESCRIPTOR_SET;
-  let reflection = tonic_reflection::server::Builder::configure()
-    .register_encoded_file_descriptor_set(descriptor)
-    .build_v1()
-    .map_err(|error| format!("failed to build Balatro Runner reflection: {error}"))?;
+  let reflection =
+    auv_api_server::reflection::service(descriptor).map_err(|error| format!("failed to build Balatro Runner reflection: {error}"))?;
   tonic::transport::Server::builder()
     .add_service(health)
     .add_service(reflection)

@@ -1562,10 +1562,8 @@ pub(super) async fn serve_inherited() -> Result<(), String> {
   #[cfg(target_os = "macos")]
   served_services.push("auv.api.driver.v1.OverlayService");
   let descriptor_set = auv_api_proto::descriptor_set_for_services(&served_services)?;
-  let reflection = tonic_reflection::server::Builder::configure()
-    .register_encoded_file_descriptor_set(&descriptor_set)
-    .build_v1()
-    .map_err(|error| format!("failed to build local Runner reflection: {error}"))?;
+  let reflection =
+    auv_api_server::reflection::service(&descriptor_set).map_err(|error| format!("failed to build local Runner reflection: {error}"))?;
 
   tonic::transport::Server::builder()
     .add_service(health)

@@ -46,7 +46,6 @@ tokio-stream = "0.1"
 futures-core = "0.3"
 tonic = { version = "0.14", features = ["transport"] }
 tonic-health = "0.14"
-tonic-reflection = "0.14"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rmcp = { version = "0.6", features = ["server", "client", "transport-io"] }

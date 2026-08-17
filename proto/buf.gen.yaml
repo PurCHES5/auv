@@ -5,6 +5,7 @@ inputs:
       - auv/api/daemon/v1
       - auv/api/driver
       - auv/api/transport/websocket/v1
+      - grpc/reflection/v1
 plugins:
   - local: [pnpm, --filter, '@auv-js/sdk', exec, protoc-gen-es]
     out: ../js/packages/sdk/src/gen

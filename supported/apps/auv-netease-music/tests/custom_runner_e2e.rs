@@ -62,7 +62,7 @@ async fn daemon_supervises_and_aggregates_the_netease_runner() {
       runner_class: "auv.app.netease_music".to_string(),
     })
     .expect("attach route metadata");
-  let mut netease = auv_netease_music::api::v1::netease_music_service_client::NeteaseMusicServiceClient::new(transport);
+  let mut netease = auv_netease_music::api::v1::player_service_client::PlayerServiceClient::new(transport);
   let response = netease
     .get_now_playing(auv_netease_music::api::v1::GetNowPlayingRequest {
       application_bundle_id: Some("dev.auv.nonexistent-test-player".to_string()),
