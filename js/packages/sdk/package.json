@@ -54,9 +54,6 @@
     "@bufbuild/buf": "catalog:",
     "@bufbuild/protoc-gen-es": "catalog:",
     "@guiiai/logg": "catalog:",
-    "@vitest/browser-playwright": "catalog:",
-    "jsdom": "catalog:",
-    "tsx": "catalog:",
-    "typescript": "catalog:"
+    "@vitest/browser-playwright": "catalog:"
   }
 }

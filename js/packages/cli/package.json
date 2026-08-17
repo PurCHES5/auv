@@ -40,9 +40,6 @@
     "binding.js",
     "dist"
   ],
-  "engines": {
-    "node": ">=20.19.0"
-  },
   "napi": {
     "binaryName": "auv-binding",
     "packageName": "@auv-js/cli",
@@ -57,14 +54,9 @@
   },
   "scripts": {
     "artifacts": "napi artifacts && tsx ./scripts/stage-platform-packages.ts ./artifacts",
-    "build": "pnpm run build:js && napi build --platform --release --esm --js binding.js --dts binding.d.ts",
-    "build:debug": "pnpm run build:js && napi build --platform --esm --js binding.js --dts binding.d.ts",
     "build:js": "tsdown",
     "create:npm-dirs": "napi create-npm-dirs",
-    "format:rs": "cargo fmt",
-    "lint:rs": "cargo clippy --all-targets --all-features -- -D warnings",
     "prepublishOnly": "pnpm run build:js && napi prepublish -t npm --no-gh-release",
-    "test:run": "pnpm run build:debug && vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "optionalDependencies": {
@@ -79,11 +71,7 @@
     "@emnapi/runtime": "catalog:",
     "@napi-rs/cli": "catalog:",
     "@pnpm/find-workspace-dir": "catalog:",
-    "emnapi": "catalog:",
-    "tsdown": "catalog:",
-    "tsx": "catalog:",
-    "typescript": "catalog:",
-    "vitest": "catalog:vitest"
+    "emnapi": "catalog:"
   },
   "publishConfig": {
     "access": "public",

@@ -18,10 +18,6 @@ default-run = "auv"
 name = "auv"
 path = "src/main.rs"
 
-[[bin]]
-name = "auv-mouse-curve"
-path = "src/mouse_curve_main.rs"
-
 [dependencies]
 clap = { version = "4.5", features = ["derive", "env"] }
 auv = { path = "../auv" }
@@ -49,7 +45,6 @@ tonic-health = "0.14"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rmcp = { version = "0.6", features = ["server", "client", "transport-io"] }
-minifb = { version = "0.28", default-features = false, features = ["wayland"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-core-graphics = { version = "0.3", features = ["CGWindow", "CGImage", "CGDataProvider", "CGGeometry"] }

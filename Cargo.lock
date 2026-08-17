@@ -504,7 +504,6 @@ dependencies = [
  "clap",
  "futures-core",
  "image",
- "minifb",
  "objc2-core-foundation",
  "objc2-core-graphics",
  "prost-types",
@@ -694,6 +693,7 @@ name = "auv-driver-overlay-macos"
 version = "0.0.11"
 dependencies = [
  "auv-driver-overlay-common",
+ "serde_json",
  "swift-bridge",
  "swift-bridge-build",
 ]
