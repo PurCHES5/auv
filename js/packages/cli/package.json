@@ -63,7 +63,7 @@
     "create:npm-dirs": "napi create-npm-dirs",
     "format:rs": "cargo fmt",
     "lint:rs": "cargo clippy --all-targets --all-features -- -D warnings",
-    "prepublishOnly": "pnpm run build:js && napi prepublish -t npm",
+    "prepublishOnly": "pnpm run build:js && napi prepublish -t npm --no-gh-release",
     "test:run": "pnpm run build:debug && vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

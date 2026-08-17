@@ -14,7 +14,7 @@ namespaced client over the same functions.
 - [Pairing](#pairing)
 - [Call Runner capabilities](#call-runner-capabilities)
 - [Typed capability invocation](#typed-capability-invocation)
-- [Reflect extension operations](#reflect-extension-operations)
+- [Discover extension operations](#discover-extension-operations)
 - [Cancellation](#cancellation)
 - [Tests](#tests)
 
@@ -235,13 +235,13 @@ for (const method of netease.apis) {
 }
 
 const result = await netease.invokeUnaryJson({
-  method: '/auv.netease_music.v1.PlayerService/GetNowPlaying',
   input: { applicationBundleId: 'com.netease.163music' },
+  method: '/auv.netease_music.v1.PlayerService/GetNowPlaying',
 })
 
 const events = await netease.invokeServerStreamJson({
-  method: '/auv.netease_music.v1.SongService/ListSongs',
   input: { dailyRecommended: {} },
+  method: '/auv.netease_music.v1.SongService/ListSongs',
 })
 for await (const event of events)
   console.info(event)

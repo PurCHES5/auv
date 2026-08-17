@@ -309,16 +309,18 @@ jobs:
 
       - name: Verify npm package contents
         working-directory: js/packages/cli
-        env:
-          NAPI_DRY_RUN: "1"
         run: |
-          pnpm prepublishOnly
+          pnpm run build:js
+          pnpm exec napi prepublish -t npm --no-gh-release --dry-run
           mkdir -p npm-package
           pnpm pack --pack-destination npm-package
-          npm publish npm-package/*.tgz --access public --dry-run
+          npm publish ./npm-package/*.tgz --access public --dry-run
 
       - name: Publish npm packages
         working-directory: js/packages/cli
+        # NOTICE(release-asset-owner): The publish job owns GitHub Release
+        # assets; NAPI prepublish only prepares and publishes npm packages.
         run: |
           pnpm prepublishOnly
-          npm publish npm-package/*.tgz --access public
+          pnpm pack --pack-destination npm-package
+          npm publish ./npm-package/*.tgz --access public
