@@ -8,9 +8,7 @@ const packageVersion = (JSON.parse(
 
 const bindingVersion = nativePackageVersion()
 if (bindingVersion !== packageVersion) {
-  throw new Error(
-    `The AUV native binding version (${bindingVersion}) does not match @auv-js/cli (${packageVersion}). Reinstall the package.`,
-  )
+  console.warn(`The AUV native binding version (${bindingVersion}) does not match @auv-js/cli (${packageVersion}). This may cause unexpected behavior.`)
 }
 
 export * from '../binding.js'
