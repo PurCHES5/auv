@@ -241,6 +241,9 @@ importers:
       '@napi-rs/cli':
         specifier: 'catalog:'
         version: 3.8.6(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.2)(@types/node@26.1.1)(emnapi@1.11.3)
+      '@pnpm/find-workspace-dir':
+        specifier: 'catalog:'
+        version: 1000.1.5
       emnapi:
         specifier: 'catalog:'
         version: 1.11.3

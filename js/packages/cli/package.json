@@ -78,6 +78,7 @@
     "@emnapi/core": "catalog:",
     "@emnapi/runtime": "catalog:",
     "@napi-rs/cli": "catalog:",
+    "@pnpm/find-workspace-dir": "catalog:",
     "emnapi": "catalog:",
     "tsdown": "catalog:",
     "tsx": "catalog:",
