@@ -54,6 +54,8 @@
   },
   "scripts": {
     "artifacts": "napi artifacts && tsx ./scripts/stage-platform-packages.ts ./artifacts",
+    "build": "pnpm run build:js && napi build --platform --release --esm --js binding.js --dts binding.d.ts",
+    "build:debug": "pnpm run build:js && napi build --platform --esm --js binding.js --dts binding.d.ts",
     "build:js": "tsdown",
     "create:npm-dirs": "napi create-npm-dirs",
     "prepublishOnly": "pnpm run build:js && napi prepublish -t npm --no-gh-release",
