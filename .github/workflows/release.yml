@@ -194,7 +194,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release
-          find artifacts -type f \( -name 'auv-*' -o -name '*.sha256' \) -print0 | while IFS= read -r -d '' file; do
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.sha256' \) -print0 | while IFS= read -r -d '' file; do
             case "$file" in
               artifacts/notarized-*/*)
                 cp "$file" release/
