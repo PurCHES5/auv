@@ -93,6 +93,7 @@ js/packages/cli/npm/*/bin/auv.exe
 .auv/
 .runs/
 docs/notes/
+reports/
 
 # Java
 **/.gradle/
