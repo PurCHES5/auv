@@ -1,6 +1,6 @@
 import type { TestProject } from 'vitest/node'
 
-import { isWindows } from 'std-env'
+import { isLinux, isMacOS, isWindows } from 'std-env'
 
 import { neteaseMusicRunner, setupPairedAuvDaemon } from './auv-daemon'
 
@@ -10,6 +10,9 @@ export type BrowserAuvDaemonContext
       readonly available: true
       readonly credential: string
       readonly endpoint: string
+      readonly isLinux: boolean
+      readonly isMacOS: boolean
+      readonly isWindows: boolean
     }
 
 declare module 'vitest' {
@@ -36,6 +39,9 @@ export async function setup(project: TestProject): Promise<() => Promise<void>> 
     available: true,
     credential: daemon.credential,
     endpoint: daemon.remoteEndpoint,
+    isLinux,
+    isMacOS,
+    isWindows,
   })
 
   return daemon.stop

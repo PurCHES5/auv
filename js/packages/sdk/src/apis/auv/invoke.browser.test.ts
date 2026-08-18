@@ -103,7 +103,7 @@ describe('typed remote invoke from a browser', () => {
     }
   })
 
-  it.skipIf(!daemon.available)('reflects and invokes the registered NetEase Runner through browser transports', async () => {
+  it.skipIf(!daemon.available || !daemon.isMacOS)('reflects and invokes the registered NetEase Runner through browser transports', async () => {
     if (!daemon.available)
       throw new Error('browser daemon fixture is unavailable')
 

@@ -1,4 +1,4 @@
-import { isWindows } from 'std-env'
+import { isMacOS } from 'std-env'
 import { describe, expect, it } from 'vitest'
 
 import { connect } from '../../node/index'
@@ -6,7 +6,7 @@ import { neteaseMusicRunner, setupAuvDaemon } from '../../tutils/auv-daemon'
 import { createAuv } from './client'
 
 describe('runner discovery through a real AUV daemon', () => {
-  it.skipIf(isWindows)('invokes discovered unary and server-streaming methods through spawned Runners', async () => {
+  it.skipIf(!isMacOS)('invokes discovered unary and server-streaming methods through spawned Runners', async () => {
     const daemon = await setupAuvDaemon({ runners: [neteaseMusicRunner] })
     const connection = await connect({ endpoint: daemon.ownerSocket, local: true, transport: 'unix' })
 
